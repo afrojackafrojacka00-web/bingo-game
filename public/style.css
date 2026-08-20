@@ -134,3 +134,8 @@ button {
 
 .nav-item.active { color: #0088cc; font-weight: bold; }
 .nav-icon { font-size: 20px; margin-bottom: 2px; }
+
+/* Add this to public/style.css */
+.hidden {
+    display: none !important;
+}
