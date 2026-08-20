@@ -12,42 +12,31 @@ const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 const PORT = process.env.PORT || 3000;
 
-// Middleware
 app.use(cors());
 app.use(express.json());
-// Serve static frontend files from the 'public' directory
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Serve main web page
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// PostgreSQL Database Connection
+// PostgreSQL Connection
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
-// Helper: Generate 5x5 Bingo Card Grid
-function generateBingoCard() {
-    const grid = Array.from({ length: 5 }, () => Array(5).fill(0));
-    for (let col = 0; col < 5; col++) {
-        const min = col * 15 + 1;
-        const numbers = [];
-        while (numbers.length < 5) {
-            const num = Math.floor(Math.random() * 15) + min;
-            if (!numbers.includes(num)) numbers.push(num);
-        }
-        for (let row = 0; row < 5; row++) {
-            grid[row][col] = numbers[row];
-        }
-    }
-    grid[2][2] = "FREE";
-    return grid;
-}
+// -------------------- IN-MEMORY GAME STATE --------------------
+// All active gameplay operates in RAM for sub-millisecond execution speeds
+const gameState = {
+    status: 'LOBBY_WAITING', // 'LOBBY_WAITING', 'GAME_ACTIVE'
+    gameId: null,
+    timer: 40,
+    selectedCards: new Map(), // cardNumber => username
+    readyPlayers: new Set()    // username
+};
 
-// Auto-initialize Database Schema & Seed 500 Bingo Cards
+// -------------------- DATABASE SCHEMA INITIALIZATION --------------------
 const initDB = async () => {
     try {
         await pool.query(`
@@ -59,48 +48,61 @@ const initDB = async () => {
                 phone_number VARCHAR(30),
                 wins INT DEFAULT 0
             );
-            ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_id BIGINT UNIQUE;
-            ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number VARCHAR(30);
 
             CREATE TABLE IF NOT EXISTS bingo_cards (
                 id SERIAL PRIMARY KEY,
                 card_number INT UNIQUE NOT NULL,
-                grid JSONB NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                grid JSONB NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS selected_cards (
-                card_number INT PRIMARY KEY,
-                username VARCHAR(50) NOT NULL
+            CREATE TABLE IF NOT EXISTS game_sessions (
+                id SERIAL PRIMARY KEY,
+                status VARCHAR(20) NOT NULL,
+                winner_username VARCHAR(50),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                ended_at TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS game_participants (
+                id SERIAL PRIMARY KEY,
+                game_id INT REFERENCES game_sessions(id) ON DELETE CASCADE,
+                username VARCHAR(50) NOT NULL,
+                cards_selected INT[] NOT NULL
             );
         `);
 
+        // Seed 500 Bingo Cards if not already present
         const countRes = await pool.query('SELECT COUNT(*) FROM bingo_cards');
-        const currentCount = parseInt(countRes.rows[0].count, 10);
-
-        if (currentCount < 500) {
-            console.log(`Seeding database with Bingo cards (Current: ${currentCount})...`);
-            for (let i = currentCount + 1; i <= 500; i++) {
-                const cardGrid = generateBingoCard();
+        if (parseInt(countRes.rows[0].count, 10) < 500) {
+            console.log("Seeding 500 Bingo cards into database...");
+            for (let i = 1; i <= 500; i++) {
+                const grid = Array.from({ length: 5 }, () => Array(5).fill(0));
+                for (let col = 0; col < 5; col++) {
+                    const min = col * 15 + 1;
+                    const nums = [];
+                    while (nums.length < 5) {
+                        const n = Math.floor(Math.random() * 15) + min;
+                        if (!nums.includes(n)) nums.push(n);
+                    }
+                    for (let row = 0; row < 5; row++) grid[row][col] = nums[row];
+                }
+                grid[2][2] = "FREE";
                 await pool.query(
                     'INSERT INTO bingo_cards (card_number, grid) VALUES ($1, $2) ON CONFLICT DO NOTHING',
-                    [i, JSON.stringify(cardGrid)]
+                    [i, JSON.stringify(grid)]
                 );
             }
-            console.log("Successfully seeded 500 Bingo cards!");
-        } else {
-            console.log("Database initialized. 500 Bingo cards ready.");
         }
+        console.log("Database initialized cleanly.");
     } catch (err) {
         console.error("Database initialization error:", err);
     }
 };
 initDB();
 
-// Cryptographic validation for Telegram initData
+// Helper: Verify Telegram Auth Data
 function verifyTelegramAuth(initData, botToken) {
     if (!initData || !botToken) return { isValid: false, user: null };
-
     try {
         const params = new URLSearchParams(initData);
         const hash = params.get('hash');
@@ -108,21 +110,14 @@ function verifyTelegramAuth(initData, botToken) {
 
         const dataCheckString = Array.from(params.entries())
             .sort(([a], [b]) => a[0].localeCompare(b[0]))
-            .map(([key, val]) => `${key}=${val}`)
+            .map(([k, v]) => `${k}=${v}`)
             .join('\n');
 
-        const secretKey = crypto.createHmac('sha256', 'WebAppData')
-            .update(botToken)
-            .digest();
-
-        const calculatedHash = crypto.createHmac('sha256', secretKey)
-            .update(dataCheckString)
-            .digest('hex');
+        const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+        const calculatedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
 
         if (calculatedHash !== hash) return { isValid: false, user: null };
-
-        const user = JSON.parse(params.get('user') || '{}');
-        return { isValid: true, user };
+        return { isValid: true, user: JSON.parse(params.get('user') || '{}') };
     } catch (err) {
         return { isValid: false, user: null };
     }
@@ -132,7 +127,7 @@ function verifyTelegramAuth(initData, botToken) {
 
 app.post('/api/register', async (req, res) => {
     const { username, password, phoneNumber, initData } = req.body;
-    if (!username || !password) return res.status(400).json({ success: false, message: "Username and password required." });
+    if (!username || !password) return res.status(400).json({ success: false, message: "Missing fields." });
 
     try {
         let telegramId = null;
@@ -142,210 +137,212 @@ app.post('/api/register', async (req, res) => {
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
-        const result = await pool.query(
-            'INSERT INTO users (username, password, telegram_id, phone_number) VALUES ($1, $2, $3, $4) RETURNING id, username',
+        await pool.query(
+            'INSERT INTO users (username, password, telegram_id, phone_number) VALUES ($1, $2, $3, $4)',
             [username, hashedPassword, telegramId, phoneNumber || null]
         );
-
-        res.json({ success: true, username: result.rows[0].username, message: "Registration successful!" });
+        res.json({ success: true, username });
     } catch (err) {
-        if (err.code === '23505') return res.status(400).json({ success: false, message: "Username or Telegram account in use." });
-        res.status(500).json({ success: false, message: "Server error during registration." });
+        res.status(400).json({ success: false, message: "Username or Telegram account taken." });
     }
 });
 
 app.post('/api/login', async (req, res) => {
-    const { username, password, initData } = req.body;
-    if (!username || !password) return res.status(400).json({ success: false, message: "Username and password required." });
-
+    const { username, password } = req.body;
     try {
         const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
         if (result.rows.length === 0) return res.status(400).json({ success: false, message: "User not found." });
 
-        const user = result.rows[0];
-        const isMatch = await bcrypt.compare(password, user.password);
+        const isMatch = await bcrypt.compare(password, result.rows[0].password);
         if (!isMatch) return res.status(401).json({ success: false, message: "Invalid password." });
 
-        if (initData && !user.telegram_id) {
-            const { isValid, user: tgUser } = verifyTelegramAuth(initData, process.env.TELEGRAM_BOT_TOKEN);
-            if (isValid && tgUser?.id) {
-                await pool.query('UPDATE users SET telegram_id = $1 WHERE id = $2', [tgUser.id, user.id]);
-            }
-        }
-
-        res.json({ success: true, username: user.username, message: "Login successful!" });
+        res.json({ success: true, username: result.rows[0].username });
     } catch (err) {
-        res.status(500).json({ success: false, message: "Server error during login." });
+        res.status(500).json({ success: false, message: "Server error." });
     }
 });
 
 app.post('/api/telegram-auth', async (req, res) => {
     const { initData } = req.body;
     const { isValid, user } = verifyTelegramAuth(initData, process.env.TELEGRAM_BOT_TOKEN);
-
-    if (!isValid || !user?.id) return res.status(401).json({ success: false, message: "Invalid Telegram authentication." });
+    if (!isValid || !user?.id) return res.status(401).json({ success: false, message: "Invalid auth." });
 
     try {
         const result = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [user.id]);
         if (result.rows.length > 0) {
-            return res.json({ success: true, status: 'LOGGED_IN', username: result.rows[0].username });
+            res.json({ success: true, status: 'LOGGED_IN', username: result.rows[0].username });
         } else {
-            return res.json({ success: true, status: 'NEEDS_CHOICE', telegramUsername: user.username || user.first_name || `player_${user.id}` });
+            res.json({ success: true, status: 'NEEDS_CHOICE' });
         }
     } catch (err) {
         res.status(500).json({ success: false, message: "Database error." });
     }
 });
 
-app.post('/api/telegram-quick-start', async (req, res) => {
-    const { initData } = req.body;
-    const { isValid, user } = verifyTelegramAuth(initData, process.env.TELEGRAM_BOT_TOKEN);
-
-    if (!isValid || !user?.id) return res.status(401).json({ success: false, message: "Invalid Telegram session." });
-
-    const defaultUsername = user.username || user.first_name || `player_${user.id}`;
-
-    try {
-        const newUser = await pool.query(
-            'INSERT INTO users (username, password, telegram_id) VALUES ($1, $2, $3) RETURNING username',
-            [defaultUsername, 'TELEGRAM_NATIVE_USER', user.id]
-        );
-        res.json({ success: true, username: newUser.rows[0].username });
-    } catch (err) {
-        res.status(500).json({ success: false, message: "Username taken or creation failed." });
-    }
-});
-
-app.post('/api/telegram-link', async (req, res) => {
-    const { initData, username, password } = req.body;
-    const { isValid, user } = verifyTelegramAuth(initData, process.env.TELEGRAM_BOT_TOKEN);
-
-    if (!isValid || !user?.id) return res.status(401).json({ success: false, message: "Invalid Telegram session." });
-
-    try {
-        const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
-        if (result.rows.length === 0) return res.status(400).json({ success: false, message: "Account not found." });
-
-        const dbUser = result.rows[0];
-        const passwordMatch = await bcrypt.compare(password, dbUser.password);
-        if (!passwordMatch) return res.status(401).json({ success: false, message: "Incorrect password." });
-
-        await pool.query('UPDATE users SET telegram_id = $1 WHERE id = $2', [user.id, dbUser.id]);
-        res.json({ success: true, username: dbUser.username });
-    } catch (err) {
-        res.status(500).json({ success: false, message: "Account linking failed." });
-    }
-});
-
 app.post('/api/user/phone', async (req, res) => {
     const { username, phoneNumber } = req.body;
-    if (!username || !phoneNumber) return res.status(400).json({ success: false, message: "Missing data." });
-
     try {
         await pool.query('UPDATE users SET phone_number = $1 WHERE username = $2', [phoneNumber, username]);
-        res.json({ success: true, message: "Phone number saved successfully." });
+        res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ success: false, message: "Database update error." });
+        res.status(500).json({ success: false, message: "Failed to update phone number." });
     }
 });
 
 app.get('/api/cards/numbers', async (req, res) => {
     try {
         const result = await pool.query('SELECT card_number FROM bingo_cards ORDER BY card_number ASC');
-        const cardNumbers = result.rows.map(row => row.card_number);
-        res.json({ success: true, cardNumbers });
+        res.json({ success: true, cardNumbers: result.rows.map(r => r.card_number) });
     } catch (err) {
-        res.status(500).json({ success: false, message: "Error fetching card numbers." });
+        res.status(500).json({ success: false, message: "Failed to load cards." });
     }
 });
 
-// -------------------- TELEGRAM BROADCAST / ADS ENDPOINT --------------------
-
+// Broadcast Ads Endpoint
 app.post('/api/admin/broadcast', async (req, res) => {
     const { message, imageUrl, adminSecret } = req.body;
-
-    if (adminSecret !== process.env.ADMIN_SECRET) {
-        return res.status(403).json({ success: false, message: "Unauthorized." });
-    }
+    if (adminSecret !== process.env.ADMIN_SECRET) return res.status(403).json({ success: false, message: "Unauthorized." });
 
     try {
         const users = await pool.query('SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL');
         const botToken = process.env.TELEGRAM_BOT_TOKEN;
 
-        let successCount = 0;
         for (const user of users.rows) {
-            try {
-                if (imageUrl) {
-                    await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            chat_id: user.telegram_id,
-                            photo: imageUrl,
-                            caption: message,
-                            parse_mode: 'HTML'
-                        })
-                    });
-                } else {
-                    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            chat_id: user.telegram_id,
-                            text: message,
-                            parse_mode: 'HTML'
-                        })
-                    });
-                }
-                successCount++;
-            } catch (err) {
-                console.error(`Failed to send ad to ${user.telegram_id}`);
-            }
+            const endpoint = imageUrl ? 'sendPhoto' : 'sendMessage';
+            const body = imageUrl ? { chat_id: user.telegram_id, photo: imageUrl, caption: message, parse_mode: 'HTML' }
+                                  : { chat_id: user.telegram_id, text: message, parse_mode: 'HTML' };
+            await fetch(`https://api.telegram.org/bot${botToken}/${endpoint}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            }).catch(() => {});
         }
-
-        res.json({ success: true, message: `Ad sent to ${successCount} Telegram users.` });
+        res.json({ success: true, message: "Broadcast sent." });
     } catch (err) {
-        res.status(500).json({ success: false, message: "Broadcast failed." });
+        res.status(500).json({ success: false, message: "Broadcast error." });
     }
 });
 
-// -------------------- REAL-TIME SOCKET.IO --------------------
+// -------------------- SERVER-SIDE 40-SECOND TIMER LOOP --------------------
+setInterval(async () => {
+    if (gameState.status === 'LOBBY_WAITING') {
+        gameState.timer--;
 
-io.on('connection', async (socket) => {
-    try {
-        const takenRes = await pool.query('SELECT card_number, username FROM selected_cards');
-        const takenCards = {};
-        takenRes.rows.forEach(row => {
-            takenCards[row.card_number] = row.username;
-        });
-        socket.emit('init_state', { takenCards });
-    } catch (err) {
-        console.error("Socket Init Error:", err);
-    }
+        if (gameState.timer <= 0) {
+            // Check if at least 2 players clicked "Start Playing"
+            if (gameState.readyPlayers.size >= 2) {
+                gameState.status = 'GAME_ACTIVE';
 
-    socket.on('toggle_card', async ({ cardNumber, username }) => {
-        if (!cardNumber || !username) return;
+                // Create Game Session asynchronously in PostgreSQL
+                try {
+                    const sessionRes = await pool.query(
+                        'INSERT INTO game_sessions (status) VALUES ($1) RETURNING id',
+                        ['IN_PROGRESS']
+                    );
+                    gameState.gameId = sessionRes.rows[0].id;
 
-        try {
-            const check = await pool.query('SELECT username FROM selected_cards WHERE card_number = $1', [cardNumber]);
+                    // Log Participants & Selected Cards asynchronously
+                    const playerCardMap = {};
+                    gameState.selectedCards.forEach((username, cardNumber) => {
+                        if (gameState.readyPlayers.has(username)) {
+                            if (!playerCardMap[username]) playerCardMap[username] = [];
+                            playerCardMap[username].push(cardNumber);
+                        }
+                    });
 
-            if (check.rows.length > 0) {
-                if (check.rows[0].username === username) {
-                    await pool.query('DELETE FROM selected_cards WHERE card_number = $1', [cardNumber]);
-                    io.emit('card_freed', { cardNumber });
-                } else {
-                    socket.emit('error_message', { message: `Card ${cardNumber} is already claimed by ${check.rows[0].username}` });
+                    for (const [username, cards] of Object.entries(playerCardMap)) {
+                        await pool.query(
+                            'INSERT INTO game_participants (game_id, username, cards_selected) VALUES ($1, $2, $3)',
+                            [gameState.gameId, username, cards]
+                        );
+                    }
+                } catch (err) {
+                    console.error("Error creating session in DB:", err);
                 }
+
+                io.emit('game_started', {
+                    gameId: gameState.gameId,
+                    players: Array.from(gameState.readyPlayers)
+                });
             } else {
-                await pool.query('INSERT INTO selected_cards (card_number, username) VALUES ($1, $2)', [cardNumber, username]);
-                io.emit('card_taken', { cardNumber, username });
+                // Not enough players, reset timer to 40s
+                gameState.timer = 40;
+                io.emit('timer_reset', { message: "Waiting for at least 2 ready players..." });
             }
-        } catch (err) {
-            console.error("Toggle Card Error:", err);
+        } else {
+            io.emit('timer_tick', { timer: gameState.timer, status: gameState.status });
         }
+    }
+}, 1000);
+
+// -------------------- REAL-TIME SOCKET.IO ENGINE --------------------
+io.on('connection', (socket) => {
+    // Sync current RAM state instantly to newly connected client
+    socket.emit('init_state', {
+        status: gameState.status,
+        timer: gameState.timer,
+        takenCards: Object.fromEntries(gameState.selectedCards),
+        readyPlayersCount: gameState.readyPlayers.size
+    });
+
+    // In-Memory Card Toggle (<1ms execution)
+    socket.on('toggle_card', ({ cardNumber, username }) => {
+        if (gameState.status !== 'LOBBY_WAITING') {
+            return socket.emit('error_message', { message: "Card selection is locked during active gameplay!" });
+        }
+
+        const currentOwner = gameState.selectedCards.get(cardNumber);
+        if (currentOwner) {
+            if (currentOwner === username) {
+                gameState.selectedCards.delete(cardNumber);
+                io.emit('card_freed', { cardNumber });
+            } else {
+                socket.emit('error_message', { message: `Card ${cardNumber} is taken by ${currentOwner}` });
+            }
+        } else {
+            gameState.selectedCards.set(cardNumber, username);
+            io.emit('card_taken', { cardNumber, username });
+        }
+    });
+
+    // Player enters ready room
+    socket.on('player_ready', ({ username }) => {
+        if (gameState.status !== 'LOBBY_WAITING') return;
+
+        // Ensure user has at least 1 card selected
+        const userHasCard = Array.from(gameState.selectedCards.values()).includes(username);
+        if (!userHasCard) {
+            return socket.emit('error_message', { message: "Please select at least one card before starting!" });
+        }
+
+        gameState.readyPlayers.add(username);
+        io.emit('ready_count_updated', { readyCount: gameState.readyPlayers.size });
+    });
+
+    // Claim BINGO Win
+    socket.on('claim_bingo', async ({ username }) => {
+        if (gameState.status !== 'GAME_ACTIVE' || !gameState.readyPlayers.has(username)) {
+            return socket.emit('error_message', { message: "Invalid Bingo claim." });
+        }
+
+        const winningUser = username;
+
+        // 1. Asynchronously log session winner & update user score in PostgreSQL
+        if (gameState.gameId) {
+            pool.query('UPDATE game_sessions SET status = $1, winner_username = $2, ended_at = NOW() WHERE id = $3', ['COMPLETED', winningUser, gameState.gameId]).catch(console.error);
+            pool.query('UPDATE users SET wins = wins + 1 WHERE username = $1', [winningUser]).catch(console.error);
+        }
+
+        // 2. Instantly reset In-Memory state for zero-lag transition
+        gameState.selectedCards.clear();
+        gameState.readyPlayers.clear();
+        gameState.status = 'LOBBY_WAITING';
+        gameState.timer = 40;
+        gameState.gameId = null;
+
+        // 3. Broadcast global reset event to return all clients to selection
+        io.emit('game_ended', { winner: winningUser });
     });
 });
 
-server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`Zero-Lag Bingo Server live on port ${PORT}`));

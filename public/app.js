@@ -1,21 +1,30 @@
-let isLogin = true;
-let isLinkingFlow = false;
-let tgInitData = null;
 let currentUsername = "";
-
 const selectedCards = new Set();
 const takenCardsMap = {};
 const socket = io();
 
-// Real-Time Socket Listeners
-socket.on('init_state', ({ takenCards }) => {
+// -------------------- REAL-TIME SOCKET LISTENERS --------------------
+socket.on('init_state', ({ status, timer, takenCards, readyPlayersCount }) => {
     Object.assign(takenCardsMap, takenCards);
-    Object.keys(takenCards).forEach(num => {
-        const cardNum = parseInt(num, 10);
-        if (takenCards[cardNum] === currentUsername) selectedCards.add(cardNum);
-    });
-    updateGridUI();
-    updateSelectedCount();
+    updateTimerUI(timer);
+    updateReadyCountUI(readyPlayersCount);
+
+    if (status === 'GAME_ACTIVE') {
+        lockSelectionPage("A game is currently in progress. Please wait for the next round!");
+    }
+});
+
+socket.on('timer_tick', ({ timer }) => {
+    updateTimerUI(timer);
+});
+
+socket.on('timer_reset', ({ message }) => {
+    alert(message);
+    updateTimerUI(40);
+});
+
+socket.on('ready_count_updated', ({ readyCount }) => {
+    updateReadyCountUI(readyCount);
 });
 
 socket.on('card_taken', ({ cardNumber, username }) => {
@@ -32,86 +41,95 @@ socket.on('card_freed', ({ cardNumber }) => {
     updateSelectedCount();
 });
 
-window.addEventListener('DOMContentLoaded', async () => {
-    const tg = window.Telegram?.WebApp;
-
-    if (tg && tg.initData) {
-        tg.ready();
-        tg.expand();
-        tgInitData = tg.initData;
-        document.getElementById('logoutBtn').classList.add('hidden');
-
-        try {
-            const res = await fetch('/api/telegram-auth', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ initData: tgInitData })
-            });
-            const data = await res.json();
-
-            if (data.status === 'LOGGED_IN') {
-                showHomeScreen(data.username);
-            } else if (data.status === 'NEEDS_CHOICE') {
-                document.getElementById('authBox').classList.add('hidden');
-                document.getElementById('choiceBox').classList.remove('hidden');
-            }
-        } catch (err) {
-            console.error("Telegram Auth Failed:", err);
-        }
+socket.on('game_started', ({ gameId, players }) => {
+    if (players.includes(currentUsername)) {
+        // Active participant: transition to game room
+        document.getElementById('selectionBox').classList.add('hidden');
+        document.getElementById('gamePlayBox').classList.remove('hidden');
+    } else {
+        // Non-participant: lock card selection page
+        lockSelectionPage("Round in progress! Waiting for next 40s countdown...");
     }
+});
 
+socket.on('game_ended', ({ winner }) => {
+    alert(`🎉 BINGO! ${winner} won the game! Returning to selection...`);
+
+    // Reset client state
+    selectedCards.clear();
+    Object.keys(takenCardsMap).forEach(key => delete takenCardsMap[key]);
+
+    // Return all players to card selection view
+    unlockSelectionPage();
+    document.getElementById('gamePlayBox').classList.add('hidden');
+    document.getElementById('selectionBox').classList.remove('hidden');
+
+    updateGridUI();
+    updateSelectedCount();
+});
+
+socket.on('error_message', ({ message }) => {
+    alert(message);
+});
+
+// -------------------- UI HELPER FUNCTIONS --------------------
+function updateTimerUI(seconds) {
+    const timerElem = document.getElementById('lobbyTimer');
+    if (timerElem) timerElem.innerText = `${seconds}s`;
+}
+
+function updateReadyCountUI(count) {
+    const readyElem = document.getElementById('readyCount');
+    if (readyElem) readyElem.innerText = count;
+}
+
+function lockSelectionPage(message) {
+    const grid = document.getElementById('cardGrid');
+    if (grid) grid.style.pointerEvents = 'none';
+    const msgElem = document.getElementById('lockoutNotice');
+    if (msgElem) {
+        msgElem.innerText = message;
+        msgElem.classList.remove('hidden');
+    }
+}
+
+function unlockSelectionPage() {
+    const grid = document.getElementById('cardGrid');
+    if (grid) grid.style.pointerEvents = 'auto';
+    const msgElem = document.getElementById('lockoutNotice');
+    if (msgElem) msgElem.classList.add('hidden');
+}
+
+// Player Ready Trigger
+function launchGame() {
+    socket.emit('player_ready', { username: currentUsername });
+    document.getElementById('playGameBtn').disabled = true;
+    document.getElementById('playGameBtn').innerText = "Waiting for game start...";
+}
+
+// Trigger BINGO Win Claim
+function claimBingo() {
+    socket.emit('claim_bingo', { username: currentUsername });
+}
+
+// -------------------- APP INITIALIZATION & AUTH --------------------
+window.addEventListener('DOMContentLoaded', async () => {
     const savedUser = localStorage.getItem('bingoUser');
     if (savedUser) showHomeScreen(savedUser);
 });
-
-// Mandatory Telegram Contact Sharing
-function requestTelegramPhone() {
-    const tg = window.Telegram?.WebApp;
-    if (tg && tg.requestContact) {
-        tg.requestContact((sent, response) => {
-            if (sent && response?.responseUnpacked?.phone_number) {
-                const phone = response.responseUnpacked.phone_number;
-                savePhoneNumber(phone);
-            } else {
-                alert("Phone number sharing is required to play on Telegram.");
-            }
-        });
-    } else {
-        const phone = prompt("Please enter your phone number:");
-        if (phone) savePhoneNumber(phone);
-    }
-}
-
-async function savePhoneNumber(phoneNumber) {
-    const res = await fetch('/api/user/phone', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: currentUsername, phoneNumber })
-    });
-    const data = await res.json();
-    if (data.success) {
-        document.getElementById('phoneModal').classList.add('hidden');
-        document.getElementById('tabGames').classList.remove('hidden');
-    }
-}
 
 function showHomeScreen(username) {
     currentUsername = username;
     localStorage.setItem('bingoUser', username);
 
     document.getElementById('playerDisplay').innerText = username;
-    document.getElementById('profileUserDisplay').innerText = username;
     document.getElementById('headerBar').classList.remove('hidden');
     document.getElementById('bottomNav').classList.remove('hidden');
-
     document.getElementById('authBox').classList.add('hidden');
-    document.getElementById('choiceBox').classList.add('hidden');
 
-    // Default tab: Games
     switchTab('tabGames', document.querySelectorAll('.nav-item')[0]);
 }
 
-// Navigation Bar Switching Logic
 function switchTab(tabId, navElement) {
     document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
     document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
@@ -145,8 +163,7 @@ function renderCardNumbers(cardNumbers) {
 }
 
 function updateGridUI() {
-    const items = document.querySelectorAll('.card-item');
-    items.forEach(item => {
+    document.querySelectorAll('.card-item').forEach(item => {
         const num = parseInt(item.innerText, 10);
         item.className = 'card-item';
         if (takenCardsMap[num]) {
@@ -160,19 +177,4 @@ function updateSelectedCount() {
     const count = selectedCards.size;
     document.getElementById('selectedCount').innerText = count;
     document.getElementById('playGameBtn').disabled = count === 0;
-}
-
-function launchGame() {
-    document.getElementById('selectionBox').classList.add('hidden');
-    document.getElementById('gamePlayBox').classList.remove('hidden');
-}
-
-function backToSelection() {
-    document.getElementById('gamePlayBox').classList.add('hidden');
-    document.getElementById('selectionBox').classList.remove('hidden');
-}
-
-function logout() {
-    localStorage.removeItem('bingoUser');
-    location.reload();
 }

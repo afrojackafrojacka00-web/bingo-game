@@ -48,18 +48,27 @@
                 <button class="btn-play" onclick="goToGameScreen()">Play Bingo 🎮</button>
             </div>
 
-            <div id="selectionBox" class="card hidden">
-                <div style="font-size: 18px; color: #0088cc; margin-bottom: 8px;">Select Cards</div>
-                <div style="color: #aaa; font-size: 14px; margin-bottom: 12px;">Selected: <strong id="selectedCount" style="color: #00d26a;">0</strong></div>
-                <div id="cardGrid" class="card-grid"></div>
-                <button id="playGameBtn" class="btn-play" style="margin-top: 16px;" onclick="launchGame()" disabled>Start Playing 🚀</button>
-            </div>
+            <!-- Inside #selectionBox in index.html -->
+<div id="selectionBox" class="card hidden">
+    <div style="font-size: 18px; color: #0088cc; margin-bottom: 8px;">
+        Select Cards (Timer: <span id="lobbyTimer" style="color: #ff4d4d; font-weight: bold;">40s</span>)
+    </div>
+    <div style="color: #aaa; font-size: 14px; margin-bottom: 8px;">
+        Selected: <strong id="selectedCount" style="color: #00d26a;">0</strong> | Ready Players: <strong id="readyCount" style="color: #0088cc;">0</strong>
+    </div>
 
-            <div id="gamePlayBox" class="card hidden">
-                <h3>Game Room</h3>
-                <p style="color: #aaa;">Your selected cards will render here.</p>
-                <button class="secondary-btn" onclick="backToSelection()">← Change Cards</button>
-            </div>
+    <!-- Lockout Notice -->
+    <div id="lockoutNotice" class="hidden" style="color: #ff4d4d; margin-bottom: 10px; font-weight: bold;"></div>
+
+    <div id="cardGrid" class="card-grid"></div>
+    <button id="playGameBtn" class="btn-play" style="margin-top: 16px;" onclick="launchGame()" disabled>Start Playing 🚀</button>
+</div>
+
+<!-- Inside #gamePlayBox in index.html -->
+<div id="gamePlayBox" class="card hidden">
+    <h3>Bingo Game Room</h3>
+    <button class="btn-play" style="background: #ff4d4d; font-size: 24px; padding: 20px; margin-top: 20px;" onclick="claimBingo()">🔥 BINGO! 🔥</button>
+</div>
         </div>
 
         <!-- TAB CONTENT 2: TASKS -->
