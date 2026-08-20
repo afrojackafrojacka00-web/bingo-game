@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bingo Game</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+
+    <div class="container">
+
+        <!-- TOP HEADER -->
+        <div id="headerBar" class="header-bar hidden">
+            <div class="user-info">
+                <span>👤</span>
+                <span id="playerDisplay" class="username-text"></span>
+            </div>
+            <button id="logoutBtn" class="logout-btn" onclick="logout()">Logout</button>
+        </div>
+
+        <!-- AUTH / CHOICE -->
+        <div id="choiceBox" class="card hidden">
+            <button onclick="quickStartTelegram()">Play Instantly with Telegram</button>
+            <button class="secondary-btn" onclick="showLinkAccountForm()">Link Existing Web Account</button>
+        </div>
+
+        <div id="authBox" class="card">
+            <input type="text" id="username" placeholder="Username">
+            <input type="password" id="password" placeholder="Password">
+            <input type="tel" id="optionalPhone" placeholder="Phone Number (Optional)">
+            <button id="authSubmitBtn" onclick="submitAuth()">Login</button>
+            <button class="secondary-btn" onclick="toggleAuthMode()">Switch Login/Register</button>
+        </div>
+
+        <!-- TELEGRAM MANDATORY PHONE REQUEST MODAL -->
+        <div id="phoneModal" class="card hidden">
+            <h3>📱 Phone Number Required</h3>
+            <p style="color: #aaa; font-size: 14px;">To start playing on Telegram, please share your contact number.</p>
+            <button class="btn-phone" onclick="requestTelegramPhone()">Share Phone Number via Telegram</button>
+        </div>
+
+        <!-- TAB CONTENT 1: GAMES (MAIN) -->
+        <div id="tabGames" class="tab-content hidden">
+            <div id="homeBox" class="card">
+                <button class="btn-play" onclick="goToGameScreen()">Play Bingo 🎮</button>
+            </div>
+
+            <div id="selectionBox" class="card hidden">
+                <div style="font-size: 18px; color: #0088cc; margin-bottom: 8px;">Select Cards</div>
+                <div style="color: #aaa; font-size: 14px; margin-bottom: 12px;">Selected: <strong id="selectedCount" style="color: #00d26a;">0</strong></div>
+                <div id="cardGrid" class="card-grid"></div>
+                <button id="playGameBtn" class="btn-play" style="margin-top: 16px;" onclick="launchGame()" disabled>Start Playing 🚀</button>
+            </div>
+
+            <div id="gamePlayBox" class="card hidden">
+                <h3>Game Room</h3>
+                <p style="color: #aaa;">Your selected cards will render here.</p>
+                <button class="secondary-btn" onclick="backToSelection()">← Change Cards</button>
+            </div>
+        </div>
+
+        <!-- TAB CONTENT 2: TASKS -->
+        <div id="tabTasks" class="tab-content card hidden">
+            <h3>📋 Daily Tasks</h3>
+            <p style="color: #aaa;">Complete tasks to earn bonus rewards!</p>
+        </div>
+
+        <!-- TAB CONTENT 3: WALLET -->
+        <div id="tabWallet" class="tab-content card hidden">
+            <h3>👛 Wallet</h3>
+            <p style="color: #aaa;">Manage your balance and withdrawals.</p>
+        </div>
+
+        <!-- TAB CONTENT 4: PROFILE -->
+        <div id="tabProfile" class="tab-content card hidden">
+            <h3>👤 Profile</h3>
+            <p id="profileUserDisplay" style="font-size: 18px; color: #00d26a;"></p>
+        </div>
+
+    </div>
+
+    <!-- BOTTOM NAVIGATION BAR -->
+    <div id="bottomNav" class="bottom-nav hidden">
+        <div class="nav-item active" onclick="switchTab('tabGames', this)">
+            <span class="nav-icon">🎮</span>
+            <span>Games</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('tabTasks', this)">
+            <span class="nav-icon">📋</span>
+            <span>Task</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('tabWallet', this)">
+            <span class="nav-icon">👛</span>
+            <span>Wallet</span>
+        </div>
+        <div class="nav-item" onclick="switchTab('tabProfile', this)">
+            <span class="nav-icon">👤</span>
+            <span>Profile</span>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
