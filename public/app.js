@@ -266,12 +266,15 @@ function showHomeScreen(username) {
     currentUsername = username;
     localStorage.setItem('bingoUser', username);
 
+    // Show header bar and navigation
     document.getElementById('playerDisplay').innerText = username;
     document.getElementById('headerBar').classList.remove('hidden');
     document.getElementById('bottomNav').classList.remove('hidden');
     document.getElementById('authBox').classList.add('hidden');
 
+    // Automatically navigate to the Bingo game selection screen
     switchTab('tabGames', document.querySelectorAll('.nav-item')[0]);
+    goToGameScreen();
 }
 
 // Global Logout Handler
