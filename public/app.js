@@ -277,6 +277,30 @@ function showHomeScreen(username) {
     goToGameScreen();
 }
 
+async function setWebPassword() {
+    const newPassword = document.getElementById('webPasswordInput').value.trim();
+
+    if (!newPassword) return alert("Please enter a password.");
+
+    try {
+        const res = await fetch('/api/set-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: currentUsername, newPassword })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            alert(data.message);
+            document.getElementById('webPasswordInput').value = '';
+        } else {
+            alert(data.message || "Failed to set password.");
+        }
+    } catch (err) {
+        alert("Server error. Could not save password.");
+    }
+}
+
 // Global Logout Handler
 function logoutUser() {
     localStorage.removeItem('bingoUser');
