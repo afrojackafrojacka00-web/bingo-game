@@ -173,31 +173,41 @@ app.post('/api/telegram-auth', async (req, res) => {
     }
 
     try {
-        // 1. Check if Telegram account already exists in DB
+        // 1. Check if Telegram account already exists
         let result = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [user.id]);
 
         if (result.rows.length > 0) {
-            // Account exists -> Log in immediately
-            return res.json({ success: true, status: 'LOGGED_IN', username: result.rows[0].username });
+            const existingUser = result.rows[0];
+            
+            // Check if user changed their Telegram name
+            let newName = user.username || user.first_name || existingUser.username;
+            newName = newName.replace(/[^a-zA-Z0-9_]/g, '');
+
+            // Update username in database if it changed and isn't taken
+            if (newName && newName !== existingUser.username) {
+                const nameCheck = await pool.query('SELECT id FROM users WHERE username = $1', [newName]);
+                if (nameCheck.rows.length === 0) {
+                    await pool.query('UPDATE users SET username = $1 WHERE id = $2', [newName, existingUser.id]);
+                    return res.json({ success: true, status: 'LOGGED_IN', username: newName });
+                }
+            }
+
+            return res.json({ success: true, status: 'LOGGED_IN', username: existingUser.username });
         }
 
-        // 2. New Telegram User -> Auto-register using Telegram profile info
+        // 2. Auto-register new user
         let baseUsername = user.username || user.first_name || `tg_${user.id}`;
-        baseUsername = baseUsername.replace(/[^a-zA-Z0-9_]/g, ''); // Sanitize username
-        if (!baseUsername) baseUsername = `tg_${user.id}`;
+        baseUsername = baseUsername.replace(/[^a-zA-Z0-9_]/g, '') || `tg_${user.id}`;
 
-        // Check for username collision and append random digits if taken
         let finalUsername = baseUsername;
-        let existingUser = await pool.query('SELECT id FROM users WHERE username = $1', [finalUsername]);
-        if (existingUser.rows.length > 0) {
+        let existingName = await pool.query('SELECT id FROM users WHERE username = $1', [finalUsername]);
+        if (existingName.rows.length > 0) {
             finalUsername = `${baseUsername}_${Math.floor(1000 + Math.random() * 9000)}`;
         }
 
-        // Generate secure dummy password for Telegram native accounts
         const randomPassword = crypto.randomBytes(16).toString('hex');
         const hashedPassword = await bcrypt.hash(randomPassword, 10);
 
-        // Save new user automatically
         await pool.query(
             'INSERT INTO users (username, password, telegram_id) VALUES ($1, $2, $3)',
             [finalUsername, hashedPassword, user.id]
@@ -205,8 +215,7 @@ app.post('/api/telegram-auth', async (req, res) => {
 
         res.json({ success: true, status: 'LOGGED_IN', username: finalUsername });
     } catch (err) {
-        console.error("Auto-registration error:", err);
-        res.status(500).json({ success: false, message: "Server error during auto-registration." });
+        res.status(500).json({ success: false, message: "Server error." });
     }
 });
 

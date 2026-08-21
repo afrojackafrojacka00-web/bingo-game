@@ -264,3 +264,17 @@ function updateSelectedCount() {
         btn.disabled = count === 0;
     }
 }
+
+function logoutUser() {
+    localStorage.removeItem('bingoUser');
+    currentUsername = "";
+
+    document.getElementById('headerBar').classList.add('hidden');
+    document.getElementById('bottomNav').classList.add('hidden');
+    document.getElementById('homeBox').classList.add('hidden');
+    document.getElementById('selectionBox').classList.add('hidden');
+    document.getElementById('gamePlayBox').classList.add('hidden');
+
+    document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
+    document.getElementById('authBox').classList.remove('hidden');
+}
