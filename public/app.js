@@ -18,7 +18,6 @@ socket.on('timer_tick', ({ timer }) => {
     updateTimerUI(timer);
 });
 
-// Automatic reset when countdown ends without enough ready players
 socket.on('lobby_reset', ({ message }) => {
     selectedCards.clear();
     Object.keys(takenCardsMap).forEach(key => delete takenCardsMap[key]);
@@ -53,35 +52,27 @@ socket.on('card_freed', ({ cardNumber }) => {
 
 socket.on('game_started', ({ gameId, players }) => {
     if (players.includes(currentUsername)) {
-        // Ready player: transition to game room
         document.getElementById('selectionBox').classList.add('hidden');
         document.getElementById('gamePlayBox').classList.remove('hidden');
     } else {
-        // Non-ready player: lock selection during active play
         lockSelectionPage("Round in progress! Waiting for next 40s countdown...");
     }
 });
 
-// Non-blocking win screen transition
 socket.on('game_ended', ({ winner }) => {
-    // 1. Reset card state
     selectedCards.clear();
     Object.keys(takenCardsMap).forEach(key => delete takenCardsMap[key]);
 
-    // 2. Reset play button back to default state
     resetPlayButton();
     unlockSelectionPage();
 
-    // 3. Automatically return all users to card selection screen
     document.getElementById('gamePlayBox').classList.add('hidden');
     document.getElementById('selectionBox').classList.remove('hidden');
 
-    // 4. Update UI grids & counters
     updateGridUI();
     updateSelectedCount();
     updateReadyCountUI(0);
 
-    // 5. Display non-blocking winner banner
     showNotification(`🎉 BINGO! ${winner} won the game! Select cards for the next round.`);
 });
 
@@ -134,27 +125,27 @@ function unlockSelectionPage() {
     if (noticeElem) noticeElem.classList.add('hidden');
 }
 
-// Player Ready Trigger
 function launchGame() {
     if (selectedCards.size === 0) return;
 
     socket.emit('player_ready', { username: currentUsername });
     const btn = document.getElementById('playGameBtn');
-    btn.disabled = true;
-    btn.innerText = "Waiting for game start...";
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = "Waiting for game start...";
+    }
 }
 
-// Trigger BINGO Win Claim
 function claimBingo() {
     socket.emit('claim_bingo', { username: currentUsername });
 }
 
+// -------------------- APP INITIALIZATION & AUTH --------------------
 window.addEventListener('DOMContentLoaded', async () => {
     const tg = window.Telegram?.WebApp;
     const initData = tg?.initData;
 
     if (initData) {
-        // Hide manual logout button for Telegram native users
         const logoutBtn = document.getElementById('logoutBtn');
         if (logoutBtn) logoutBtn.classList.add('hidden');
 
@@ -167,7 +158,6 @@ window.addEventListener('DOMContentLoaded', async () => {
             const data = await res.json();
 
             if (data.success && data.status === 'LOGGED_IN') {
-                // Auto-login complete: bypass registration screens completely
                 showHomeScreen(data.username);
             } else {
                 showAuthBox();
@@ -176,26 +166,22 @@ window.addEventListener('DOMContentLoaded', async () => {
             showAuthBox();
         }
     } else {
-        // Web browser users (Non-Telegram)
         const savedUser = localStorage.getItem('bingoUser');
         if (savedUser) showHomeScreen(savedUser);
         else showAuthBox();
     }
 });
 
-// Switch to Register View
 function switchToRegister() {
     document.getElementById('loginForm').classList.add('hidden');
     document.getElementById('registerForm').classList.remove('hidden');
 }
 
-// Switch to Login View
 function switchToLogin() {
     document.getElementById('registerForm').classList.add('hidden');
     document.getElementById('loginForm').classList.remove('hidden');
 }
 
-// Display Auth Screen (Defaults to Login View)
 function showAuthBox() {
     document.getElementById('authBox').classList.remove('hidden');
     document.getElementById('headerBar').classList.add('hidden');
@@ -206,11 +192,9 @@ function showAuthBox() {
 
     document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
 
-    // Default to showing the login form
     switchToLogin();
 }
 
-// Handle Web Login
 async function loginUser() {
     const username = document.getElementById('loginUsername').value.trim();
     const password = document.getElementById('loginPassword').value.trim();
@@ -235,7 +219,6 @@ async function loginUser() {
     }
 }
 
-// Handle Web Registration
 async function registerUser() {
     const username = document.getElementById('regUsername').value.trim();
     const password = document.getElementById('regPassword').value.trim();
@@ -261,21 +244,25 @@ async function registerUser() {
     }
 }
 
-
 function showHomeScreen(username) {
     currentUsername = username;
     localStorage.setItem('bingoUser', username);
 
-    // Show header bar and navigation
     document.getElementById('playerDisplay').innerText = username;
     document.getElementById('headerBar').classList.remove('hidden');
     document.getElementById('bottomNav').classList.remove('hidden');
     document.getElementById('authBox').classList.add('hidden');
 
-    // Automatically navigate to the Bingo game selection screen
     switchTab('tabGames', document.querySelectorAll('.nav-item')[0]);
-    goToGameScreen();
+    document.getElementById('homeBox').classList.remove('hidden');
+    document.getElementById('selectionBox').classList.add('hidden');
 }
+
+window.logoutUser = function() {
+    localStorage.removeItem('bingoUser');
+    currentUsername = "";
+    showAuthBox();
+};
 
 async function setWebPassword() {
     const newPassword = document.getElementById('webPasswordInput').value.trim();
@@ -301,18 +288,13 @@ async function setWebPassword() {
     }
 }
 
-// Global Logout Handler
-function logoutUser() {
-    localStorage.removeItem('bingoUser');
-    currentUsername = "";
-    showAuthBox();
-}
-
+// -------------------- NAVIGATION & GAME SELECTION --------------------
 function switchTab(tabId, navElement) {
     document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
     document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
 
-    document.getElementById(tabId).classList.remove('hidden');
+    const activeTab = document.getElementById(tabId);
+    if (activeTab) activeTab.classList.remove('hidden');
     if (navElement) navElement.classList.add('active');
 }
 
@@ -320,13 +302,23 @@ async function goToGameScreen() {
     document.getElementById('homeBox').classList.add('hidden');
     document.getElementById('selectionBox').classList.remove('hidden');
 
-    const res = await fetch('/api/cards/numbers');
-    const data = await res.json();
-    if (data.success) renderCardNumbers(data.cardNumbers);
+    try {
+        const res = await fetch('/api/cards/numbers');
+        const data = await res.json();
+        if (data.success && data.cardNumbers) {
+            renderCardNumbers(data.cardNumbers);
+        } else {
+            showNotification("Failed to load cards. Please try again.");
+        }
+    } catch (err) {
+        console.error("Card fetch error:", err);
+        showNotification("Server connection error while loading cards.");
+    }
 }
 
 function renderCardNumbers(cardNumbers) {
     const gridContainer = document.getElementById('cardGrid');
+    if (!gridContainer) return;
     gridContainer.innerHTML = '';
 
     cardNumbers.forEach(num => {
@@ -353,31 +345,11 @@ function updateGridUI() {
 
 function updateSelectedCount() {
     const count = selectedCards.size;
-    document.getElementById('selectedCount').innerText = count;
-    
-    // Only update button enabled status if it's not waiting for a match
+    const countElem = document.getElementById('selectedCount');
+    if (countElem) countElem.innerText = count;
+
     const btn = document.getElementById('playGameBtn');
     if (btn && btn.innerText !== "Waiting for game start...") {
         btn.disabled = count === 0;
     }
 }
-
-// Global logout function for Web users
-window.logoutUser = function() {
-    // 1. Clear stored login session
-    localStorage.removeItem('bingoUser');
-    currentUsername = "";
-
-    // 2. Hide top header, bottom nav, and all game screens
-    document.getElementById('headerBar').classList.add('hidden');
-    document.getElementById('bottomNav').classList.add('hidden');
-    document.getElementById('homeBox').classList.add('hidden');
-    document.getElementById('selectionBox').classList.add('hidden');
-    document.getElementById('gamePlayBox').classList.add('hidden');
-
-    // 3. Hide all tab contents
-    document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
-
-    // 4. Show authentication (Login/Register) box
-    document.getElementById('authBox').classList.remove('hidden');
-};
