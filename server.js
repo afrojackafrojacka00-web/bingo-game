@@ -6,6 +6,8 @@ const bcrypt = require('bcryptjs');
 const path = require('path');
 const http = require('http');
 const { Server } = require('socket.io');
+const multer = require('multer');
+const upload = multer();
 
 const app = express();
 const server = http.createServer(app);
@@ -199,27 +201,49 @@ app.get('/api/cards/numbers', async (req, res) => {
 });
 
 // Broadcast Ads Endpoint
-app.post('/api/admin/broadcast', async (req, res) => {
+app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) => {
     const { message, imageUrl, adminSecret } = req.body;
-    if (adminSecret !== process.env.ADMIN_SECRET) return res.status(403).json({ success: false, message: "Unauthorized." });
+    
+    if (adminSecret !== process.env.ADMIN_SECRET) {
+        return res.status(403).json({ success: false, message: "Unauthorized: Incorrect secret key." });
+    }
 
     try {
         const users = await pool.query('SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL');
         const botToken = process.env.TELEGRAM_BOT_TOKEN;
 
         for (const user of users.rows) {
-            const endpoint = imageUrl ? 'sendPhoto' : 'sendMessage';
-            const body = imageUrl ? { chat_id: user.telegram_id, photo: imageUrl, caption: message, parse_mode: 'HTML' }
-                                  : { chat_id: user.telegram_id, text: message, parse_mode: 'HTML' };
-            await fetch(`https://api.telegram.org/bot${botToken}/${endpoint}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body)
-            }).catch(() => {});
+            if (req.file) {
+                // Send uploaded file directly to Telegram
+                const formData = new FormData();
+                formData.append('chat_id', user.telegram_id);
+                formData.append('caption', message || '');
+                formData.append('parse_mode', 'HTML');
+                formData.append('photo', new Blob([req.file.buffer], { type: req.file.mimetype }), req.file.originalname);
+
+                await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+                    method: 'POST',
+                    body: formData
+                }).catch(() => {});
+            } else if (imageUrl) {
+                // Send via image URL
+                await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chat_id: user.telegram_id, photo: imageUrl, caption: message, parse_mode: 'HTML' })
+                }).catch(() => {});
+            } else {
+                // Send text message
+                await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chat_id: user.telegram_id, text: message, parse_mode: 'HTML' })
+                }).catch(() => {});
+            }
         }
-        res.json({ success: true, message: "Broadcast sent." });
+        res.json({ success: true, message: "Broadcast sent successfully!" });
     } catch (err) {
-        res.status(500).json({ success: false, message: "Broadcast error." });
+        res.status(500).json({ success: false, message: "Server error during broadcast." });
     }
 });
 
