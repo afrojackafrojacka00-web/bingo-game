@@ -149,17 +149,15 @@ function claimBingo() {
     socket.emit('claim_bingo', { username: currentUsername });
 }
 
-// -------------------- APP INITIALIZATION & AUTH --------------------
 window.addEventListener('DOMContentLoaded', async () => {
     const tg = window.Telegram?.WebApp;
     const initData = tg?.initData;
 
     if (initData) {
-        // 1. Hide Logout button specifically for Telegram users
+        // Hide manual logout button for Telegram native users
         const logoutBtn = document.getElementById('logoutBtn');
         if (logoutBtn) logoutBtn.classList.add('hidden');
 
-        // 2. Telegram Auth Check (Always takes priority over localStorage)
         try {
             const res = await fetch('/api/telegram-auth', {
                 method: 'POST',
@@ -169,25 +167,19 @@ window.addEventListener('DOMContentLoaded', async () => {
             const data = await res.json();
 
             if (data.success && data.status === 'LOGGED_IN') {
-                // Account found for THIS Telegram ID -> Log into correct user
+                // Auto-login complete: bypass registration screens completely
                 showHomeScreen(data.username);
             } else {
-                // New/Different Telegram Account -> Clear old session & show register/login
-                localStorage.removeItem('bingoUser');
                 showAuthBox();
             }
         } catch (err) {
-            console.error("Telegram auth failed:", err);
             showAuthBox();
         }
     } else {
-        // Regular Web Browser User (Non-Telegram)
+        // Web browser users (Non-Telegram)
         const savedUser = localStorage.getItem('bingoUser');
-        if (savedUser) {
-            showHomeScreen(savedUser);
-        } else {
-            showAuthBox();
-        }
+        if (savedUser) showHomeScreen(savedUser);
+        else showAuthBox();
     }
 });
 
