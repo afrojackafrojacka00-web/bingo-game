@@ -265,16 +265,22 @@ function updateSelectedCount() {
     }
 }
 
-function logoutUser() {
+// Global logout function for Web users
+window.logoutUser = function() {
+    // 1. Clear stored login session
     localStorage.removeItem('bingoUser');
     currentUsername = "";
 
+    // 2. Hide top header, bottom nav, and all game screens
     document.getElementById('headerBar').classList.add('hidden');
     document.getElementById('bottomNav').classList.add('hidden');
     document.getElementById('homeBox').classList.add('hidden');
     document.getElementById('selectionBox').classList.add('hidden');
     document.getElementById('gamePlayBox').classList.add('hidden');
 
+    // 3. Hide all tab contents
     document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
+
+    // 4. Show authentication (Login/Register) box
     document.getElementById('authBox').classList.remove('hidden');
-}
+};
