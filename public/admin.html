@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin Announcement Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #121212; color: #fff; padding: 20px; }
+        .card { max-width: 500px; margin: auto; background: #1e1e1e; padding: 20px; border-radius: 12px; }
+        input, textarea, button { width: 100%; padding: 12px; margin: 8px 0; border-radius: 8px; border: 1px solid #333; background: #2a2a2a; color: white; box-sizing: border-box; }
+        button { background: #0088cc; font-weight: bold; cursor: pointer; border: none; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h2>📢 Send Telegram Ad</h2>
+        <input type="password" id="secret" placeholder="Admin Secret Key">
+        <textarea id="message" rows="4" placeholder="Announcement message (HTML tags allowed: <b>, <i>, <a>)..."></textarea>
+        <input type="url" id="imageUrl" placeholder="Image URL (Optional)">
+        <button onclick="sendAd()">Broadcast Ad 🚀</button>
+        <p id="status"></p>
+    </div>
+
+    <script>
+        async function sendAd() {
+            const adminSecret = document.getElementById('secret').value;
+            const message = document.getElementById('message').value;
+            const imageUrl = document.getElementById('imageUrl').value;
+            const status = document.getElementById('status');
+
+            status.innerText = "Sending broadcast...";
+
+            try {
+                const res = await fetch('/api/admin/broadcast', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ adminSecret, message, imageUrl })
+                });
+                const data = await res.json();
+                status.innerText = data.message;
+            } catch (err) {
+                status.innerText = "Failed to send broadcast.";
+            }
+        }
+    </script>
+
+</body>
+</html>
