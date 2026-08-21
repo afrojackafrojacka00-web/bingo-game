@@ -183,6 +183,19 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 });
 
+// Switch to Register View
+function switchToRegister() {
+    document.getElementById('loginForm').classList.add('hidden');
+    document.getElementById('registerForm').classList.remove('hidden');
+}
+
+// Switch to Login View
+function switchToLogin() {
+    document.getElementById('registerForm').classList.add('hidden');
+    document.getElementById('loginForm').classList.remove('hidden');
+}
+
+// Display Auth Screen (Defaults to Login View)
 function showAuthBox() {
     document.getElementById('authBox').classList.remove('hidden');
     document.getElementById('headerBar').classList.add('hidden');
@@ -190,7 +203,64 @@ function showAuthBox() {
     document.getElementById('homeBox').classList.add('hidden');
     document.getElementById('selectionBox').classList.add('hidden');
     document.getElementById('gamePlayBox').classList.add('hidden');
+
+    document.querySelectorAll('.tab-content').forEach(tab => tab.classList.add('hidden'));
+
+    // Default to showing the login form
+    switchToLogin();
 }
+
+// Handle Web Login
+async function loginUser() {
+    const username = document.getElementById('loginUsername').value.trim();
+    const password = document.getElementById('loginPassword').value.trim();
+
+    if (!username || !password) return alert("Please fill in all fields.");
+
+    try {
+        const res = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            showHomeScreen(data.username);
+        } else {
+            alert(data.message || "Invalid credentials.");
+        }
+    } catch (err) {
+        alert("Login failed. Check your network connection.");
+    }
+}
+
+// Handle Web Registration
+async function registerUser() {
+    const username = document.getElementById('regUsername').value.trim();
+    const password = document.getElementById('regPassword').value.trim();
+    const phoneNumber = document.getElementById('regPhone').value.trim();
+
+    if (!username || !password) return alert("Please fill in username and password.");
+
+    try {
+        const res = await fetch('/api/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password, phoneNumber })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            showHomeScreen(data.username);
+        } else {
+            alert(data.message || "Registration failed.");
+        }
+    } catch (err) {
+        alert("Registration failed. Check your network connection.");
+    }
+}
+
 
 function showHomeScreen(username) {
     currentUsername = username;
@@ -204,7 +274,7 @@ function showHomeScreen(username) {
     switchTab('tabGames', document.querySelectorAll('.nav-item')[0]);
 }
 
-// Explicit Logout (Only used by Non-Telegram Web Users)
+// Global Logout Handler
 function logoutUser() {
     localStorage.removeItem('bingoUser');
     currentUsername = "";
