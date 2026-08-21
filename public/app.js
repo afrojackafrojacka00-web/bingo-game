@@ -151,9 +151,54 @@ function claimBingo() {
 
 // -------------------- APP INITIALIZATION & AUTH --------------------
 window.addEventListener('DOMContentLoaded', async () => {
-    const savedUser = localStorage.getItem('bingoUser');
-    if (savedUser) showHomeScreen(savedUser);
+    const tg = window.Telegram?.WebApp;
+    const initData = tg?.initData;
+
+    if (initData) {
+        // 1. Hide Logout button specifically for Telegram users
+        const logoutBtn = document.getElementById('logoutBtn');
+        if (logoutBtn) logoutBtn.classList.add('hidden');
+
+        // 2. Telegram Auth Check (Always takes priority over localStorage)
+        try {
+            const res = await fetch('/api/telegram-auth', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ initData })
+            });
+            const data = await res.json();
+
+            if (data.success && data.status === 'LOGGED_IN') {
+                // Account found for THIS Telegram ID -> Log into correct user
+                showHomeScreen(data.username);
+            } else {
+                // New/Different Telegram Account -> Clear old session & show register/login
+                localStorage.removeItem('bingoUser');
+                showAuthBox();
+            }
+        } catch (err) {
+            console.error("Telegram auth failed:", err);
+            showAuthBox();
+        }
+    } else {
+        // Regular Web Browser User (Non-Telegram)
+        const savedUser = localStorage.getItem('bingoUser');
+        if (savedUser) {
+            showHomeScreen(savedUser);
+        } else {
+            showAuthBox();
+        }
+    }
 });
+
+function showAuthBox() {
+    document.getElementById('authBox').classList.remove('hidden');
+    document.getElementById('headerBar').classList.add('hidden');
+    document.getElementById('bottomNav').classList.add('hidden');
+    document.getElementById('homeBox').classList.add('hidden');
+    document.getElementById('selectionBox').classList.add('hidden');
+    document.getElementById('gamePlayBox').classList.add('hidden');
+}
 
 function showHomeScreen(username) {
     currentUsername = username;
@@ -165,6 +210,13 @@ function showHomeScreen(username) {
     document.getElementById('authBox').classList.add('hidden');
 
     switchTab('tabGames', document.querySelectorAll('.nav-item')[0]);
+}
+
+// Explicit Logout (Only used by Non-Telegram Web Users)
+function logoutUser() {
+    localStorage.removeItem('bingoUser');
+    currentUsername = "";
+    showAuthBox();
 }
 
 function switchTab(tabId, navElement) {
