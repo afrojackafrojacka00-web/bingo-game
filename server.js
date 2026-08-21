@@ -233,7 +233,6 @@ setInterval(async () => {
             if (gameState.readyPlayers.size >= 2) {
                 gameState.status = 'GAME_ACTIVE';
 
-                // Create Game Session asynchronously in PostgreSQL
                 try {
                     const sessionRes = await pool.query(
                         'INSERT INTO game_sessions (status) VALUES ($1) RETURNING id',
@@ -241,7 +240,6 @@ setInterval(async () => {
                     );
                     gameState.gameId = sessionRes.rows[0].id;
 
-                    // Log Participants & Selected Cards asynchronously
                     const playerCardMap = {};
                     gameState.selectedCards.forEach((username, cardNumber) => {
                         if (gameState.readyPlayers.has(username)) {
@@ -265,9 +263,14 @@ setInterval(async () => {
                     players: Array.from(gameState.readyPlayers)
                 });
             } else {
-                // Not enough players, reset timer to 40s
+                // Not enough players: Wipe RAM cards and ready states for a fair fresh round
+                gameState.selectedCards.clear();
+                gameState.readyPlayers.clear();
                 gameState.timer = 40;
-                io.emit('timer_reset', { message: "Waiting for at least 2 ready players..." });
+
+                io.emit('lobby_reset', { 
+                    message: "Not enough ready players. Cards reset for a fair round!" 
+                });
             }
         } else {
             io.emit('timer_tick', { timer: gameState.timer, status: gameState.status });

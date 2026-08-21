@@ -18,9 +18,19 @@ socket.on('timer_tick', ({ timer }) => {
     updateTimerUI(timer);
 });
 
-socket.on('timer_reset', ({ message }) => {
-    alert(message);
+// Automatic reset when countdown ends without enough ready players
+socket.on('lobby_reset', ({ message }) => {
+    selectedCards.clear();
+    Object.keys(takenCardsMap).forEach(key => delete takenCardsMap[key]);
+
+    resetPlayButton();
+    unlockSelectionPage();
+    updateGridUI();
+    updateSelectedCount();
     updateTimerUI(40);
+    updateReadyCountUI(0);
+
+    showNotification(message);
 });
 
 socket.on('ready_count_updated', ({ readyCount }) => {
@@ -43,36 +53,64 @@ socket.on('card_freed', ({ cardNumber }) => {
 
 socket.on('game_started', ({ gameId, players }) => {
     if (players.includes(currentUsername)) {
-        // Active participant: transition to game room
+        // Ready player: transition to game room
         document.getElementById('selectionBox').classList.add('hidden');
         document.getElementById('gamePlayBox').classList.remove('hidden');
     } else {
-        // Non-participant: lock card selection page
+        // Non-ready player: lock selection during active play
         lockSelectionPage("Round in progress! Waiting for next 40s countdown...");
     }
 });
 
+// Non-blocking win screen transition
 socket.on('game_ended', ({ winner }) => {
-    alert(`🎉 BINGO! ${winner} won the game! Returning to selection...`);
-
-    // Reset client state
+    // 1. Reset card state
     selectedCards.clear();
     Object.keys(takenCardsMap).forEach(key => delete takenCardsMap[key]);
 
-    // Return all players to card selection view
+    // 2. Reset play button back to default state
+    resetPlayButton();
     unlockSelectionPage();
+
+    // 3. Automatically return all users to card selection screen
     document.getElementById('gamePlayBox').classList.add('hidden');
     document.getElementById('selectionBox').classList.remove('hidden');
 
+    // 4. Update UI grids & counters
     updateGridUI();
     updateSelectedCount();
+    updateReadyCountUI(0);
+
+    // 5. Display non-blocking winner banner
+    showNotification(`🎉 BINGO! ${winner} won the game! Select cards for the next round.`);
 });
 
 socket.on('error_message', ({ message }) => {
-    alert(message);
+    showNotification(message);
 });
 
 // -------------------- UI HELPER FUNCTIONS --------------------
+function resetPlayButton() {
+    const btn = document.getElementById('playGameBtn');
+    if (btn) {
+        btn.innerText = "Start Playing 🚀";
+        btn.disabled = selectedCards.size === 0;
+    }
+}
+
+function showNotification(message) {
+    const noticeElem = document.getElementById('lockoutNotice');
+    if (noticeElem) {
+        noticeElem.innerText = message;
+        noticeElem.classList.remove('hidden');
+        setTimeout(() => {
+            if (noticeElem.innerText === message) {
+                noticeElem.classList.add('hidden');
+            }
+        }, 4000);
+    }
+}
+
 function updateTimerUI(seconds) {
     const timerElem = document.getElementById('lobbyTimer');
     if (timerElem) timerElem.innerText = `${seconds}s`;
@@ -86,25 +124,24 @@ function updateReadyCountUI(count) {
 function lockSelectionPage(message) {
     const grid = document.getElementById('cardGrid');
     if (grid) grid.style.pointerEvents = 'none';
-    const msgElem = document.getElementById('lockoutNotice');
-    if (msgElem) {
-        msgElem.innerText = message;
-        msgElem.classList.remove('hidden');
-    }
+    showNotification(message);
 }
 
 function unlockSelectionPage() {
     const grid = document.getElementById('cardGrid');
     if (grid) grid.style.pointerEvents = 'auto';
-    const msgElem = document.getElementById('lockoutNotice');
-    if (msgElem) msgElem.classList.add('hidden');
+    const noticeElem = document.getElementById('lockoutNotice');
+    if (noticeElem) noticeElem.classList.add('hidden');
 }
 
 // Player Ready Trigger
 function launchGame() {
+    if (selectedCards.size === 0) return;
+
     socket.emit('player_ready', { username: currentUsername });
-    document.getElementById('playGameBtn').disabled = true;
-    document.getElementById('playGameBtn').innerText = "Waiting for game start...";
+    const btn = document.getElementById('playGameBtn');
+    btn.disabled = true;
+    btn.innerText = "Waiting for game start...";
 }
 
 // Trigger BINGO Win Claim
@@ -176,5 +213,10 @@ function updateGridUI() {
 function updateSelectedCount() {
     const count = selectedCards.size;
     document.getElementById('selectedCount').innerText = count;
-    document.getElementById('playGameBtn').disabled = count === 0;
+    
+    // Only update button enabled status if it's not waiting for a match
+    const btn = document.getElementById('playGameBtn');
+    if (btn && btn.innerText !== "Waiting for game start...") {
+        btn.disabled = count === 0;
+    }
 }
