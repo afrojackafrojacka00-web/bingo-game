@@ -9,6 +9,7 @@ const { Server } = require('socket.io');
 const multer = require('multer');
 const upload = multer();
 
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
@@ -235,6 +236,37 @@ app.get('/api/cards/numbers', async (req, res) => {
         res.json({ success: true, cardNumbers: result.rows.map(r => r.card_number) });
     } catch (err) {
         res.status(500).json({ success: false, message: "Failed to load cards." });
+    }
+});
+
+app.post('/api/set-password', async (req, res) => {
+    const { username, newPassword } = req.body;
+
+    if (!username || !newPassword) {
+        return res.status(400).json({ success: false, message: "Missing username or password." });
+    }
+
+    try {
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        // Case-insensitive lookup using LOWER()
+        const result = await pool.query(
+            'UPDATE users SET password = $1 WHERE LOWER(username) = LOWER($2) RETURNING id',
+            [hashedPassword, username]
+        );
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ 
+                success: false, 
+                message: `User '${username}' not found in the database. Please ensure you are logged in.` 
+            });
+        }
+
+        res.json({ success: true, message: "Password updated successfully! You can now log in on the web." });
+    } catch (err) {
+        console.error("Set password error:", err);
+        // Sends the exact database error message to the client alert
+        res.status(500).json({ success: false, message: `Database Error: ${err.message}` });
     }
 });
 
