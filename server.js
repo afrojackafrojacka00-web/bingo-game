@@ -26,7 +26,9 @@ const storage = multer.diskStorage({
         cb(null, uniqueSuffix + path.extname(file.originalname));
     }
 });
-const upload = multer({ storage });
+// const upload = multer({ storage });
+// Memory storage handles uploads directly in RAM (No disk required)
+const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });
 
 const app = express();
 const server = http.createServer(app);
@@ -510,40 +512,46 @@ app.post('/api/set-password', async (req, res) => {
     }
 });
 
-// 1. Updated Admin Broadcast (Saves to DB + sends to Telegram)
-// 1. Broadcast Post (Saves to Disk, DB & Sends to Telegram)
+
+// 1. Create Broadcast (Base64 stored in DB for Web, Direct Buffer to Telegram)
 app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) => {
     const { message, imageUrl, adminSecret } = req.body;
     
     if (adminSecret !== process.env.ADMIN_SECRET) {
-        return res.status(403).json({ success: false, message: "Unauthorized key." });
+        return res.status(403).json({ success: false, message: "Unauthorized admin key." });
     }
 
     try {
         let finalImageUrl = imageUrl || null;
 
+        // Convert uploaded image to Base64 Data URL for web persistence
         if (req.file) {
-            finalImageUrl = `/uploads/${req.file.filename}`;
+            finalImageUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
         }
 
-        // Save persistent post in PostgreSQL
+        // Save persistent post in Database
         await pool.query(
             'INSERT INTO notifications (message, image_url) VALUES ($1, $2)',
             [message, finalImageUrl]
         );
 
-        // Telegram Send Logic
+        // Telegram Broadcast
         const users = await pool.query('SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL');
         const botToken = process.env.TELEGRAM_BOT_TOKEN;
-        const baseUrl = process.env.APP_URL || (process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : '');
-        const fullPhotoUrl = (finalImageUrl && finalImageUrl.startsWith('/uploads/')) ? `${baseUrl}${finalImageUrl}` : finalImageUrl;
 
         for (const user of users.rows) {
-            if (fullPhotoUrl) {
+            if (req.file) {
+                const formData = new FormData();
+                formData.append('chat_id', user.telegram_id);
+                formData.append('caption', message || '');
+                formData.append('parse_mode', 'HTML');
+                formData.append('photo', new Blob([req.file.buffer], { type: req.file.mimetype }), req.file.originalname);
+                await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, { method: 'POST', body: formData }).catch(() => {});
+            } else if (imageUrl) {
                 await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chat_id: user.telegram_id, photo: fullPhotoUrl, caption: message, parse_mode: 'HTML' })
+                    body: JSON.stringify({ chat_id: user.telegram_id, photo: imageUrl, caption: message, parse_mode: 'HTML' })
                 }).catch(() => {});
             } else {
                 await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -554,14 +562,14 @@ app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) =>
             }
         }
 
-        res.json({ success: true, message: "Broadcast posted to web and Telegram!" });
+        res.json({ success: true, message: "Broadcast sent to Telegram and published on Web!" });
     } catch (err) {
         console.error("Broadcast error:", err);
         res.status(500).json({ success: false, message: "Server error during broadcast." });
     }
 });
 
-// 2. Get All Posts for Admin Dashboard
+// 2. Get All Notifications for Admin Dashboard
 app.get('/api/admin/notifications', async (req, res) => {
     const adminSecret = req.headers['x-admin-secret'];
     if (adminSecret !== process.env.ADMIN_SECRET) {
