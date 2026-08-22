@@ -3,55 +3,138 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KalBingo - Play & Win</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Bingo Web Game</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; background: #121212; color: #fff; margin: 0; padding: 15px; pb: 70px; }
+        .hidden { display: none !important; }
+        .header-bar { display: flex; justify-content: space-between; align-items: center; background: #1e1e1e; padding: 12px 16px; border-radius: 8px; margin-bottom: 15px; }
+        .card { background: #1e1e1e; padding: 20px; border-radius: 12px; margin-bottom: 20px; text-align: center; }
+        input, textarea, button { width: 100%; padding: 12px; margin-top: 8px; border-radius: 8px; border: 1px solid #333; background: #2a2a2a; color: white; box-sizing: border-box; }
+        button.btn-play { background: #0088cc; font-weight: bold; border: none; cursor: pointer; font-size: 16px; margin-top: 15px; }
+        button.btn-play:disabled { background: #555; cursor: not-allowed; }
+        button.btn-logout { background: #ff4d4d; border: none; padding: 6px 12px; width: auto; font-weight: bold; cursor: pointer; border-radius: 6px; }
+        .grid-container { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 15px; }
+        .card-item { background: #2a2a2a; padding: 15px 0; text-align: center; font-weight: bold; border-radius: 6px; cursor: pointer; border: 1px solid #444; }
+        .card-item.selected { background: #0088cc; color: #fff; border-color: #00aaff; }
+        .card-item.taken { background: #444; color: #888; cursor: not-allowed; opacity: 0.6; }
+        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: #1e1e1e; display: flex; justify-content: space-around; padding: 12px 0; border-top: 1px solid #333; }
+        .nav-item { color: #aaa; text-align: center; font-size: 14px; cursor: pointer; width: 50%; }
+        .nav-item.active { color: #0088cc; font-weight: bold; }
+    </style>
 </head>
 <body>
-    <div id="app">
-        <header>
-            <h1>KalBingo</h1>
-            <div id="userInfo">
-                <span id="displayUsername">Guest</span> | Balance: <span id="userBalance">0.00</span> ETB
-            </div>
-        </header>
 
-        <main>
-            <!-- LOBBY SCREEN -->
-            <div id="gameLobby">
-                <h2>Lobby Countdown: <span id="timer">40</span>s</h2>
-                <p>Ready Players: <span id="readyCount">0</span></p>
-                <p>Select your card number (10 ETB/card):</p>
-                
-                <div id="cardNumbersGrid" class="cards-grid"></div>
-                
-                <button id="readyBtn" class="primary-btn">I'm Ready</button>
-            </div>
-
-            <!-- ACTIVE GAMEPLAY SCREEN -->
-            <div id="gamePlayArea" class="hidden">
-                <div class="caller-box">
-                    <h2>Current Number: <span id="currentNumber">--</span></h2>
-                    <div id="numberHistory" class="history-pills"></div>
-                </div>
-
-                <div id="activeCardsContainer"></div>
-
-                <button id="claimBingoBtn" class="bingo-btn">BINGO!</button>
-            </div>
-        </main>
+    <!-- HEADER BAR -->
+    <!-- HEADER BAR WITH NOTIFICATION BELL & BALANCE -->
+<div id="headerBar" class="header-bar hidden">
+    <div>
+        👤 <span id="playerDisplay"></span> | 💰 <span id="balanceDisplay">10.00</span> Birr
     </div>
+    <div style="display: flex; gap: 10px; align-items: center;">
+        <button id="notifBell" onclick="toggleNotificationModal()" style="position: relative; background: none; border: none; font-size: 20px; cursor: pointer; padding: 0; width: auto;">
+            🔔<span id="notifBadge" style="position: absolute; top: -5px; right: -5px; background: #ff4d4d; color: white; font-size: 10px; padding: 2px 6px; border-radius: 50%;">1</span>
+        </button>
+        <button id="logoutBtn" class="btn-logout" onclick="logoutUser()">Logout</button>
+    </div>
+</div>
 
-    <!-- Announcement Modal -->
-    <div id="announcementModal" class="modal hidden">
-        <div class="modal-content">
-            <span class="close-btn" id="closeModal">&times;</span>
-            <img id="popupImage" src="" class="hidden">
-            <p id="popupMessage"></p>
+<!-- WEB NOTIFICATION MODAL -->
+<div id="notifModal" class="hidden" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 20px;">
+    <div class="card" style="max-width: 380px; width: 100%; text-align: center; position: relative;">
+        <span onclick="toggleNotificationModal()" style="position: absolute; right: 15px; top: 10px; cursor: pointer; font-size: 18px;">❌</span>
+        <img src="/images/welcome.jpg" alt="Welcome" style="width: 100%; border-radius: 8px; margin-bottom: 12px; max-height: 200px; object-fit: cover;">
+        <h3>🎉 Welcome Gift!</h3>
+        <p id="notifAmharicText" style="font-size: 14px; text-align: left; line-height: 1.6; background: #2a2a2a; padding: 12px; border-radius: 8px;"></p>
+        <button class="btn-play" onclick="toggleNotificationModal()">Close</button>
+    </div>
+</div>
+
+
+
+<!-- MANDATORY TELEGRAM PHONE SHARE MODAL -->
+<div id="phoneModal" class="hidden" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 20px;">
+    <div class="card" style="max-width: 350px; width: 100%; text-align: center;">
+        <h2>📲 Phone Verification Required</h2>
+        <p style="color: #aaa; font-size: 14px; margin-bottom: 20px;">To play Bingo on Telegram, please share your official Telegram phone number.</p>
+        <button class="btn-play" onclick="shareTelegramContact()">Share Telegram Phone Number 🔒</button>
+    </div>
+</div>
+
+    <!-- AUTHENTICATION CONTAINER -->
+    <div id="authBox" class="card">
+        <!-- LOGIN FORM -->
+        <div id="loginForm">
+            <h2>Welcome Back 👋</h2>
+            <input type="text" id="loginUsername" placeholder="Username">
+            <input type="password" id="loginPassword" placeholder="Password">
+            <button class="btn-play" onclick="loginUser()">Log In 🚀</button>
+            <p style="margin-top: 12px; font-size: 14px; color: #aaa;">
+                Don't have an account? <a href="#" onclick="switchToRegister()" style="color: #0088cc;">Register</a>
+            </p>
+        </div>
+
+        <!-- REGISTER FORM -->
+        <div id="registerForm" class="hidden">
+            <h2>Create Account 📝</h2>
+            <input type="text" id="regUsername" placeholder="Username">
+            <input type="password" id="regPassword" placeholder="Password">
+            <input type="tel" id="regPhone" placeholder="Phone Number (Optional)">
+            <button class="btn-play" onclick="registerUser()">Register & Play 🚀</button>
+            <p style="margin-top: 12px; font-size: 14px; color: #aaa;">
+                Already have an account? <a href="#" onclick="switchToLogin()" style="color: #0088cc;">Log In</a>
+            </p>
         </div>
     </div>
 
-    <script src="/js/player.js"></script>
+    <!-- TAB 1: GAMES & CARD SELECTION -->
+    <div id="tabGames" class="tab-content hidden">
+        <!-- HOME BOX -->
+        <div id="homeBox" class="card">
+            <h2>Ready to Play? 🎲</h2>
+            <p>Pick your cards and join the lobby!</p>
+            <button class="btn-play" onclick="goToGameScreen()">Play Bingo 🚀</button>
+        </div>
+
+        <!-- CARD SELECTION LOBBY -->
+        <div id="selectionBox" class="card hidden">
+            <h2>Select Your Cards 🎟️</h2>
+            <p>Timer: <span id="lobbyTimer">40s</span> | Ready Players: <span id="readyCount">0</span></p>
+            <div id="lockoutNotice" class="hidden" style="color: #ff4d4d; margin-bottom: 10px;"></div>
+            
+            <div id="cardGrid" class="grid-container"></div>
+            
+            <div style="margin-top: 15px;">
+                <p>Selected Cards: <span id="selectedCount">0</span></p>
+                <button id="playGameBtn" class="btn-play" disabled onclick="launchGame()">Start Playing 🚀</button>
+            </div>
+        </div>
+
+        <!-- ACTIVE GAMEPLAY BOX -->
+        <div id="gamePlayBox" class="card hidden">
+            <h2>Bingo In Progress 🎯</h2>
+            <p>Match numbers as they are called!</p>
+            <button class="btn-play" onclick="claimBingo()" style="background: #00d26a;">BINGO! 🏆</button>
+        </div>
+    </div>
+
+    <!-- TAB 2: ACCOUNT SETTINGS -->
+    <div id="tabAccount" class="tab-content hidden">
+        <div class="card">
+            <h2>Account Settings ⚙️</h2>
+            <p>Set a password to log in on standard web browsers:</p>
+            <input type="password" id="webPasswordInput" placeholder="Enter new web password">
+            <button class="btn-play" onclick="setWebPassword()">Save Web Password 🔒</button>
+        </div>
+    </div>
+
+    <!-- BOTTOM NAVIGATION -->
+    <div id="bottomNav" class="bottom-nav hidden">
+        <div class="nav-item active" onclick="switchTab('tabGames', this)">🎮 Games</div>
+        <div class="nav-item" onclick="switchTab('tabAccount', this)">⚙️ Account</div>
+    </div>
+
+    <script src="app.js"></script>
 </body>
 </html>

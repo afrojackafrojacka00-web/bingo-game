@@ -3,37 +3,123 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KalBingo Admin Dashboard</title>
-    <link rel="stylesheet" href="style.css">
+    <title>Admin Dashboard - Broadcast Ads</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #121212; color: #fff; padding: 20px; margin: 0; }
+        .card { max-width: 500px; margin: 40px auto; background: #1e1e1e; padding: 24px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        h2 { margin-top: 0; color: #0088cc; }
+        label { font-size: 14px; color: #aaa; margin-top: 12px; display: block; }
+        input, textarea, button { width: 100%; padding: 12px; margin-top: 6px; border-radius: 8px; border: 1px solid #333; background: #2a2a2a; color: white; box-sizing: border-box; }
+        
+        .drop-zone {
+            border: 2px dashed #0088cc;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            color: #aaa;
+            margin-top: 8px;
+            cursor: pointer;
+            background: #252525;
+        }
+        .drop-zone.dragover { background: #333; border-color: #00d26a; }
+        
+        button { background: #0088cc; font-weight: bold; cursor: pointer; border: none; margin-top: 16px; font-size: 16px; }
+        button:hover { background: #0077b5; }
+        #status { margin-top: 15px; font-weight: bold; text-align: center; }
+    </style>
 </head>
 <body>
-    <div class="admin-container">
-        <h1>KalBingo Admin Portal</h1>
 
-        <!-- Broadcast Section -->
-        <div class="card">
-            <h2>📢 Dual Broadcast (Telegram + Web Popup)</h2>
-            <form id="broadcastForm">
-                <textarea id="broadcastMessage" placeholder="Message content..." required></textarea>
-                <input type="text" id="imageUrl" placeholder="Image URL (Optional)">
-                <input type="file" id="imageFile" accept="image/*">
-                <input type="password" id="adminSecret" placeholder="Admin Secret Key" required>
-                <button type="submit">Deploy Broadcast</button>
-            </form>
-        </div>
+    <div class="card">
+        <h2>📢 Send Telegram Broadcast</h2>
+        
+        <label for="secret">Admin Secret Key</label>
+        <input type="password" id="secret" placeholder="Enter ADMIN_SECRET env key">
 
-        <!-- Balance Management -->
-        <div class="card">
-            <h2>💰 Adjust User Balance</h2>
-            <form id="balanceForm">
-                <input type="text" id="targetUsername" placeholder="Target Username" required>
-                <input type="number" step="0.01" id="adjustAmount" placeholder="Amount (+/-)" required>
-                <input type="text" id="adjustReason" placeholder="Reason (e.g. Deposit)" required>
-                <input type="password" id="balanceAdminSecret" placeholder="Admin Secret Key" required>
-                <button type="submit">Update Balance</button>
-            </form>
+        <label for="message">Message (HTML Supported)</label>
+        <textarea id="message" rows="4" placeholder="<b>New Tournament!</b> Join now to win rewards..."></textarea>
+
+        <label>Upload Image (Choose File or Drag & Drop)</label>
+        <div id="dropZone" class="drop-zone">
+            <span>📁 Drag & Drop Image Here or Click to Select</span>
+            <input type="file" id="fileInput" accept="image/*" style="display: none;">
         </div>
+        <div id="fileInfo" style="color: #00d26a; margin-top: 6px; font-size: 14px;"></div>
+
+        <label for="imageUrl">OR Image URL (Optional)</label>
+        <input type="url" id="imageUrl" placeholder="https://example.com/banner.jpg">
+
+        <button onclick="sendAd()">Broadcast to All Users 🚀</button>
+        <div id="status"></div>
     </div>
-    <script src="/js/admin.js"></script>
+
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+        const fileInfo = document.getElementById('fileInfo');
+
+        dropZone.onclick = () => fileInput.click();
+
+        fileInput.onchange = () => {
+            if (fileInput.files.length > 0) {
+                fileInfo.innerText = `Selected: ${fileInput.files[0].name}`;
+            }
+        };
+
+        dropZone.ondragover = (e) => { e.preventDefault(); dropZone.classList.add('dragover'); };
+        dropZone.ondragleave = () => dropZone.classList.remove('dragover');
+        dropZone.ondrop = (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) {
+                fileInput.files = e.dataTransfer.files;
+                fileInfo.innerText = `Selected: ${fileInput.files[0].name}`;
+            }
+        };
+
+        async function sendAd() {
+            const adminSecret = document.getElementById('secret').value;
+            const message = document.getElementById('message').value;
+            const imageUrl = document.getElementById('imageUrl').value;
+            const status = document.getElementById('status');
+
+            if (!adminSecret) {
+                status.style.color = '#ff4d4d';
+                status.innerText = "Secret key is required.";
+                return;
+            }
+
+            status.style.color = '#0088cc';
+            status.innerText = "Sending broadcast...";
+
+            const formData = new FormData();
+            formData.append('adminSecret', adminSecret);
+            formData.append('message', message);
+            formData.append('imageUrl', imageUrl);
+            if (fileInput.files[0]) {
+                formData.append('imageFile', fileInput.files[0]);
+            }
+
+            try {
+                const res = await fetch('/api/admin/broadcast', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    status.style.color = '#00d26a';
+                    status.innerText = data.message;
+                } else {
+                    status.style.color = '#ff4d4d';
+                    status.innerText = data.message || "Failed to send broadcast.";
+                }
+            } catch (err) {
+                status.style.color = '#ff4d4d';
+                status.innerText = "Network error while sending broadcast.";
+            }
+        }
+    </script>
+
 </body>
 </html>
