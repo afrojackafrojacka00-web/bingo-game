@@ -42,12 +42,13 @@
 
 <!-- WEB NOTIFICATION MODAL -->
 <div id="notifModal" class="hidden" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 20px;">
-    <div class="card" style="max-width: 380px; width: 100%; text-align: center; position: relative;">
+    <div class="card" style="max-width: 400px; width: 100%; max-height: 80vh; overflow-y: auto; position: relative;">
         <span onclick="toggleNotificationModal()" style="position: absolute; right: 15px; top: 10px; cursor: pointer; font-size: 18px;">❌</span>
-        <img src="/images/welcome.jpg" alt="Welcome" style="width: 100%; border-radius: 8px; margin-bottom: 12px; max-height: 200px; object-fit: cover;">
-        <h3>🎉 Welcome Gift!</h3>
-        <p id="notifAmharicText" style="font-size: 14px; text-align: left; line-height: 1.6; background: #2a2a2a; padding: 12px; border-radius: 8px;"></p>
-        <button class="btn-play" onclick="toggleNotificationModal()">Close</button>
+        <h3 style="margin-top: 5px; color: #0088cc;">📢 Admin Announcements</h3>
+        
+        <div id="notifListContainer" style="margin-top: 15px;"></div>
+        
+        <button class="btn-play" onclick="toggleNotificationModal()" style="margin-top: 10px;">Close</button>
     </div>
 </div>
 

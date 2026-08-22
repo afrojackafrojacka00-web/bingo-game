@@ -305,45 +305,92 @@ async function registerUser() {
     }
 }
 
-// Fetch latest balance and load web welcome notification
+// Load User Data & Unread Notification Count
 async function loadUserData(username) {
     try {
         const res = await fetch(`/api/user-details?username=${encodeURIComponent(username)}`);
         const data = await res.json();
 
         if (data.success && data.user) {
-            const user = data.user;
-            
-            // Update balance in header
             const balanceElem = document.getElementById('balanceDisplay');
-            if (balanceElem) balanceElem.innerText = parseFloat(user.balance || 10).toFixed(2);
-
-            // Populate Web Notification Card
-            const phone = user.phone_number || "Not Registered";
-            const amharicMsg = `ለስለተመዘገብ እናመሰግናለን ${user.username}! 10 ብር ስጦታ አለዎት .\n\n` +
-                               `<b>የአካውንት ዝርዝሮች</b>\n` +
-                               `ስም: ${user.username}\n` +
-                               `ስልክ: ${phone}\n` +
-                               `ቀሪ ሒሳብ: ${user.balance || 10} Birr`;
-
-            const notifTextElem = document.getElementById('notifAmharicText');
-            if (notifTextElem) notifTextElem.innerHTML = amharicMsg.replace(/\n/g, '<br>');
+            if (balanceElem) balanceElem.innerText = parseFloat(data.user.balance || 10).toFixed(2);
         }
+
+        // Fetch notifications list and badge count
+        fetchNotifications(username);
     } catch (err) {
         console.error("Failed to fetch user details:", err);
     }
 }
 
-// Toggle Notification Modal Visibility
-function toggleNotificationModal() {
-    const modal = document.getElementById('notifModal');
-    if (modal) {
-        modal.classList.toggle('hidden');
-        // Hide red badge after opening notification
-        const badge = document.getElementById('notifBadge');
-        if (badge) badge.classList.add('hidden');
+// Fetch posts & update red badge count
+async function fetchNotifications(username) {
+    try {
+        const res = await fetch(`/api/notifications?username=${encodeURIComponent(username)}`);
+        const data = await res.json();
+
+        if (data.success) {
+            const badge = document.getElementById('notifBadge');
+            if (badge) {
+                if (data.unreadCount > 0) {
+                    badge.innerText = data.unreadCount;
+                    badge.classList.remove('hidden');
+                } else {
+                    badge.classList.add('hidden');
+                }
+            }
+            renderNotificationsList(data.notifications);
+        }
+    } catch (err) {
+        console.error("Failed to fetch notifications:", err);
     }
 }
+
+// Render notification list inside modal
+function renderNotificationsList(notifications) {
+    const container = document.getElementById('notifListContainer');
+    if (!container) return;
+
+    if (notifications.length === 0) {
+        container.innerHTML = `<p style="color: #888;">No announcements yet.</p>`;
+        return;
+    }
+
+    container.innerHTML = notifications.map(item => `
+        <div style="background: #2a2a2a; border-radius: 8px; padding: 12px; margin-bottom: 12px; text-align: left;">
+            ${item.image_url ? `<img src="${item.image_url}" style="width: 100%; max-height: 180px; object-fit: cover; border-radius: 6px; margin-bottom: 8px;">` : ''}
+            <div style="font-size: 14px; line-height: 1.5;">${item.message.replace(/\n/g, '<br>')}</div>
+            <div style="font-size: 10px; color: #888; margin-top: 6px;">${new Date(item.created_at).toLocaleString()}</div>
+        </div>
+    `).join('');
+}
+
+// Open/Close Modal & Mark as Read when opened
+async function toggleNotificationModal() {
+    const modal = document.getElementById('notifModal');
+    if (!modal) return;
+
+    const isHidden = modal.classList.contains('hidden');
+    if (isHidden) {
+        modal.classList.remove('hidden');
+        
+        // Hide badge immediately
+        const badge = document.getElementById('notifBadge');
+        if (badge) badge.classList.add('hidden');
+
+        // Send request to server to mark posts read for this user
+        if (currentUsername) {
+            await fetch('/api/notifications/mark-read', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username: currentUsername })
+            });
+        }
+    } else {
+        modal.classList.add('hidden');
+    }
+}
+
 
 // Update showHomeScreen to trigger user data load
 function showHomeScreen(username) {

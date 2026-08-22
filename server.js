@@ -81,6 +81,17 @@ const initDB = async () => {
                 username VARCHAR(50) NOT NULL,
                 cards_selected INT[] NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS notifications (
+                id SERIAL PRIMARY KEY,
+                message TEXT NOT NULL,
+                image_url TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS user_notification_reads (
+                user_id INT REFERENCES users(id) ON DELETE CASCADE PRIMARY KEY,
+                last_read_id INT DEFAULT 0
+            );
         `);
 
         // Migration columns for existing tables
@@ -446,15 +457,30 @@ app.post('/api/set-password', async (req, res) => {
     }
 });
 
-// 9. Broadcast Ads Endpoint (Supports Text, Photo URL, or Uploaded File)
+// 1. Updated Admin Broadcast (Saves to DB + sends to Telegram)
 app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) => {
     const { message, imageUrl, adminSecret } = req.body;
     
     if (adminSecret !== process.env.ADMIN_SECRET) {
-        return res.status(403).json({ success: false, message: "Unauthorized: Incorrect secret key." });
+        return res.status(403).json({ success: false, message: "Unauthorized key." });
     }
 
     try {
+        let finalImageUrl = imageUrl || null;
+
+        // Save image relative path if uploaded file exists
+        if (req.file) {
+            // Save file or keep external URL path logic as needed
+            finalImageUrl = imageUrl || null; 
+        }
+
+        // Save persistent post into database
+        await pool.query(
+            'INSERT INTO notifications (message, image_url) VALUES ($1, $2)',
+            [message, finalImageUrl]
+        );
+
+        // Telegram Broadcast Logic (Preserved)
         const users = await pool.query('SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL');
         const botToken = process.env.TELEGRAM_BOT_TOKEN;
 
@@ -465,11 +491,7 @@ app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) =>
                 formData.append('caption', message || '');
                 formData.append('parse_mode', 'HTML');
                 formData.append('photo', new Blob([req.file.buffer], { type: req.file.mimetype }), req.file.originalname);
-
-                await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-                    method: 'POST',
-                    body: formData
-                }).catch(() => {});
+                await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, { method: 'POST', body: formData }).catch(() => {});
             } else if (imageUrl) {
                 await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
                     method: 'POST',
@@ -484,11 +506,63 @@ app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) =>
                 }).catch(() => {});
             }
         }
-        res.json({ success: true, message: "Broadcast sent successfully!" });
+
+        res.json({ success: true, message: "Broadcast posted to web and sent to Telegram!" });
     } catch (err) {
+        console.error(err);
         res.status(500).json({ success: false, message: "Server error during broadcast." });
     }
 });
+
+// 2. Get Notifications & Unread Count for User
+app.get('/api/notifications', async (req, res) => {
+    const { username } = req.query;
+    try {
+        const userRes = await pool.query('SELECT id FROM users WHERE LOWER(username) = LOWER($1)', [username]);
+        if (userRes.rows.length === 0) return res.status(404).json({ success: false });
+
+        const userId = userRes.rows[0].id;
+
+        // Fetch user read state
+        const readRes = await pool.query('SELECT last_read_id FROM user_notification_reads WHERE user_id = $1', [userId]);
+        const lastReadId = readRes.rows[0]?.last_read_id || 0;
+
+        // Fetch all notifications ordered newest first
+        const notifs = await pool.query('SELECT * FROM notifications ORDER BY id DESC LIMIT 20');
+
+        // Calculate unread count
+        const unreadCount = notifs.rows.filter(n => n.id > lastReadId).length;
+
+        res.json({ success: true, notifications: notifs.rows, unreadCount });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Server error." });
+    }
+});
+
+// 3. Mark Notifications as Read
+app.post('/api/notifications/mark-read', async (req, res) => {
+    const { username } = req.body;
+    try {
+        const userRes = await pool.query('SELECT id FROM users WHERE LOWER(username) = LOWER($1)', [username]);
+        if (userRes.rows.length === 0) return res.status(404).json({ success: false });
+
+        const userId = userRes.rows[0].id;
+        const maxNotif = await pool.query('SELECT MAX(id) as max_id FROM notifications');
+        const latestId = maxNotif.rows[0].max_id || 0;
+
+        await pool.query(
+            `INSERT INTO user_notification_reads (user_id, last_read_id) 
+             VALUES ($1, $2) 
+             ON CONFLICT (user_id) DO UPDATE SET last_read_id = $2`,
+            [userId, latestId]
+        );
+
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Server error." });
+    }
+});
+
 
 // -------------------- SERVER-SIDE 40-SECOND TIMER LOOP --------------------
 setInterval(async () => {
