@@ -141,6 +141,7 @@ function claimBingo() {
 }
 
 // -------------------- APP INITIALIZATION & AUTH --------------------
+// Check Phone Status during Telegram Auto-Login
 window.addEventListener('DOMContentLoaded', async () => {
     const tg = window.Telegram?.WebApp;
     const initData = tg?.initData;
@@ -158,7 +159,15 @@ window.addEventListener('DOMContentLoaded', async () => {
             const data = await res.json();
 
             if (data.success && data.status === 'LOGGED_IN') {
-                showHomeScreen(data.username);
+                currentUsername = data.username;
+                localStorage.setItem('bingoUser', data.username);
+
+                if (!data.hasPhone) {
+                    // Force phone number entry before revealing game
+                    document.getElementById('phoneModal').classList.remove('hidden');
+                } else {
+                    showHomeScreen(data.username);
+                }
             } else {
                 showAuthBox();
             }
@@ -172,6 +181,32 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 });
 
+// Submit and Save Phone Number
+async function submitTelegramPhone() {
+    const phoneNumber = document.getElementById('telegramPhoneInput').value.trim();
+
+    if (!phoneNumber) {
+        return alert("Phone number is required to play.");
+    }
+
+    try {
+        const res = await fetch('/api/save-phone', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: currentUsername, phoneNumber })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            document.getElementById('phoneModal').classList.add('hidden');
+            showHomeScreen(currentUsername);
+        } else {
+            alert(data.message || "Failed to save phone number.");
+        }
+    } catch (err) {
+        alert("Network error. Please try again.");
+    }
+}
 function switchToRegister() {
     document.getElementById('loginForm').classList.add('hidden');
     document.getElementById('registerForm').classList.remove('hidden');

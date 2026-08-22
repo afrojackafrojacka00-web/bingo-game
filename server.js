@@ -165,6 +165,7 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
+// 1. Updated Telegram Auth (Checks for existing phone number)
 app.post('/api/telegram-auth', async (req, res) => {
     const { initData } = req.body;
     const { isValid, user } = verifyTelegramAuth(initData, process.env.TELEGRAM_BOT_TOKEN);
@@ -174,29 +175,21 @@ app.post('/api/telegram-auth', async (req, res) => {
     }
 
     try {
-        // 1. Check if Telegram account already exists
+        await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT;');
+
         let result = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [user.id]);
 
         if (result.rows.length > 0) {
-            const existingUser = result.rows[0];
-            
-            // Check if user changed their Telegram name
-            let newName = user.username || user.first_name || existingUser.username;
-            newName = newName.replace(/[^a-zA-Z0-9_]/g, '');
-
-            // Update username in database if it changed and isn't taken
-            if (newName && newName !== existingUser.username) {
-                const nameCheck = await pool.query('SELECT id FROM users WHERE username = $1', [newName]);
-                if (nameCheck.rows.length === 0) {
-                    await pool.query('UPDATE users SET username = $1 WHERE id = $2', [newName, existingUser.id]);
-                    return res.json({ success: true, status: 'LOGGED_IN', username: newName });
-                }
-            }
-
-            return res.json({ success: true, status: 'LOGGED_IN', username: existingUser.username });
+            const dbUser = result.rows[0];
+            return res.json({ 
+                success: true, 
+                status: 'LOGGED_IN', 
+                username: dbUser.username,
+                hasPhone: !!dbUser.phone_number 
+            });
         }
 
-        // 2. Auto-register new user
+        // Auto-register new Telegram user
         let baseUsername = user.username || user.first_name || `tg_${user.id}`;
         baseUsername = baseUsername.replace(/[^a-zA-Z0-9_]/g, '') || `tg_${user.id}`;
 
@@ -214,9 +207,35 @@ app.post('/api/telegram-auth', async (req, res) => {
             [finalUsername, hashedPassword, user.id]
         );
 
-        res.json({ success: true, status: 'LOGGED_IN', username: finalUsername });
+        res.json({ 
+            success: true, 
+            status: 'LOGGED_IN', 
+            username: finalUsername,
+            hasPhone: false 
+        });
     } catch (err) {
+        console.error("Telegram Auth Error:", err);
         res.status(500).json({ success: false, message: "Server error." });
+    }
+});
+
+// 2. Save Phone Number Endpoint
+app.post('/api/save-phone', async (req, res) => {
+    const { username, phoneNumber } = req.body;
+
+    if (!username || !phoneNumber) {
+        return res.status(400).json({ success: false, message: "Username and phone number required." });
+    }
+
+    try {
+        await pool.query(
+            'UPDATE users SET phone_number = $1 WHERE LOWER(username) = LOWER($2)',
+            [phoneNumber, username]
+        );
+        res.json({ success: true, message: "Phone number registered successfully!" });
+    } catch (err) {
+        console.error("Save phone error:", err);
+        res.status(500).json({ success: false, message: "Failed to save phone number." });
     }
 });
 
