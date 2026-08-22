@@ -232,32 +232,7 @@ async function saveVerifiedTelegramPhone(phoneNumber) {
     }
 }
 
-// Submit and Save Phone Number
-async function submitTelegramPhone() {
-    const phoneNumber = document.getElementById('telegramPhoneInput').value.trim();
 
-    if (!phoneNumber) {
-        return alert("Phone number is required to play.");
-    }
-
-    try {
-        const res = await fetch('/api/save-phone', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: currentUsername, phoneNumber })
-        });
-        const data = await res.json();
-
-        if (data.success) {
-            document.getElementById('phoneModal').classList.add('hidden');
-            showHomeScreen(currentUsername);
-        } else {
-            alert(data.message || "Failed to save phone number.");
-        }
-    } catch (err) {
-        alert("Network error. Please try again.");
-    }
-}
 function switchToRegister() {
     document.getElementById('loginForm').classList.add('hidden');
     document.getElementById('registerForm').classList.remove('hidden');

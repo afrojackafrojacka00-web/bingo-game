@@ -262,25 +262,6 @@ app.post('/api/save-telegram-phone', async (req, res) => {
     }
 });
 
-// 2. Save Phone Number Endpoint
-app.post('/api/save-phone', async (req, res) => {
-    const { username, phoneNumber } = req.body;
-
-    if (!username || !phoneNumber) {
-        return res.status(400).json({ success: false, message: "Username and phone number required." });
-    }
-
-    try {
-        await pool.query(
-            'UPDATE users SET phone_number = $1 WHERE LOWER(username) = LOWER($2)',
-            [phoneNumber, username]
-        );
-        res.json({ success: true, message: "Phone number registered successfully!" });
-    } catch (err) {
-        console.error("Save phone error:", err);
-        res.status(500).json({ success: false, message: "Failed to save phone number." });
-    }
-});
 
 app.post('/api/user/phone', async (req, res) => {
     const { username, phoneNumber } = req.body;
