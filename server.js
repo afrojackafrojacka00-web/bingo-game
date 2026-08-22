@@ -7,12 +7,34 @@ const path = require('path');
 const http = require('http');
 const { Server } = require('socket.io');
 const multer = require('multer');
-const upload = multer();
+// const upload = multer();
+
+
+const fs = require('fs');
+
+// Ensure public/uploads directory exists
+const uploadDir = path.join(__dirname, 'public', 'uploads');
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+// Store uploaded image files statically
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadDir),
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, uniqueSuffix + path.extname(file.originalname));
+    }
+});
+const upload = multer({ storage });
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 const PORT = process.env.PORT || 3000;
+
+
+
 
 app.use(cors());
 app.use(express.json());
@@ -27,6 +49,16 @@ const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
+
+
+
+
+
+
+
+
+
+
 
 // -------------------- IN-MEMORY GAME STATE --------------------
 const gameState = {
@@ -127,6 +159,26 @@ const initDB = async () => {
     }
 };
 initDB();
+
+
+
+
+// Ensure public/uploads directory exists
+const uploadDir = path.join(__dirname, 'public', 'uploads');
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+// Store uploaded image files statically
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadDir),
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, uniqueSuffix + path.extname(file.originalname));
+    }
+});
+const upload = multer({ storage });
+
 
 // Helper: Verify Telegram Auth Data
 function verifyTelegramAuth(initData, botToken) {
@@ -458,6 +510,7 @@ app.post('/api/set-password', async (req, res) => {
 });
 
 // 1. Updated Admin Broadcast (Saves to DB + sends to Telegram)
+// 1. Broadcast Endpoint (Saves image to /uploads/ and DB)
 app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) => {
     const { message, imageUrl, adminSecret } = req.body;
     
@@ -468,35 +521,32 @@ app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) =>
     try {
         let finalImageUrl = imageUrl || null;
 
-        // Save image relative path if uploaded file exists
+        // If a file was uploaded, construct a web-accessible static path
         if (req.file) {
-            // Save file or keep external URL path logic as needed
-            finalImageUrl = imageUrl || null; 
+            finalImageUrl = `/uploads/${req.file.filename}`;
         }
 
-        // Save persistent post into database
-        await pool.query(
-            'INSERT INTO notifications (message, image_url) VALUES ($1, $2)',
+        // Save persistent post in Database
+        const postRes = await pool.query(
+            'INSERT INTO notifications (message, image_url) VALUES ($1, $2) RETURNING id',
             [message, finalImageUrl]
         );
 
-        // Telegram Broadcast Logic (Preserved)
+        // Telegram Broadcast
         const users = await pool.query('SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL');
         const botToken = process.env.TELEGRAM_BOT_TOKEN;
+        const baseUrl = process.env.APP_URL || (process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : '');
+
+        const telegramPhotoUrl = (finalImageUrl && finalImageUrl.startsWith('/uploads/')) 
+            ? `${baseUrl}${finalImageUrl}` 
+            : finalImageUrl;
 
         for (const user of users.rows) {
-            if (req.file) {
-                const formData = new FormData();
-                formData.append('chat_id', user.telegram_id);
-                formData.append('caption', message || '');
-                formData.append('parse_mode', 'HTML');
-                formData.append('photo', new Blob([req.file.buffer], { type: req.file.mimetype }), req.file.originalname);
-                await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, { method: 'POST', body: formData }).catch(() => {});
-            } else if (imageUrl) {
+            if (telegramPhotoUrl) {
                 await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chat_id: user.telegram_id, photo: imageUrl, caption: message, parse_mode: 'HTML' })
+                    body: JSON.stringify({ chat_id: user.telegram_id, photo: telegramPhotoUrl, caption: message, parse_mode: 'HTML' })
                 }).catch(() => {});
             } else {
                 await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -507,10 +557,62 @@ app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) =>
             }
         }
 
-        res.json({ success: true, message: "Broadcast posted to web and sent to Telegram!" });
+        res.json({ success: true, message: "Broadcast published successfully!" });
     } catch (err) {
-        console.error(err);
+        console.error("Broadcast error:", err);
         res.status(500).json({ success: false, message: "Server error during broadcast." });
+    }
+});
+
+// 2. Fetch All Admin Notifications for Management
+app.get('/api/admin/notifications', async (req, res) => {
+    const adminSecret = req.headers['x-admin-secret'];
+    if (adminSecret !== process.env.ADMIN_SECRET) {
+        return res.status(403).json({ success: false, message: "Unauthorized." });
+    }
+
+    try {
+        const result = await pool.query('SELECT * FROM notifications ORDER BY id DESC');
+        res.json({ success: true, notifications: result.rows });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Failed to load posts." });
+    }
+});
+
+// 3. Edit Notification
+app.put('/api/admin/notifications/:id', async (req, res) => {
+    const { id } = req.params;
+    const { message, imageUrl, adminSecret } = req.body;
+
+    if (adminSecret !== process.env.ADMIN_SECRET) {
+        return res.status(403).json({ success: false, message: "Unauthorized." });
+    }
+
+    try {
+        await pool.query(
+            'UPDATE notifications SET message = $1, image_url = $2 WHERE id = $3',
+            [message, imageUrl || null, id]
+        );
+        res.json({ success: true, message: "Post updated successfully!" });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Failed to update post." });
+    }
+});
+
+// 4. Delete Notification
+app.delete('/api/admin/notifications/:id', async (req, res) => {
+    const { id } = req.params;
+    const adminSecret = req.headers['x-admin-secret'];
+
+    if (adminSecret !== process.env.ADMIN_SECRET) {
+        return res.status(403).json({ success: false, message: "Unauthorized." });
+    }
+
+    try {
+        await pool.query('DELETE FROM notifications WHERE id = $1', [id]);
+        res.json({ success: true, message: "Post deleted successfully!" });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Failed to delete post." });
     }
 });
 

@@ -323,7 +323,6 @@ async function loadUserData(username) {
     }
 }
 
-// Fetch posts & update red badge count
 async function fetchNotifications(username) {
     try {
         const res = await fetch(`/api/notifications?username=${encodeURIComponent(username)}`);
@@ -342,25 +341,24 @@ async function fetchNotifications(username) {
             renderNotificationsList(data.notifications);
         }
     } catch (err) {
-        console.error("Failed to fetch notifications:", err);
+        console.error("Failed to load announcements:", err);
     }
 }
 
-// Render notification list inside modal
 function renderNotificationsList(notifications) {
     const container = document.getElementById('notifListContainer');
     if (!container) return;
 
     if (notifications.length === 0) {
-        container.innerHTML = `<p style="color: #888;">No announcements yet.</p>`;
+        container.innerHTML = `<p style="color: #888; padding: 20px 0;">No announcements available.</p>`;
         return;
     }
 
-    container.innerHTML = notifications.map(item => `
-        <div style="background: #2a2a2a; border-radius: 8px; padding: 12px; margin-bottom: 12px; text-align: left;">
-            ${item.image_url ? `<img src="${item.image_url}" style="width: 100%; max-height: 180px; object-fit: cover; border-radius: 6px; margin-bottom: 8px;">` : ''}
-            <div style="font-size: 14px; line-height: 1.5;">${item.message.replace(/\n/g, '<br>')}</div>
-            <div style="font-size: 10px; color: #888; margin-top: 6px;">${new Date(item.created_at).toLocaleString()}</div>
+    container.innerHTML = notifications.map(post => `
+        <div class="notif-card">
+            ${post.image_url ? `<img src="${post.image_url}" alt="Post Banner" onerror="this.style.display='none'">` : ''}
+            <div class="notif-body">${post.message.replace(/\n/g, '<br>')}</div>
+            <div class="notif-date">📅 ${new Date(post.created_at).toLocaleString()}</div>
         </div>
     `).join('');
 }
