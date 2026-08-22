@@ -621,27 +621,38 @@ app.delete('/api/admin/notifications/:id', async (req, res) => {
     }
 });
 
-// 2. Get Notifications & Unread Count for User
 app.get('/api/notifications', async (req, res) => {
     const { username } = req.query;
     try {
-        const userRes = await pool.query('SELECT id FROM users WHERE LOWER(username) = LOWER($1)', [username]);
-        if (userRes.rows.length === 0) return res.status(404).json({ success: false });
+        // 1. Get user ID and account creation timestamp
+        const userRes = await pool.query(
+            'SELECT id, created_at FROM users WHERE LOWER(username) = LOWER($1)', 
+            [username]
+        );
+        if (userRes.rows.length === 0) return res.status(404).json({ success: false, message: "User not found." });
 
         const userId = userRes.rows[0].id;
+        const userCreatedAt = userRes.rows[0].created_at;
 
-        // Fetch user read state
-        const readRes = await pool.query('SELECT last_read_id FROM user_notification_reads WHERE user_id = $1', [userId]);
+        // 2. Fetch last notification ID read by this user
+        const readRes = await pool.query(
+            'SELECT last_read_id FROM user_notification_reads WHERE user_id = $1', 
+            [userId]
+        );
         const lastReadId = readRes.rows[0]?.last_read_id || 0;
 
-        // Fetch all notifications ordered newest first
-        const notifs = await pool.query('SELECT * FROM notifications ORDER BY id DESC LIMIT 20');
+        // 3. Fetch ONLY notifications created after the user joined
+        const notifs = await pool.query(
+            'SELECT * FROM notifications WHERE created_at >= $1 ORDER BY id DESC LIMIT 20',
+            [userCreatedAt]
+        );
 
-        // Calculate unread count
+        // 4. Calculate unread count for relevant posts only
         const unreadCount = notifs.rows.filter(n => n.id > lastReadId).length;
 
         res.json({ success: true, notifications: notifs.rows, unreadCount });
     } catch (err) {
+        console.error("Error fetching user notifications:", err);
         res.status(500).json({ success: false, message: "Server error." });
     }
 });
