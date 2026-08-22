@@ -31,29 +31,18 @@ async function sendTelegramWelcomeMessage(telegramId, username, phoneNumber) {
     const botToken = process.env.TELEGRAM_BOT_TOKEN;
     if (!botToken || !telegramId) return;
 
-    const baseUrl = process.env.APP_URL || (process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : '');
-    const imageUrl = baseUrl ? `${baseUrl}/images/welcome.jpg` : '';
-
-    const captionText = `ለስለተመዘገብ እናመሰግናለን ${username}! 10 ብር ስጦታ አለዎት .\n\n` +
-                        `የአካውንት ዝርዝሮች\n` +
+    const captionText = `ለስለተመዘገቡ እናመሰግናለን ${username}! 10 ብር ስጦታ አለዎት።\n\n` +
+                        `የአካውንት ዝርዝሮች:\n` +
                         `ስም: ${username}\n` +
                         `ስልክ: ${phoneNumber}\n` +
-                        `ቀሪ ሒሳብ: 10`;
+                        `ቀሪ ሒሳብ: 10 ETB`;
 
     try {
-        if (imageUrl) {
-            await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chat_id: telegramId, photo: imageUrl, caption: captionText })
-            });
-        } else {
-            await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ chat_id: telegramId, text: captionText })
-            });
-        }
+        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: telegramId, text: captionText })
+        });
     } catch (err) {
         console.error("Failed to send Telegram welcome message:", err);
     }
@@ -61,7 +50,7 @@ async function sendTelegramWelcomeMessage(telegramId, username, phoneNumber) {
 
 router.post('/register', async (req, res) => {
     const { username, password, phoneNumber, initData } = req.body;
-    if (!username || !password) return res.status(400).json({ success: false, message: "Missing fields." });
+    if (!username || !password) return res.status(400).json({ success: false, message: "Missing required fields." });
 
     const client = await pool.connect();
     try {
@@ -74,8 +63,8 @@ router.post('/register', async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(password, 10);
         const userRes = await client.query(
-            'INSERT INTO users (username, password, telegram_id, phone_number, balance) VALUES ($1, $2, $3, $4, 10.00) RETURNING id, username',
-            [username, hashedPassword, telegramId, phoneNumber || null]
+            'INSERT INTO users (username, password, telegram_id, phone_number, balance, phone_verified) VALUES ($1, $2, $3, $4, 10.00, $5) RETURNING id, username',
+            [username, hashedPassword, telegramId, phoneNumber || null, !!phoneNumber]
         );
 
         await client.query(
@@ -112,7 +101,7 @@ router.post('/telegram-auth', async (req, res) => {
     const { initData } = req.body;
     const { isValid, user } = verifyTelegramAuth(initData, process.env.TELEGRAM_BOT_TOKEN);
     
-    if (!isValid || !user?.id) return res.status(401).json({ success: false, message: "Invalid Telegram auth." });
+    if (!isValid || !user?.id) return res.status(401).json({ success: false, message: "Invalid Telegram authentication." });
 
     const client = await pool.connect();
     try {
@@ -157,7 +146,7 @@ router.post('/telegram-auth', async (req, res) => {
         res.json({ success: true, status: 'LOGGED_IN', username: finalUsername, phoneVerified: false });
     } catch (err) {
         await client.query('ROLLBACK');
-        res.status(500).json({ success: false, message: "Server error." });
+        res.status(500).json({ success: false, message: "Server authentication error." });
     } finally {
         client.release();
     }
@@ -178,18 +167,8 @@ router.post('/save-telegram-phone', async (req, res) => {
             return res.status(404).json({ success: false, message: "User not found." });
         }
 
-        const isAlreadyVerified = checkUser.rows[0].phone_verified;
         const username = checkUser.rows[0].username;
-        const userId = checkUser.rows[0].id;
-
         await client.query('UPDATE users SET phone_number = $1, phone_verified = TRUE WHERE telegram_id = $2', [phoneNumber, user.id]);
-
-        if (!isAlreadyVerified) {
-            const hasBonus = await client.query("SELECT id FROM transactions WHERE user_id = $1 AND type = 'WELCOME_BONUS'", [userId]);
-            if (hasBonus.rows.length === 0) {
-                await client.query('INSERT INTO transactions (user_id, amount, type) VALUES ($1, $2, $3)', [userId, 10.00, 'WELCOME_BONUS']);
-            }
-        }
 
         await client.query('COMMIT');
         sendTelegramWelcomeMessage(user.id, username, phoneNumber);
@@ -199,24 +178,6 @@ router.post('/save-telegram-phone', async (req, res) => {
         res.status(500).json({ success: false, message: "Failed to save phone." });
     } finally {
         client.release();
-    }
-});
-
-router.post('/set-password', async (req, res) => {
-    const { username, newPassword } = req.body;
-    if (!username || !newPassword) return res.status(400).json({ success: false, message: "Missing required fields." });
-
-    try {
-        const hashedPassword = await bcrypt.hash(newPassword, 10);
-        const result = await pool.query(
-            'UPDATE users SET password = $1 WHERE LOWER(username) = LOWER($2) RETURNING id',
-            [hashedPassword, username]
-        );
-        if (result.rowCount === 0) return res.status(404).json({ success: false, message: "User not found." });
-
-        res.json({ success: true, message: "Password updated successfully!" });
-    } catch (err) {
-        res.status(500).json({ success: false, message: "Database Error." });
     }
 });
 

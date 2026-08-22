@@ -5,25 +5,45 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>KalBingo - Play & Win</title>
     <link rel="stylesheet" href="style.css">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
     <div id="app">
         <header>
             <h1>KalBingo</h1>
-            <div id="userInfo">Balance: <span id="userBalance">0.00</span> ETB</div>
+            <div id="userInfo">
+                <span id="displayUsername">Guest</span> | Balance: <span id="userBalance">0.00</span> ETB
+            </div>
         </header>
 
         <main>
+            <!-- LOBBY SCREEN -->
             <div id="gameLobby">
                 <h2>Lobby Countdown: <span id="timer">40</span>s</h2>
-                <div id="cardGrid"></div>
-                <button id="readyBtn">I'm Ready</button>
+                <p>Ready Players: <span id="readyCount">0</span></p>
+                <p>Select your card number (10 ETB/card):</p>
+                
+                <div id="cardNumbersGrid" class="cards-grid"></div>
+                
+                <button id="readyBtn" class="primary-btn">I'm Ready</button>
+            </div>
+
+            <!-- ACTIVE GAMEPLAY SCREEN -->
+            <div id="gamePlayArea" class="hidden">
+                <div class="caller-box">
+                    <h2>Current Number: <span id="currentNumber">--</span></h2>
+                    <div id="numberHistory" class="history-pills"></div>
+                </div>
+
+                <div id="activeCardsContainer"></div>
+
+                <button id="claimBingoBtn" class="bingo-btn">BINGO!</button>
             </div>
         </main>
     </div>
 
-    <!-- Announcement Modal Popup -->
+    <!-- Announcement Modal -->
     <div id="announcementModal" class="modal hidden">
         <div class="modal-content">
             <span class="close-btn" id="closeModal">&times;</span>

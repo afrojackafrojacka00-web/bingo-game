@@ -45,6 +45,7 @@ const initDB = async () => {
                 id SERIAL PRIMARY KEY,
                 status VARCHAR(20) NOT NULL,
                 winner_username VARCHAR(50),
+                called_numbers INT[],
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 ended_at TIMESTAMP
             );
@@ -57,13 +58,15 @@ const initDB = async () => {
             );
         `);
 
+        // Ensure columns exist on legacy databases
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC(10,2) DEFAULT 10.00;');
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT;');
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE;');
 
+        // Seed standard B-I-N-G-O 5x5 grids
         const countRes = await pool.query('SELECT COUNT(*) FROM bingo_cards');
         if (parseInt(countRes.rows[0].count, 10) < 500) {
-            console.log("Seeding 500 Bingo cards into database...");
+            console.log("Seeding 500 standard Bingo cards into database...");
             for (let i = 1; i <= 500; i++) {
                 const grid = Array.from({ length: 5 }, () => Array(5).fill(0));
                 for (let col = 0; col < 5; col++) {
@@ -82,7 +85,7 @@ const initDB = async () => {
                 );
             }
         }
-        console.log("Database initialized cleanly.");
+        console.log("Database initialized successfully.");
     } catch (err) {
         console.error("Database initialization error:", err);
     }

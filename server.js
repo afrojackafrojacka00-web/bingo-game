@@ -15,7 +15,7 @@ app.use(express.json());
 
 initDB();
 
-// Subdomain Middleware Routing
+// Host Subdomain Guard
 app.use((req, res, next) => {
     const host = req.headers.host || '';
     if (host.startsWith('admin.')) {
@@ -32,12 +32,12 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Modular API Routes
+// Modular Routes
 app.use('/api', require('./routes/auth.routes'));
 app.use('/api', require('./routes/game.routes'));
 app.use('/api/admin', require('./routes/admin.routes')(io));
 
-// Modular WebSockets
+// Modular Sockets
 require('./sockets/notificationSocket').initNotificationSocket(io);
 require('./sockets/gameSocket')(io, pool);
 

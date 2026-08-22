@@ -6,8 +6,8 @@ async function notifyBalanceChange(pool, io, userId, username, changeAmount, new
         );
 
         io.to(`user_${username.toLowerCase()}`).emit('balance_updated', {
-            amount: changeAmount,
-            newBalance: newBalance,
+            amount: parseFloat(changeAmount),
+            newBalance: parseFloat(newBalance),
             reason: reasonType,
             timestamp: new Date()
         });
@@ -18,9 +18,9 @@ async function notifyBalanceChange(pool, io, userId, username, changeAmount, new
 
         if (telegramId && botToken) {
             const text = `💰 **ሒሳብ ተቀይሯል / Balance Update**\n\n` +
-                         `ተግባር: ${reasonType}\n` +
+                         `ምክንያት: ${reasonType}\n` +
                          `መጠን: ${changeAmount > 0 ? '+' : ''}${changeAmount} ETB\n` +
-                         `አሁን ያለዎት ቀሪ ሒሳብ: ${newBalance} ETB`;
+                         `አሁን ያለዎት ቀሪ ሒሳብ: ${parseFloat(newBalance).toFixed(2)} ETB`;
 
             fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
                 method: 'POST',
