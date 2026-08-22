@@ -27,10 +27,29 @@
 <body>
 
     <!-- HEADER BAR -->
-    <div id="headerBar" class="header-bar hidden">
-        <div>👤 <span id="playerDisplay"></span></div>
+    <!-- HEADER BAR WITH NOTIFICATION BELL & BALANCE -->
+<div id="headerBar" class="header-bar hidden">
+    <div>
+        👤 <span id="playerDisplay"></span> | 💰 <span id="balanceDisplay">10.00</span> Birr
+    </div>
+    <div style="display: flex; gap: 10px; align-items: center;">
+        <button id="notifBell" onclick="toggleNotificationModal()" style="position: relative; background: none; border: none; font-size: 20px; cursor: pointer; padding: 0; width: auto;">
+            🔔<span id="notifBadge" style="position: absolute; top: -5px; right: -5px; background: #ff4d4d; color: white; font-size: 10px; padding: 2px 6px; border-radius: 50%;">1</span>
+        </button>
         <button id="logoutBtn" class="btn-logout" onclick="logoutUser()">Logout</button>
     </div>
+</div>
+
+<!-- WEB NOTIFICATION MODAL -->
+<div id="notifModal" class="hidden" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 20px;">
+    <div class="card" style="max-width: 380px; width: 100%; text-align: center; position: relative;">
+        <span onclick="toggleNotificationModal()" style="position: absolute; right: 15px; top: 10px; cursor: pointer; font-size: 18px;">❌</span>
+        <img src="/images/welcome.jpg" alt="Welcome" style="width: 100%; border-radius: 8px; margin-bottom: 12px; max-height: 200px; object-fit: cover;">
+        <h3>🎉 Welcome Gift!</h3>
+        <p id="notifAmharicText" style="font-size: 14px; text-align: left; line-height: 1.6; background: #2a2a2a; padding: 12px; border-radius: 8px;"></p>
+        <button class="btn-play" onclick="toggleNotificationModal()">Close</button>
+    </div>
+</div>
 
 
 

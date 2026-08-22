@@ -305,6 +305,47 @@ async function registerUser() {
     }
 }
 
+// Fetch latest balance and load web welcome notification
+async function loadUserData(username) {
+    try {
+        const res = await fetch(`/api/user-details?username=${encodeURIComponent(username)}`);
+        const data = await res.json();
+
+        if (data.success && data.user) {
+            const user = data.user;
+            
+            // Update balance in header
+            const balanceElem = document.getElementById('balanceDisplay');
+            if (balanceElem) balanceElem.innerText = parseFloat(user.balance || 10).toFixed(2);
+
+            // Populate Web Notification Card
+            const phone = user.phone_number || "Not Registered";
+            const amharicMsg = `ለስለተመዘገብ እናመሰግናለን ${user.username}! 10 ብር ስጦታ አለዎት .\n\n` +
+                               `<b>የአካውንት ዝርዝሮች</b>\n` +
+                               `ስም: ${user.username}\n` +
+                               `ስልክ: ${phone}\n` +
+                               `ቀሪ ሒሳብ: ${user.balance || 10} Birr`;
+
+            const notifTextElem = document.getElementById('notifAmharicText');
+            if (notifTextElem) notifTextElem.innerHTML = amharicMsg.replace(/\n/g, '<br>');
+        }
+    } catch (err) {
+        console.error("Failed to fetch user details:", err);
+    }
+}
+
+// Toggle Notification Modal Visibility
+function toggleNotificationModal() {
+    const modal = document.getElementById('notifModal');
+    if (modal) {
+        modal.classList.toggle('hidden');
+        // Hide red badge after opening notification
+        const badge = document.getElementById('notifBadge');
+        if (badge) badge.classList.add('hidden');
+    }
+}
+
+// Update showHomeScreen to trigger user data load
 function showHomeScreen(username) {
     currentUsername = username;
     localStorage.setItem('bingoUser', username);
@@ -317,6 +358,9 @@ function showHomeScreen(username) {
     switchTab('tabGames', document.querySelectorAll('.nav-item')[0]);
     document.getElementById('homeBox').classList.remove('hidden');
     document.getElementById('selectionBox').classList.add('hidden');
+
+    // Load balance and notification payload
+    loadUserData(username);
 }
 
 window.logoutUser = function() {
