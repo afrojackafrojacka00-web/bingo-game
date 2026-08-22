@@ -12,13 +12,13 @@ const multer = require('multer');
 
 const fs = require('fs');
 
-// Ensure public/uploads directory exists
+// Ensure public/uploads folder exists
 const uploadDir = path.join(__dirname, 'public', 'uploads');
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Store uploaded image files statically
+// Save uploaded files to server disk
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, uploadDir),
     filename: (req, file, cb) => {
@@ -34,7 +34,8 @@ const io = new Server(server, { cors: { origin: "*" } });
 const PORT = process.env.PORT || 3000;
 
 
-
+// Serve static uploaded images
+app.use('/uploads', express.static(uploadDir));
 
 app.use(cors());
 app.use(express.json());
@@ -510,7 +511,7 @@ app.post('/api/set-password', async (req, res) => {
 });
 
 // 1. Updated Admin Broadcast (Saves to DB + sends to Telegram)
-// 1. Broadcast Endpoint (Saves image to /uploads/ and DB)
+// 1. Broadcast Post (Saves to Disk, DB & Sends to Telegram)
 app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) => {
     const { message, imageUrl, adminSecret } = req.body;
     
@@ -521,32 +522,28 @@ app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) =>
     try {
         let finalImageUrl = imageUrl || null;
 
-        // If a file was uploaded, construct a web-accessible static path
         if (req.file) {
             finalImageUrl = `/uploads/${req.file.filename}`;
         }
 
-        // Save persistent post in Database
-        const postRes = await pool.query(
-            'INSERT INTO notifications (message, image_url) VALUES ($1, $2) RETURNING id',
+        // Save persistent post in PostgreSQL
+        await pool.query(
+            'INSERT INTO notifications (message, image_url) VALUES ($1, $2)',
             [message, finalImageUrl]
         );
 
-        // Telegram Broadcast
+        // Telegram Send Logic
         const users = await pool.query('SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL');
         const botToken = process.env.TELEGRAM_BOT_TOKEN;
         const baseUrl = process.env.APP_URL || (process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : '');
-
-        const telegramPhotoUrl = (finalImageUrl && finalImageUrl.startsWith('/uploads/')) 
-            ? `${baseUrl}${finalImageUrl}` 
-            : finalImageUrl;
+        const fullPhotoUrl = (finalImageUrl && finalImageUrl.startsWith('/uploads/')) ? `${baseUrl}${finalImageUrl}` : finalImageUrl;
 
         for (const user of users.rows) {
-            if (telegramPhotoUrl) {
+            if (fullPhotoUrl) {
                 await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chat_id: user.telegram_id, photo: telegramPhotoUrl, caption: message, parse_mode: 'HTML' })
+                    body: JSON.stringify({ chat_id: user.telegram_id, photo: fullPhotoUrl, caption: message, parse_mode: 'HTML' })
                 }).catch(() => {});
             } else {
                 await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -557,14 +554,14 @@ app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) =>
             }
         }
 
-        res.json({ success: true, message: "Broadcast published successfully!" });
+        res.json({ success: true, message: "Broadcast posted to web and Telegram!" });
     } catch (err) {
         console.error("Broadcast error:", err);
         res.status(500).json({ success: false, message: "Server error during broadcast." });
     }
 });
 
-// 2. Fetch All Admin Notifications for Management
+// 2. Get All Posts for Admin Dashboard
 app.get('/api/admin/notifications', async (req, res) => {
     const adminSecret = req.headers['x-admin-secret'];
     if (adminSecret !== process.env.ADMIN_SECRET) {
@@ -575,11 +572,11 @@ app.get('/api/admin/notifications', async (req, res) => {
         const result = await pool.query('SELECT * FROM notifications ORDER BY id DESC');
         res.json({ success: true, notifications: result.rows });
     } catch (err) {
-        res.status(500).json({ success: false, message: "Failed to load posts." });
+        res.status(500).json({ success: false, message: "Failed to fetch posts." });
     }
 });
 
-// 3. Edit Notification
+// 3. Edit Notification Post
 app.put('/api/admin/notifications/:id', async (req, res) => {
     const { id } = req.params;
     const { message, imageUrl, adminSecret } = req.body;
@@ -599,7 +596,7 @@ app.put('/api/admin/notifications/:id', async (req, res) => {
     }
 });
 
-// 4. Delete Notification
+// 4. Delete Notification Post
 app.delete('/api/admin/notifications/:id', async (req, res) => {
     const { id } = req.params;
     const adminSecret = req.headers['x-admin-secret'];
