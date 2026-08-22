@@ -166,26 +166,39 @@ app.post('/api/login', async (req, res) => {
 });
 
 // 1. Updated Telegram Auth (Checks for existing phone number)
+// 1. Updated Telegram Auth (Checks phone_verified status)
 app.post('/api/telegram-auth', async (req, res) => {
     const { initData } = req.body;
     const { isValid, user } = verifyTelegramAuth(initData, process.env.TELEGRAM_BOT_TOKEN);
     
     if (!isValid || !user?.id) {
-        return res.status(401).json({ success: false, message: "Invalid auth data." });
+        return res.status(401).json({ success: false, message: "Invalid Telegram auth." });
     }
 
     try {
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT;');
+        await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE;');
 
+        // Check if user exists by telegram_id OR linked username
         let result = await pool.query('SELECT * FROM users WHERE telegram_id = $1', [user.id]);
+        let dbUser;
 
-        if (result.rows.length > 0) {
-            const dbUser = result.rows[0];
+        if (result.rows.length === 0 && user.username) {
+            let webUser = await pool.query('SELECT * FROM users WHERE LOWER(username) = LOWER($1)', [user.username]);
+            if (webUser.rows.length > 0) {
+                await pool.query('UPDATE users SET telegram_id = $1 WHERE id = $2', [user.id, webUser.rows[0].id]);
+                dbUser = webUser.rows[0];
+            }
+        } else if (result.rows.length > 0) {
+            dbUser = result.rows[0];
+        }
+
+        if (dbUser) {
             return res.json({ 
                 success: true, 
                 status: 'LOGGED_IN', 
                 username: dbUser.username,
-                hasPhone: !!dbUser.phone_number 
+                phoneVerified: !!dbUser.phone_verified 
             });
         }
 
@@ -203,7 +216,7 @@ app.post('/api/telegram-auth', async (req, res) => {
         const hashedPassword = await bcrypt.hash(randomPassword, 10);
 
         await pool.query(
-            'INSERT INTO users (username, password, telegram_id) VALUES ($1, $2, $3)',
+            'INSERT INTO users (username, password, telegram_id, phone_verified) VALUES ($1, $2, $3, FALSE)',
             [finalUsername, hashedPassword, user.id]
         );
 
@@ -211,11 +224,41 @@ app.post('/api/telegram-auth', async (req, res) => {
             success: true, 
             status: 'LOGGED_IN', 
             username: finalUsername,
-            hasPhone: false 
+            phoneVerified: false 
         });
     } catch (err) {
         console.error("Telegram Auth Error:", err);
         res.status(500).json({ success: false, message: "Server error." });
+    }
+});
+
+// 2. Save Verified Telegram Phone Endpoint
+app.post('/api/save-telegram-phone', async (req, res) => {
+    const { initData, phoneNumber } = req.body;
+
+    const { isValid, user } = verifyTelegramAuth(initData, process.env.TELEGRAM_BOT_TOKEN);
+    if (!isValid || !user?.id) {
+        return res.status(401).json({ success: false, message: "Unauthorized request." });
+    }
+
+    if (!phoneNumber) {
+        return res.status(400).json({ success: false, message: "Phone number is missing." });
+    }
+
+    try {
+        await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT;');
+        await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE;');
+
+        // Overwrite phone_number and mark phone_verified = TRUE
+        await pool.query(
+            'UPDATE users SET phone_number = $1, phone_verified = TRUE WHERE telegram_id = $2',
+            [phoneNumber, user.id]
+        );
+
+        res.json({ success: true, message: "Telegram phone number verified and saved!" });
+    } catch (err) {
+        console.error("Save Telegram phone error:", err);
+        res.status(500).json({ success: false, message: "Failed to save phone number." });
     }
 });
 

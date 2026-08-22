@@ -141,12 +141,13 @@ function claimBingo() {
 }
 
 // -------------------- APP INITIALIZATION & AUTH --------------------
-// Check Phone Status during Telegram Auto-Login
+// Check Phone Verification Status during Telegram Auto-Login
 window.addEventListener('DOMContentLoaded', async () => {
     const tg = window.Telegram?.WebApp;
     const initData = tg?.initData;
 
     if (initData) {
+        tg.expand();
         const logoutBtn = document.getElementById('logoutBtn');
         if (logoutBtn) logoutBtn.classList.add('hidden');
 
@@ -162,8 +163,8 @@ window.addEventListener('DOMContentLoaded', async () => {
                 currentUsername = data.username;
                 localStorage.setItem('bingoUser', data.username);
 
-                if (!data.hasPhone) {
-                    // Force phone number entry before revealing game
+                // Show modal if phone is not verified via Telegram contact request
+                if (!data.phoneVerified) {
                     document.getElementById('phoneModal').classList.remove('hidden');
                 } else {
                     showHomeScreen(data.username);
@@ -175,11 +176,61 @@ window.addEventListener('DOMContentLoaded', async () => {
             showAuthBox();
         }
     } else {
+        // Web Browser User Flow (Phone is optional)
         const savedUser = localStorage.getItem('bingoUser');
         if (savedUser) showHomeScreen(savedUser);
         else showAuthBox();
     }
 });
+
+// Prompt Native Telegram Share Contact
+function shareTelegramContact() {
+    const tg = window.Telegram?.WebApp;
+    if (!tg) {
+        return alert("This feature is only available inside Telegram.");
+    }
+
+    if (tg.requestContact) {
+        tg.requestContact(async (sent, event) => {
+            if (sent) {
+                const phoneNumber = event?.responseUnsafe?.contact?.phone_number || event?.response?.contact?.phone_number;
+                if (phoneNumber) {
+                    await saveVerifiedTelegramPhone(phoneNumber);
+                } else {
+                    alert("Could not retrieve phone number. Please try again.");
+                }
+            } else {
+                alert("You must share your Telegram phone number to continue.");
+            }
+        });
+    } else {
+        alert("Please update your Telegram app to support contact sharing.");
+    }
+}
+
+// Save Phone Number to Server
+async function saveVerifiedTelegramPhone(phoneNumber) {
+    const tg = window.Telegram?.WebApp;
+    const initData = tg?.initData;
+
+    try {
+        const res = await fetch('/api/save-telegram-phone', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ initData, phoneNumber })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            document.getElementById('phoneModal').classList.add('hidden');
+            showHomeScreen(currentUsername);
+        } else {
+            alert(data.message || "Failed to save phone number.");
+        }
+    } catch (err) {
+        alert("Network error while saving phone number.");
+    }
+}
 
 // Submit and Save Phone Number
 async function submitTelegramPhone() {
