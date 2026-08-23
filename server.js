@@ -479,11 +479,15 @@ cloudinary.config({
 
 // Configure Multer Storage Engine to upload directly to Cloudinary
 const storage = new CloudinaryStorage({
-    cloudinary: cloudinary,
-    params: {
-        folder: 'bingo_broadcasts',
-        allowed_formats: ['jpg', 'png', 'jpeg', 'webp']
-    }
+  cloudinary: cloudinary,
+  params: {
+    folder: 'announcements',
+    // Compress quality automatically and convert to efficient web formats
+    transformation: [
+      { width: 800, crop: 'limit' }, // Scales down images larger than 800px width
+      { quality: 'auto', fetch_format: 'auto' } // Reduces file size without visible loss
+    ]
+  }
 });
 
 const upload = multer({ storage });

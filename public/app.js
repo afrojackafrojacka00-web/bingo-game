@@ -477,6 +477,12 @@ async function fetchNotifications(username) {
     }
 }
 
+// Helper function to dynamically add Cloudinary auto-compression flags
+function getOptimizedImageUrl(url) {
+    if (!url || !url.includes('cloudinary.com')) return url;
+    return url.replace('/upload/', '/upload/f_auto,q_auto,w_800/');
+}
+
 function renderNotificationsList(notifications) {
     const container = document.getElementById('notifListContainer');
     if (!container) return;
@@ -486,14 +492,20 @@ function renderNotificationsList(notifications) {
         return;
     }
 
-    container.innerHTML = notifications.map(post => `
-        <div style="background: #1e1e28; border: 1px solid #2d2d3f; border-radius: 12px; padding: 14px; margin-bottom: 14px; text-align: left; box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
-            ${post.image_url ? `<img src="${post.image_url}" alt="Post Banner" style="width: 100%; max-height: 220px; object-fit: cover; border-radius: 8px; margin-bottom: 10px; border: 1px solid #333;" onerror="this.style.display='none'">` : ''}
-            <div style="font-size: 14px; line-height: 1.6; color: #e0e0e0;">${post.message.replace(/\n/g, '<br>')}</div>
-            <div style="font-size: 11px; color: #71717a; margin-top: 8px;">📅 ${new Date(post.created_at).toLocaleString()}</div>
-        </div>
-    `).join('');
+    container.innerHTML = notifications.map(post => {
+        // Optimize the image URL before rendering
+        const optimizedUrl = getOptimizedImageUrl(post.image_url);
+
+        return `
+            <div style="background: #1e1e28; border: 1px solid #2d2d3f; border-radius: 12px; padding: 14px; margin-bottom: 14px; text-align: left; box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
+                ${optimizedUrl ? `<img src="${optimizedUrl}" alt="Post Banner" style="width: 100%; max-height: 220px; object-fit: cover; border-radius: 8px; margin-bottom: 10px; border: 1px solid #333;" onerror="this.style.display='none'">` : ''}
+                <div style="font-size: 14px; line-height: 1.6; color: #e0e0e0;">${post.message.replace(/\n/g, '<br>')}</div>
+                <div style="font-size: 11px; color: #71717a; margin-top: 8px;">📅 ${new Date(post.created_at).toLocaleString()}</div>
+            </div>
+        `;
+    }).join('');
 }
+
 
 function updateSelectedCount() {
     const count = selectedCards.size;
