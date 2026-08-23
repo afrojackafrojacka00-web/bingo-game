@@ -40,6 +40,16 @@
     </div>
 </div>
 
+<!-- WEB NOTIFICATION MODAL -->
+<div id="notifModal" class="hidden" style="position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.85); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 20px;">
+    <div class="card" style="max-width: 380px; width: 100%; text-align: center; position: relative;">
+        <span onclick="toggleNotificationModal()" style="position: absolute; right: 15px; top: 10px; cursor: pointer; font-size: 18px;">❌</span>
+        <img src="/images/welcome.jpg" alt="Welcome" style="width: 100%; border-radius: 8px; margin-bottom: 12px; max-height: 200px; object-fit: cover;">
+        <h3>🎉 Welcome Gift!</h3>
+        <p id="notifAmharicText" style="font-size: 14px; text-align: left; line-height: 1.6; background: #2a2a2a; padding: 12px; border-radius: 8px;"></p>
+        <button class="btn-play" onclick="toggleNotificationModal()">Close</button>
+    </div>
+</div>
 
 
 
@@ -82,7 +92,7 @@
     <div id="tabGames" class="tab-content hidden">
         <!-- HOME BOX -->
         <div id="homeBox" class="card">
-            <h2>Ready man man to Play? 🎲</h2>
+            <h2>Ready to Play? 🎲</h2>
             <p>Pick your cards and join the lobby!</p>
             <button class="btn-play" onclick="goToGameScreen()">Play Bingo 🚀</button>
         </div>

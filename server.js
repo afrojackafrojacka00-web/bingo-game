@@ -7,18 +7,12 @@ const path = require('path');
 const http = require('http');
 const { Server } = require('socket.io');
 const multer = require('multer');
-// const upload = multer();
-
-
-// const fs = require('fs');
-
+const upload = multer();
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 const PORT = process.env.PORT || 3000;
-
-
 
 app.use(cors());
 app.use(express.json());
@@ -34,16 +28,6 @@ const pool = new Pool({
     ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
-
-
-
-
-
-
-
-
-
-
 // -------------------- IN-MEMORY GAME STATE --------------------
 const gameState = {
     status: 'LOBBY_WAITING', // 'LOBBY_WAITING', 'GAME_ACTIVE'
@@ -53,9 +37,9 @@ const gameState = {
     readyPlayers: new Set()    // username
 };
 
+// -------------------- DATABASE SCHEMA INITIALIZATION --------------------
 const initDB = async () => {
     try {
-        // 1. Create Tables
         await pool.query(`
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -97,32 +81,14 @@ const initDB = async () => {
                 username VARCHAR(50) NOT NULL,
                 cards_selected INT[] NOT NULL
             );
-
-            CREATE TABLE IF NOT EXISTS notifications (
-                id SERIAL PRIMARY KEY,
-                message TEXT NOT NULL,
-                image_url TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE TABLE IF NOT EXISTS user_notification_reads (
-                user_id INT REFERENCES users(id) ON DELETE CASCADE PRIMARY KEY,
-                last_read_id INT DEFAULT 0
-            );
         `);
 
-        // 2. Schema Migrations (Forces adding missing columns to existing tables)
+        // Migration columns for existing tables
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC(10,2) DEFAULT 10.00;');
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT;');
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE;');
-        await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;');
-        await pool.query('ALTER TABLE notifications ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;');
 
-        // 3. Fix any existing NULL timestamps in the database
-        await pool.query('UPDATE users SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL;');
-        await pool.query('UPDATE notifications SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL;');
-
-        // 4. Seed 500 Bingo Cards if not already present
+        // Seed 500 Bingo Cards if not already present
         const countRes = await pool.query('SELECT COUNT(*) FROM bingo_cards');
         if (parseInt(countRes.rows[0].count, 10) < 500) {
             console.log("Seeding 500 Bingo cards into database...");
@@ -144,19 +110,12 @@ const initDB = async () => {
                 );
             }
         }
-
-        console.log("Database initialized cleanly and created_at timestamps updated.");
+        console.log("Database initialized cleanly.");
     } catch (err) {
         console.error("Database initialization error:", err);
     }
 };
-
 initDB();
-
-
-
-
-
 
 // Helper: Verify Telegram Auth Data
 function verifyTelegramAuth(initData, botToken) {
@@ -487,61 +446,35 @@ app.post('/api/set-password', async (req, res) => {
     }
 });
 
-
-const fs = require('fs');
-
-// Ensure public/uploads folder exists
-const uploadDir = path.join(__dirname, 'public', 'uploads');
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-// Save uploaded files to server disk
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, uploadDir),
-    filename: (req, file, cb) => {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, uniqueSuffix + path.extname(file.originalname));
-    }
-});
-const upload = multer({ storage });
-
-// Serve static uploaded images
-app.use('/uploads', express.static(uploadDir));
-
-// 1. Broadcast Post (Saves to Disk, DB & Sends to Telegram)
+// 9. Broadcast Ads Endpoint (Supports Text, Photo URL, or Uploaded File)
 app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) => {
     const { message, imageUrl, adminSecret } = req.body;
     
     if (adminSecret !== process.env.ADMIN_SECRET) {
-        return res.status(403).json({ success: false, message: "Unauthorized key." });
+        return res.status(403).json({ success: false, message: "Unauthorized: Incorrect secret key." });
     }
 
     try {
-        let finalImageUrl = imageUrl || null;
-
-        if (req.file) {
-            finalImageUrl = `/uploads/${req.file.filename}`;
-        }
-
-        // Save persistent post in PostgreSQL
-        await pool.query(
-            'INSERT INTO notifications (message, image_url) VALUES ($1, $2)',
-            [message, finalImageUrl]
-        );
-
-        // Telegram Send Logic
         const users = await pool.query('SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL');
         const botToken = process.env.TELEGRAM_BOT_TOKEN;
-        const baseUrl = process.env.APP_URL || (process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : '');
-        const fullPhotoUrl = (finalImageUrl && finalImageUrl.startsWith('/uploads/')) ? `${baseUrl}${finalImageUrl}` : finalImageUrl;
 
         for (const user of users.rows) {
-            if (fullPhotoUrl) {
+            if (req.file) {
+                const formData = new FormData();
+                formData.append('chat_id', user.telegram_id);
+                formData.append('caption', message || '');
+                formData.append('parse_mode', 'HTML');
+                formData.append('photo', new Blob([req.file.buffer], { type: req.file.mimetype }), req.file.originalname);
+
+                await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+                    method: 'POST',
+                    body: formData
+                }).catch(() => {});
+            } else if (imageUrl) {
                 await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chat_id: user.telegram_id, photo: fullPhotoUrl, caption: message, parse_mode: 'HTML' })
+                    body: JSON.stringify({ chat_id: user.telegram_id, photo: imageUrl, caption: message, parse_mode: 'HTML' })
                 }).catch(() => {});
             } else {
                 await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -551,91 +484,11 @@ app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) =>
                 }).catch(() => {});
             }
         }
-
-        res.json({ success: true, message: "Broadcast posted to web and Telegram!" });
+        res.json({ success: true, message: "Broadcast sent successfully!" });
     } catch (err) {
-        console.error("Broadcast error:", err);
         res.status(500).json({ success: false, message: "Server error during broadcast." });
     }
 });
-
-// 2. Get All Posts for Admin Dashboard
-app.get('/api/admin/notifications', async (req, res) => {
-    const adminSecret = req.headers['x-admin-secret'];
-    if (adminSecret !== process.env.ADMIN_SECRET) {
-        return res.status(403).json({ success: false, message: "Unauthorized." });
-    }
-
-    try {
-        const result = await pool.query('SELECT * FROM notifications ORDER BY id DESC');
-        res.json({ success: true, notifications: result.rows });
-    } catch (err) {
-        res.status(500).json({ success: false, message: "Failed to fetch posts." });
-    }
-});
-
-// 3. Edit Notification Post
-app.put('/api/admin/notifications/:id', async (req, res) => {
-    const { id } = req.params;
-    const { message, imageUrl, adminSecret } = req.body;
-
-    if (adminSecret !== process.env.ADMIN_SECRET) {
-        return res.status(403).json({ success: false, message: "Unauthorized." });
-    }
-
-    try {
-        await pool.query(
-            'UPDATE notifications SET message = $1, image_url = $2 WHERE id = $3',
-            [message, imageUrl || null, id]
-        );
-        res.json({ success: true, message: "Post updated successfully!" });
-    } catch (err) {
-        res.status(500).json({ success: false, message: "Failed to update post." });
-    }
-});
-
-// 4. Delete Notification Post
-app.delete('/api/admin/notifications/:id', async (req, res) => {
-    const { id } = req.params;
-    const adminSecret = req.headers['x-admin-secret'];
-
-    if (adminSecret !== process.env.ADMIN_SECRET) {
-        return res.status(403).json({ success: false, message: "Unauthorized." });
-    }
-
-    try {
-        await pool.query('DELETE FROM notifications WHERE id = $1', [id]);
-        res.json({ success: true, message: "Post deleted successfully!" });
-    } catch (err) {
-        res.status(500).json({ success: false, message: "Failed to delete post." });
-    }
-});
-
-
-// 3. Mark Notifications as Read
-app.post('/api/notifications/mark-read', async (req, res) => {
-    const { username } = req.body;
-    try {
-        const userRes = await pool.query('SELECT id FROM users WHERE LOWER(username) = LOWER($1)', [username]);
-        if (userRes.rows.length === 0) return res.status(404).json({ success: false });
-
-        const userId = userRes.rows[0].id;
-        const maxNotif = await pool.query('SELECT MAX(id) as max_id FROM notifications');
-        const latestId = maxNotif.rows[0].max_id || 0;
-
-        await pool.query(
-            `INSERT INTO user_notification_reads (user_id, last_read_id) 
-             VALUES ($1, $2) 
-             ON CONFLICT (user_id) DO UPDATE SET last_read_id = $2`,
-            [userId, latestId]
-        );
-
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ success: false, message: "Server error." });
-    }
-});
-
 
 // -------------------- SERVER-SIDE 40-SECOND TIMER LOOP --------------------
 setInterval(async () => {
