@@ -141,7 +141,6 @@ function claimBingo() {
 }
 
 // -------------------- APP INITIALIZATION & AUTH --------------------
-// Check Phone Verification Status during Telegram Auto-Login
 window.addEventListener('DOMContentLoaded', async () => {
     const tg = window.Telegram?.WebApp;
     const initData = tg?.initData;
@@ -163,7 +162,6 @@ window.addEventListener('DOMContentLoaded', async () => {
                 currentUsername = data.username;
                 localStorage.setItem('bingoUser', data.username);
 
-                // Show modal if phone is not verified via Telegram contact request
                 if (!data.phoneVerified) {
                     document.getElementById('phoneModal').classList.remove('hidden');
                 } else {
@@ -176,14 +174,12 @@ window.addEventListener('DOMContentLoaded', async () => {
             showAuthBox();
         }
     } else {
-        // Web Browser User Flow (Phone is optional)
         const savedUser = localStorage.getItem('bingoUser');
         if (savedUser) showHomeScreen(savedUser);
         else showAuthBox();
     }
 });
 
-// Prompt Native Telegram Share Contact
 function shareTelegramContact() {
     const tg = window.Telegram?.WebApp;
     if (!tg) {
@@ -208,7 +204,6 @@ function shareTelegramContact() {
     }
 }
 
-// Save Phone Number to Server
 async function saveVerifiedTelegramPhone(phoneNumber) {
     const tg = window.Telegram?.WebApp;
     const initData = tg?.initData;
@@ -304,7 +299,6 @@ async function registerUser() {
     }
 }
 
-// Fetch latest balance and load web welcome notification
 async function loadUserData(username) {
     try {
         const res = await fetch(`/api/user-details?username=${encodeURIComponent(username)}`);
@@ -313,11 +307,9 @@ async function loadUserData(username) {
         if (data.success && data.user) {
             const user = data.user;
             
-            // Update balance in header
             const balanceElem = document.getElementById('balanceDisplay');
             if (balanceElem) balanceElem.innerText = parseFloat(user.balance || 10).toFixed(2);
 
-            // Populate Web Notification Card
             const phone = user.phone_number || "Not Registered";
             const amharicMsg = `ለስለተመዘገብ እናመሰግናለን ${user.username}! 10 ብር ስጦታ አለዎት .\n\n` +
                                `<b>የአካውንት ዝርዝሮች</b>\n` +
@@ -333,13 +325,11 @@ async function loadUserData(username) {
     }
 }
 
-// Helper function to dynamically add Cloudinary auto-compression flags
 function getOptimizedImageUrl(url) {
     if (!url || !url.includes('cloudinary.com')) return url;
     return url.replace('/upload/', '/upload/f_auto,q_auto,w_800/');
 }
 
-// Global cached notifications array
 let cachedNotifications = [];
 
 async function fetchNotifications(username) {
@@ -349,33 +339,26 @@ async function fetchNotifications(username) {
 
         if (data.success) {
             cachedNotifications = data.notifications || [];
-            updateNotificationBadge();
+            
+            const badge = document.getElementById('notifBadge');
+            if (badge) {
+                // Determine unread count strictly based on server data or local mark-read action
+                const isSeen = localStorage.getItem(`notifSeen_${username}`);
+                const unread = isSeen ? 0 : (data.unreadCount || 0);
+
+                if (unread > 0) {
+                    badge.innerText = unread;
+                    badge.classList.remove('hidden');
+                } else {
+                    badge.innerText = '0';
+                    badge.classList.add('hidden');
+                }
+            }
+
             renderNotificationsList(cachedNotifications);
         }
     } catch (err) {
         console.error("Failed to load announcements:", err);
-    }
-}
-
-function updateNotificationBadge() {
-    const badge = document.getElementById('notifBadge');
-    if (!badge) return;
-
-    // Retrieve last time user opened notifications
-    const lastSeenTime = parseInt(localStorage.getItem('lastNotifSeenTime') || '0', 10);
-
-    // Filter posts created AFTER the last time notifications were opened
-    const unreadPosts = cachedNotifications.filter(post => {
-        const postTime = new Date(post.created_at).getTime();
-        return postTime > lastSeenTime;
-    });
-
-    if (unreadPosts.length > 0) {
-        badge.innerText = unreadPosts.length;
-        badge.classList.remove('hidden');
-    } else {
-        badge.innerText = '0';
-        badge.classList.add('hidden');
     }
 }
 
@@ -384,32 +367,28 @@ async function toggleNotificationModal() {
     if (modal) {
         modal.classList.toggle('hidden');
         
-        // If modal is opened
         if (!modal.classList.contains('hidden')) {
-            // Save current time as last seen time
-            localStorage.setItem('lastNotifSeenTime', Date.now().toString());
-
-            // Instantly clear the notification badge UI
+            // Instantly hide badge in UI
             const badge = document.getElementById('notifBadge');
             if (badge) {
                 badge.innerText = '0';
                 badge.classList.add('hidden');
             }
 
-            // Refresh list
             if (currentUsername) {
-                fetchNotifications(currentUsername);
-            }
+                localStorage.setItem(`notifSeen_${currentUsername}`, 'true');
+                
+                try {
+                    await fetch('/api/notifications/mark-read', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username: currentUsername })
+                    });
+                } catch (err) {
+                    console.error("Failed to mark notifications as read on server:", err);
+                }
 
-            // Mark read on server
-            try {
-                await fetch('/api/notifications/mark-read', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username: currentUsername })
-                });
-            } catch (err) {
-                // Ignore API read mark errors
+                fetchNotifications(currentUsername);
             }
         }
     }
@@ -450,12 +429,14 @@ function showHomeScreen(username) {
     document.getElementById('homeBox').classList.remove('hidden');
     document.getElementById('selectionBox').classList.add('hidden');
 
-    // Load balance AND fetch live notifications from server
     loadUserData(username);
     fetchNotifications(username);
 }
 
 window.logoutUser = function() {
+    if (currentUsername) {
+        localStorage.removeItem(`notifSeen_${currentUsername}`);
+    }
     localStorage.removeItem('bingoUser');
     currentUsername = "";
     showAuthBox();
