@@ -1,0 +1,33 @@
+
+bingo bot and web
+
+1,telegram 
+2,github using this username afrojackafrojacka00@gmail.com and (bingo-game) folder
+3,render.com same afrojackafrojacka00@gmail.com but use GitHub to login instead of email
+4,https://kal-bingo-game.onrender.com/ to open the web base
+5,@kal_bingo_bot and then menu to open telegram bot
+6,this is the telegram bot token "8955853714:AAHLdP_NR8F8S91l8xCPBQ3iSjhTmtYS7Oc" 
+
+database
+
+1, i am using PostgreSQL
+2,internal database url for postgres in render.com (postgresql://bingouser:FpQeLqQQsZPqgxdWKSUKRgnTvljuRgSq@dpg-da34dpqbkg8c73fmjj80-a/bingodb_mhqm)
+
+3, i am using app name "tableplus" to see the database it is just like xampp and install it and then open it and then click create a new connection and then select PostgreSQL and then click import and theni connect it using this (Go to your Render dashboard $\rightarrow$ bingo-db $\rightarrow$ Info tab, copy the External Database URL.)
+
+
+vs code
+
+1,i fix the error that was blocking me to use the terminal it was forcing me to use the command promt so i use this to fix it
+ "Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned"
+2, and then run this in the terminal to create the first file Jason this is the first thing i did 
+ "npm init -y" and then i did this in the terminal "npm install express socket.io" and the this "npm install pg bcryptjs"
+3,when i want to run the app i use this command "node server.js"
+
+
+4,to send the new updated code from the vs code to the GitHub i use these commande in order 
+   first (git add .)
+   second ("git commit -m "Add Telegram username sync and fix web logout functionality")
+   third  (git push origin main)
+
+
