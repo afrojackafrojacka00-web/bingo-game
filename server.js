@@ -509,7 +509,7 @@ const storage = multer.diskStorage({
 });
 // const upload = multer({ storage });
 // Memory storage handles uploads directly in RAM (No disk required)
-const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });
+// const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });
 
 // Serve static uploaded images
 app.use('/uploads', express.static(uploadDir));
