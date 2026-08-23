@@ -466,6 +466,47 @@ function renderNotificationsList(notifications) {
     `).join('');
 }
 
+
+async function fetchNotifications(username) {
+    try {
+        const res = await fetch(`/api/notifications?username=${encodeURIComponent(username)}`);
+        const data = await res.json();
+
+        if (data.success) {
+            const badge = document.getElementById('notifBadge');
+            if (badge) {
+                if (data.unreadCount > 0) {
+                    badge.innerText = data.unreadCount;
+                    badge.classList.remove('hidden');
+                } else {
+                    badge.classList.add('hidden');
+                }
+            }
+            renderNotificationsList(data.notifications);
+        }
+    } catch (err) {
+        console.error("Failed to load announcements:", err);
+    }
+}
+
+function renderNotificationsList(notifications) {
+    const container = document.getElementById('notifListContainer');
+    if (!container) return;
+
+    if (notifications.length === 0) {
+        container.innerHTML = `<p style="color: #888; padding: 20px 0;">No announcements available.</p>`;
+        return;
+    }
+
+    container.innerHTML = notifications.map(post => `
+        <div class="notif-card">
+            ${post.image_url ? `<img src="${post.image_url}" alt="Post Banner" onerror="this.style.display='none'">` : ''}
+            <div class="notif-body">${post.message.replace(/\n/g, '<br>')}</div>
+            <div class="notif-date">📅 ${new Date(post.created_at).toLocaleString()}</div>
+        </div>
+    `).join('');
+}
+
 function updateSelectedCount() {
     const count = selectedCards.size;
     const countElem = document.getElementById('selectedCount');
