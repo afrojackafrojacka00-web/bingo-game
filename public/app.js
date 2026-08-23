@@ -334,18 +334,22 @@ async function loadUserData(username) {
     }
 }
 
-// Toggle Notification Modal Visibility
 function toggleNotificationModal() {
     const modal = document.getElementById('notifModal');
     if (modal) {
         modal.classList.toggle('hidden');
+        
+        // Fetch fresh notifications if modal is opened
+        if (!modal.classList.contains('hidden') && currentUsername) {
+            fetchNotifications(currentUsername);
+        }
+
         // Hide red badge after opening notification
         const badge = document.getElementById('notifBadge');
         if (badge) badge.classList.add('hidden');
     }
 }
 
-// Update showHomeScreen to trigger user data load
 function showHomeScreen(username) {
     currentUsername = username;
     localStorage.setItem('bingoUser', username);
@@ -359,8 +363,9 @@ function showHomeScreen(username) {
     document.getElementById('homeBox').classList.remove('hidden');
     document.getElementById('selectionBox').classList.add('hidden');
 
-    // Load balance and notification payload
+    // Load balance AND fetch live notifications from server
     loadUserData(username);
+    fetchNotifications(username); // <-- ADD THIS LINE
 }
 
 window.logoutUser = function() {

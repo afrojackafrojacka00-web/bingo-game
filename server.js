@@ -613,6 +613,43 @@ app.delete('/api/admin/notifications/:id', async (req, res) => {
     }
 });
 
+
+// Get User Notifications & Unread Count
+app.get('/api/notifications', async (req, res) => {
+    const { username } = req.query;
+
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+
+    if (!username || username === 'null' || username === 'undefined') {
+        return res.json({ success: true, notifications: [], unreadCount: 0 });
+    }
+
+    try {
+        const query = `
+            SELECT n.*, 
+                   (n.id > COALESCE(r.last_read_id, 0)) AS is_unread
+            FROM notifications n
+            JOIN users u ON LOWER(u.username) = LOWER($1)
+            LEFT JOIN user_notification_reads r ON r.user_id = u.id
+            WHERE n.created_at >= (u.created_at - INTERVAL '10 seconds')
+            ORDER BY n.id DESC
+            LIMIT 20;
+        `;
+        const result = await pool.query(query, [username]);
+
+        const unreadCount = result.rows.filter(row => row.is_unread).length;
+
+        res.json({
+            success: true,
+            notifications: result.rows,
+            unreadCount
+        });
+    } catch (err) {
+        console.error("Notification Fetch Error:", err);
+        res.status(500).json({ success: false, message: "Server error" });
+    }
+});
+
 // -------------------- SERVER-SIDE 40-SECOND TIMER LOOP --------------------
 setInterval(async () => {
     if (gameState.status === 'LOBBY_WAITING') {
