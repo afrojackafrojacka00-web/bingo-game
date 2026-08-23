@@ -116,6 +116,7 @@ const initDB = async () => {
                 username VARCHAR(50) NOT NULL,
                 cards_selected INT[] NOT NULL
             );
+
             CREATE TABLE IF NOT EXISTS notifications (
                 id SERIAL PRIMARY KEY,
                 message TEXT NOT NULL,
@@ -125,7 +126,8 @@ const initDB = async () => {
 
             CREATE TABLE IF NOT EXISTS user_notification_reads (
                 user_id INT REFERENCES users(id) ON DELETE CASCADE PRIMARY KEY,
-                last_read_id INT DEFAULT 0
+                last_read_id INT DEFAULT 0,
+                min_notif_id INT DEFAULT 0
             );
         `);
 
@@ -133,6 +135,30 @@ const initDB = async () => {
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC(10,2) DEFAULT 10.00;');
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT;');
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE;');
+        await pool.query('ALTER TABLE user_notification_reads ADD COLUMN IF NOT EXISTS min_notif_id INT DEFAULT 0;');
+
+        // Automatic Trigger: Records current highest notification ID as registration baseline
+        await pool.query(`
+            CREATE OR REPLACE FUNCTION set_new_user_notification_baseline()
+            RETURNS TRIGGER AS $$
+            DECLARE
+                max_notif_id INT;
+            BEGIN
+                SELECT COALESCE(MAX(id), 0) INTO max_notif_id FROM notifications;
+                INSERT INTO user_notification_reads (user_id, last_read_id, min_notif_id)
+                VALUES (NEW.id, max_notif_id, max_notif_id)
+                ON CONFLICT (user_id) DO NOTHING;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+
+            DROP TRIGGER IF EXISTS trg_set_new_user_notif_baseline ON users;
+
+            CREATE TRIGGER trg_set_new_user_notif_baseline
+            AFTER INSERT ON users
+            FOR EACH ROW
+            EXECUTE FUNCTION set_new_user_notification_baseline();
+        `);
 
         // Seed 500 Bingo Cards if not already present
         const countRes = await pool.query('SELECT COUNT(*) FROM bingo_cards');
@@ -162,7 +188,6 @@ const initDB = async () => {
     }
 };
 initDB();
-
 
 
 
@@ -624,37 +649,37 @@ app.delete('/api/admin/notifications/:id', async (req, res) => {
 app.get('/api/notifications', async (req, res) => {
     const { username } = req.query;
 
-    if (!username) {
-        return res.status(400).json({ success: false, message: "Username required." });
+    if (!username || username === 'null' || username === 'undefined') {
+        return res.json({ success: true, notifications: [], unreadCount: 0 });
     }
 
     try {
-        // 1. Single SQL query comparing timestamps directly in the DB
-        const notifQuery = `
-            SELECT n.* 
-            FROM notifications n
-            CROSS JOIN users u
+        // 1. Fetch user ID, read state, and registration baseline
+        const userRes = await pool.query(`
+            SELECT u.id, 
+                   COALESCE(r.last_read_id, 0) AS last_read_id, 
+                   COALESCE(r.min_notif_id, 0) AS min_notif_id
+            FROM users u
+            LEFT JOIN user_notification_reads r ON u.id = r.user_id
             WHERE LOWER(u.username) = LOWER($1)
-              AND n.created_at >= u.created_at
-            ORDER BY n.id DESC
-            LIMIT 20;
-        `;
-        const notifs = await pool.query(notifQuery, [username]);
+        `, [username]);
 
-        // 2. Fetch user ID to check unread status
-        const userRes = await pool.query('SELECT id FROM users WHERE LOWER(username) = LOWER($1)', [username]);
-        if (userRes.rows.length === 0) return res.status(404).json({ success: false, message: "User not found." });
+        if (userRes.rows.length === 0) {
+            return res.json({ success: true, notifications: [], unreadCount: 0 });
+        }
 
-        const userId = userRes.rows[0].id;
+        const { last_read_id, min_notif_id } = userRes.rows[0];
 
-        // 3. Get last read notification ID for badge calculation
-        const readRes = await pool.query('SELECT last_read_id FROM user_notification_reads WHERE user_id = $1', [userId]);
-        const lastReadId = readRes.rows[0]?.last_read_id || 0;
+        // 2. Fetch ONLY posts created AFTER the user registered (id > min_notif_id)
+        const notifRes = await pool.query(
+            'SELECT * FROM notifications WHERE id > $1 ORDER BY id DESC LIMIT 20',
+            [min_notif_id]
+        );
 
-        // 4. Count unread posts
-        const unreadCount = notifs.rows.filter(n => n.id > lastReadId).length;
+        // 3. Calculate unread count for eligible posts
+        const unreadCount = notifRes.rows.filter(n => n.id > last_read_id).length;
 
-        res.json({ success: true, notifications: notifs.rows, unreadCount });
+        res.json({ success: true, notifications: notifRes.rows, unreadCount });
     } catch (err) {
         console.error("Error fetching notifications:", err);
         res.status(500).json({ success: false, message: "Server error." });
