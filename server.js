@@ -465,28 +465,27 @@ app.post('/api/set-password', async (req, res) => {
     }
 });
 
-const fs = require('fs');
+const { v2: cloudinary } = require('cloudinary');
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
-// Ensure public/uploads folder exists
-const uploadDir = path.join(__dirname, 'public', 'uploads');
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-}
+// Configure Cloudinary API Credentials
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
-// Save uploaded files to server disk
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, uploadDir),
-    filename: (req, file, cb) => {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, uniqueSuffix + path.extname(file.originalname));
+// Configure Multer Storage Engine to upload directly to Cloudinary
+const storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'bingo_broadcasts',
+        allowed_formats: ['jpg', 'png', 'jpeg', 'webp']
     }
 });
+
 const upload = multer({ storage });
 
-// Serve static uploaded images
-app.use('/uploads', express.static(uploadDir));
-
-// 1. Broadcast Post (Saves to Disk, DB & Sends to Telegram)
 app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) => {
     const { message, imageUrl, adminSecret } = req.body;
     
@@ -497,44 +496,53 @@ app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) =>
     try {
         let finalImageUrl = imageUrl || null;
 
-        if (req.file) {
-            finalImageUrl = `/uploads/${req.file.filename}`;
+        // If file was uploaded via Multer, req.file.path is Cloudinary's secure HTTP URL
+        if (req.file && req.file.path) {
+            finalImageUrl = req.file.path;
         }
 
-        // Save persistent post in PostgreSQL
+        // Save persistent post with Cloudinary URL in PostgreSQL
         await pool.query(
             'INSERT INTO notifications (message, image_url) VALUES ($1, $2)',
             [message, finalImageUrl]
         );
 
-        // Telegram Send Logic
+        // Send to Telegram
         const users = await pool.query('SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL');
         const botToken = process.env.TELEGRAM_BOT_TOKEN;
-        const baseUrl = process.env.APP_URL || (process.env.RENDER_EXTERNAL_HOSTNAME ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` : '');
-        const fullPhotoUrl = (finalImageUrl && finalImageUrl.startsWith('/uploads/')) ? `${baseUrl}${finalImageUrl}` : finalImageUrl;
 
         for (const user of users.rows) {
-            if (fullPhotoUrl) {
+            if (finalImageUrl) {
                 await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chat_id: user.telegram_id, photo: fullPhotoUrl, caption: message, parse_mode: 'HTML' })
+                    body: JSON.stringify({ 
+                        chat_id: user.telegram_id, 
+                        photo: finalImageUrl, 
+                        caption: message, 
+                        parse_mode: 'HTML' 
+                    })
                 }).catch(() => {});
             } else {
                 await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ chat_id: user.telegram_id, text: message, parse_mode: 'HTML' })
+                    body: JSON.stringify({ 
+                        chat_id: user.telegram_id, 
+                        text: message, 
+                        parse_mode: 'HTML' 
+                    })
                 }).catch(() => {});
             }
         }
 
-        res.json({ success: true, message: "Broadcast posted to web and Telegram!" });
+        res.json({ success: true, message: "Broadcast posted using Cloudinary permanent storage!" });
     } catch (err) {
         console.error("Broadcast error:", err);
         res.status(500).json({ success: false, message: "Server error during broadcast." });
     }
 });
+
 
 // 2. Get All Posts for Admin Dashboard
 app.get('/api/admin/notifications', async (req, res) => {
