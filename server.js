@@ -623,36 +623,40 @@ app.delete('/api/admin/notifications/:id', async (req, res) => {
 
 app.get('/api/notifications', async (req, res) => {
     const { username } = req.query;
+
+    if (!username) {
+        return res.status(400).json({ success: false, message: "Username required." });
+    }
+
     try {
-        // 1. Get user ID and account creation timestamp
-        const userRes = await pool.query(
-            'SELECT id, created_at FROM users WHERE LOWER(username) = LOWER($1)', 
-            [username]
-        );
+        // 1. Single SQL query comparing timestamps directly in the DB
+        const notifQuery = `
+            SELECT n.* 
+            FROM notifications n
+            CROSS JOIN users u
+            WHERE LOWER(u.username) = LOWER($1)
+              AND n.created_at >= u.created_at
+            ORDER BY n.id DESC
+            LIMIT 20;
+        `;
+        const notifs = await pool.query(notifQuery, [username]);
+
+        // 2. Fetch user ID to check unread status
+        const userRes = await pool.query('SELECT id FROM users WHERE LOWER(username) = LOWER($1)', [username]);
         if (userRes.rows.length === 0) return res.status(404).json({ success: false, message: "User not found." });
 
         const userId = userRes.rows[0].id;
-        const userCreatedAt = userRes.rows[0].created_at;
 
-        // 2. Fetch last notification ID read by this user
-        const readRes = await pool.query(
-            'SELECT last_read_id FROM user_notification_reads WHERE user_id = $1', 
-            [userId]
-        );
+        // 3. Get last read notification ID for badge calculation
+        const readRes = await pool.query('SELECT last_read_id FROM user_notification_reads WHERE user_id = $1', [userId]);
         const lastReadId = readRes.rows[0]?.last_read_id || 0;
 
-        // 3. Fetch ONLY notifications created after the user joined
-        const notifs = await pool.query(
-            'SELECT * FROM notifications WHERE created_at >= $1 ORDER BY id DESC LIMIT 20',
-            [userCreatedAt]
-        );
-
-        // 4. Calculate unread count for relevant posts only
+        // 4. Count unread posts
         const unreadCount = notifs.rows.filter(n => n.id > lastReadId).length;
 
         res.json({ success: true, notifications: notifs.rows, unreadCount });
     } catch (err) {
-        console.error("Error fetching user notifications:", err);
+        console.error("Error fetching notifications:", err);
         res.status(500).json({ success: false, message: "Server error." });
     }
 });
