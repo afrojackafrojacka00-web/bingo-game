@@ -12,23 +12,6 @@ const multer = require('multer');
 
 const fs = require('fs');
 
-// Ensure public/uploads folder exists
-const uploadDir = path.join(__dirname, 'public', 'uploads');
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-// Save uploaded files to server disk
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, uploadDir),
-    filename: (req, file, cb) => {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, uniqueSuffix + path.extname(file.originalname));
-    }
-});
-// const upload = multer({ storage });
-// Memory storage handles uploads directly in RAM (No disk required)
-const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });
 
 const app = express();
 const server = http.createServer(app);
