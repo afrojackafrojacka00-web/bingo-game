@@ -493,7 +493,7 @@ const storage = new CloudinaryStorage({
 const upload = multer({ storage });
 
 app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) => {
-    const { message, imageUrl, adminSecret } = req.body;
+    const { message, imageUrl, adminSecret, destination } = req.body;
     
     if (adminSecret !== process.env.ADMIN_SECRET) {
         return res.status(403).json({ success: false, message: "Unauthorized key." });
@@ -502,44 +502,47 @@ app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) =>
     try {
         let finalImageUrl = imageUrl || null;
 
-        // If a file was uploaded, req.file.path contains Cloudinary's secure HTTPS URL
         if (req.file && req.file.path) {
             finalImageUrl = req.file.path;
         }
 
-        // 1. Insert post into Database for web users
-        await pool.query(
-            'INSERT INTO notifications (message, image_url) VALUES ($1, $2)',
-            [message || '', finalImageUrl]
-        );
+        // 1. Insert into Database for Web/App Notifications (ONLY if BOTH or APP_ONLY)
+        if (destination === 'BOTH' || destination === 'APP_ONLY') {
+            await pool.query(
+                'INSERT INTO notifications (message, image_url) VALUES ($1, $2)',
+                [message || '', finalImageUrl]
+            );
+        }
 
-        // 2. Broadcast to Telegram users (if any exist)
-        const botToken = process.env.TELEGRAM_BOT_TOKEN;
-        if (botToken) {
-            const users = await pool.query('SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL');
-            
-            for (const user of users.rows) {
-                if (finalImageUrl) {
-                    await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            chat_id: user.telegram_id, 
-                            photo: finalImageUrl, 
-                            caption: message || '', 
-                            parse_mode: 'HTML' 
-                        })
-                    }).catch(() => {});
-                } else if (message) {
-                    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            chat_id: user.telegram_id, 
-                            text: message, 
-                            parse_mode: 'HTML' 
-                        })
-                    }).catch(() => {});
+        // 2. Broadcast to Telegram users (ONLY if BOTH or TELEGRAM_ONLY)
+        if (destination === 'BOTH' || destination === 'TELEGRAM_ONLY') {
+            const botToken = process.env.TELEGRAM_BOT_TOKEN;
+            if (botToken) {
+                const users = await pool.query('SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL');
+                
+                for (const user of users.rows) {
+                    if (finalImageUrl) {
+                        await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                chat_id: user.telegram_id, 
+                                photo: finalImageUrl, 
+                                caption: message || '', 
+                                parse_mode: 'HTML' 
+                            })
+                        }).catch(() => {});
+                    } else if (message) {
+                        await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ 
+                                chat_id: user.telegram_id, 
+                                text: message, 
+                                parse_mode: 'HTML' 
+                            })
+                        }).catch(() => {});
+                    }
                 }
             }
         }
@@ -550,6 +553,8 @@ app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) =>
         res.status(500).json({ success: false, message: `Server Error: ${err.message}` });
     }
 });
+
+
 
 
 // 2. Get All Posts for Admin Dashboard
