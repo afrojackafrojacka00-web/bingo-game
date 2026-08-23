@@ -334,7 +334,13 @@ async function loadUserData(username) {
     }
 }
 
-function toggleNotificationModal() {
+// Helper function to dynamically add Cloudinary auto-compression flags
+function getOptimizedImageUrl(url) {
+    if (!url || !url.includes('cloudinary.com')) return url;
+    return url.replace('/upload/', '/upload/f_auto,q_auto,w_800/');
+}
+
+async function toggleNotificationModal() {
     const modal = document.getElementById('notifModal');
     if (modal) {
         modal.classList.toggle('hidden');
@@ -342,12 +348,48 @@ function toggleNotificationModal() {
         // Fetch fresh notifications if modal is opened
         if (!modal.classList.contains('hidden') && currentUsername) {
             fetchNotifications(currentUsername);
-        }
 
-        // Hide red badge after opening notification
-        const badge = document.getElementById('notifBadge');
-        if (badge) badge.classList.add('hidden');
+            // Hide the badge visually
+            const badge = document.getElementById('notifBadge');
+            if (badge) {
+                badge.innerText = '0';
+                badge.classList.add('hidden');
+            }
+
+            // Mark notifications as read on the backend (if your server API supports it)
+            try {
+                await fetch('/api/notifications/mark-read', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: currentUsername })
+                });
+            } catch (err) {
+                console.error("Failed to mark notifications as read:", err);
+            }
+        }
     }
+}
+
+function renderNotificationsList(notifications) {
+    const container = document.getElementById('notifListContainer');
+    if (!container) return;
+
+    if (!notifications || notifications.length === 0) {
+        container.innerHTML = `<p style="color: #888; text-align: center; padding: 20px 0;">No announcements available.</p>`;
+        return;
+    }
+
+    container.innerHTML = notifications.map(post => {
+        const optimizedUrl = getOptimizedImageUrl(post.image_url);
+
+        return `
+            <div style="background: #1e1e28; border: 1px solid #2d2d3f; border-radius: 12px; padding: 14px; margin-bottom: 14px; text-align: left; box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
+                ${optimizedUrl ? `<img src="${optimizedUrl}" alt="Post Banner" style="width: 100%; max-height: 350px; object-fit: contain; background: #111; border-radius: 8px; margin-bottom: 10px; border: 1px solid #333;" onerror="this.style.display='none'">` : ''}
+                <div style="font-size: 14px; line-height: 1.6; color: #e0e0e0;">${post.message.replace(/\n/g, '<br>')}</div>
+                <div style="font-size: 11px; color: #71717a; margin-top: 8px;">📅 ${new Date(post.created_at).toLocaleString()}</div>
+            </div>
+        `;
+    }).join('');
 }
 
 function showHomeScreen(username) {
@@ -477,34 +519,7 @@ async function fetchNotifications(username) {
     }
 }
 
-// Helper function to dynamically add Cloudinary auto-compression flags
-function getOptimizedImageUrl(url) {
-    if (!url || !url.includes('cloudinary.com')) return url;
-    return url.replace('/upload/', '/upload/f_auto,q_auto,w_800/');
-}
 
-function renderNotificationsList(notifications) {
-    const container = document.getElementById('notifListContainer');
-    if (!container) return;
-
-    if (!notifications || notifications.length === 0) {
-        container.innerHTML = `<p style="color: #888; text-align: center; padding: 20px 0;">No announcements available.</p>`;
-        return;
-    }
-
-    container.innerHTML = notifications.map(post => {
-        // Optimize the image URL before rendering
-        const optimizedUrl = getOptimizedImageUrl(post.image_url);
-
-        return `
-            <div style="background: #1e1e28; border: 1px solid #2d2d3f; border-radius: 12px; padding: 14px; margin-bottom: 14px; text-align: left; box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
-                ${optimizedUrl ? `<img src="${optimizedUrl}" alt="Post Banner" style="width: 100%; max-height: 220px; object-fit: cover; border-radius: 8px; margin-bottom: 10px; border: 1px solid #333;" onerror="this.style.display='none'">` : ''}
-                <div style="font-size: 14px; line-height: 1.6; color: #e0e0e0;">${post.message.replace(/\n/g, '<br>')}</div>
-                <div style="font-size: 11px; color: #71717a; margin-top: 8px;">📅 ${new Date(post.created_at).toLocaleString()}</div>
-            </div>
-        `;
-    }).join('');
-}
 
 
 function updateSelectedCount() {
