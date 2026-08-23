@@ -165,7 +165,7 @@ window.addEventListener('DOMContentLoaded', async () => {
                 if (!data.phoneVerified) {
                     document.getElementById('phoneModal').classList.remove('hidden');
                 } else {
-                    showHomeScreen(data.username);
+                    await showHomeScreen(data.username);
                 }
             } else {
                 showAuthBox();
@@ -175,8 +175,11 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
     } else {
         const savedUser = localStorage.getItem('bingoUser');
-        if (savedUser) showHomeScreen(savedUser);
-        else showAuthBox();
+        if (savedUser) {
+            await showHomeScreen(savedUser);
+        } else {
+            showAuthBox();
+        }
     }
 });
 
@@ -218,7 +221,7 @@ async function saveVerifiedTelegramPhone(phoneNumber) {
 
         if (data.success) {
             document.getElementById('phoneModal').classList.add('hidden');
-            showHomeScreen(currentUsername);
+            await showHomeScreen(currentUsername);
         } else {
             alert(data.message || "Failed to save phone number.");
         }
@@ -265,7 +268,7 @@ async function loginUser() {
         const data = await res.json();
 
         if (data.success) {
-            showHomeScreen(data.username);
+            await showHomeScreen(data.username);
         } else {
             alert(data.message || "Invalid credentials.");
         }
@@ -290,7 +293,7 @@ async function registerUser() {
         const data = await res.json();
 
         if (data.success) {
-            showHomeScreen(data.username);
+            await showHomeScreen(data.username);
         } else {
             alert(data.message || "Registration failed.");
         }
@@ -342,9 +345,8 @@ async function fetchNotifications(username) {
             
             const badge = document.getElementById('notifBadge');
             if (badge) {
-                // Determine unread count strictly based on server data or local mark-read action
-                const isSeen = localStorage.getItem(`notifSeen_${username}`);
-                const unread = isSeen ? 0 : (data.unreadCount || 0);
+                const isSeenLocal = localStorage.getItem(`notifSeen_${username}`) === 'true';
+                const unread = isSeenLocal ? 0 : (data.unreadCount || 0);
 
                 if (unread > 0) {
                     badge.innerText = unread;
@@ -368,7 +370,6 @@ async function toggleNotificationModal() {
         modal.classList.toggle('hidden');
         
         if (!modal.classList.contains('hidden')) {
-            // Instantly hide badge in UI
             const badge = document.getElementById('notifBadge');
             if (badge) {
                 badge.innerText = '0';
@@ -388,7 +389,7 @@ async function toggleNotificationModal() {
                     console.error("Failed to mark notifications as read on server:", err);
                 }
 
-                fetchNotifications(currentUsername);
+                await fetchNotifications(currentUsername);
             }
         }
     }
@@ -416,7 +417,7 @@ function renderNotificationsList(notifications) {
     }).join('');
 }
 
-function showHomeScreen(username) {
+async function showHomeScreen(username) {
     currentUsername = username;
     localStorage.setItem('bingoUser', username);
 
@@ -429,8 +430,9 @@ function showHomeScreen(username) {
     document.getElementById('homeBox').classList.remove('hidden');
     document.getElementById('selectionBox').classList.add('hidden');
 
-    loadUserData(username);
-    fetchNotifications(username);
+    // Sequence execution to prevent stale count on page refresh
+    await loadUserData(username);
+    await fetchNotifications(username);
 }
 
 window.logoutUser = function() {
