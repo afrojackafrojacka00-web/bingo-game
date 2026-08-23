@@ -9,8 +9,6 @@ const { Server } = require('socket.io');
 const multer = require('multer');
 // const upload = multer();
 
-
-
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
@@ -491,6 +489,31 @@ app.post('/api/set-password', async (req, res) => {
 //         res.status(500).json({ success: false, message: "Server error during broadcast." });
 //     }
 // });
+
+
+const fs = require('fs');
+
+// Ensure public/uploads folder exists
+const uploadDir = path.join(__dirname, 'public', 'uploads');
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+// Save uploaded files to server disk
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadDir),
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        cb(null, uniqueSuffix + path.extname(file.originalname));
+    }
+});
+// const upload = multer({ storage });
+// Memory storage handles uploads directly in RAM (No disk required)
+const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });
+
+// Serve static uploaded images
+app.use('/uploads', express.static(uploadDir));
+
 // Memory storage handles uploads directly in RAM (No disk required)
 const upload = multer({ limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -601,7 +624,6 @@ app.delete('/api/admin/notifications/:id', async (req, res) => {
         res.status(500).json({ success: false, message: "Failed to delete post." });
     }
 });
-
 
 // -------------------- SERVER-SIDE 40-SECOND TIMER LOOP --------------------
 setInterval(async () => {
