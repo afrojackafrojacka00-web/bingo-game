@@ -22,13 +22,31 @@
         .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: #1e1e1e; display: flex; justify-content: space-around; padding: 12px 0; border-top: 1px solid #333; }
         .nav-item { color: #aaa; text-align: center; font-size: 14px; cursor: pointer; width: 50%; }
         .nav-item.active { color: #0088cc; font-weight: bold; }
+
+        .status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    transition: background-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.status-dot.online {
+    background-color: #00d26a;
+    box-shadow: 0 0 8px #00d26a;
+}
+
+.status-dot.offline {
+    background-color: #ff4d4d;
+    box-shadow: 0 0 8px #ff4d4d;
+}
     </style>
 </head>
 <body>
 
     <!-- HEADER BAR -->
     <!-- HEADER BAR WITH NOTIFICATION BELL & BALANCE -->
-<div id="headerBar" class="header-bar hidden">
+<!-- <div id="headerBar" class="header-bar hidden">
     <div>
         👤 <span id="playerDisplay"></span> | 💰 <span id="balanceDisplay">10.00</span> Birr
     </div>
@@ -37,6 +55,20 @@
             🔔<span id="notifBadge" style="position: absolute; top: -5px; right: -5px; background: #ff4d4d; color: white; font-size: 10px; padding: 2px 6px; border-radius: 50%;">1</span>
         </button>
         <button id="logoutBtn" class="btn-logout" onclick="logoutUser()">Logout</button>
+    </div>
+</div> -->
+<!-- Inside #headerBar -->
+<div id="headerBar" class="hidden" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: #181820; border-bottom: 1px solid #2d2d3f;">
+    <div style="display: flex; align-items: center; gap: 8px;">
+        <!-- Online Status Dot -->
+        <span id="connectionDot" class="status-dot offline" title="Disconnected"></span>
+        <span id="playerDisplay" style="color: #fff; font-weight: bold;"></span>
+    </div>
+
+    <!-- Notification Icon Button -->
+    <div style="position: relative; cursor: pointer;" onclick="toggleNotificationModal()">
+        <span style="font-size: 20px;">🔔</span>
+        <span id="notifBadge" class="hidden" style="position: absolute; top: -5px; right: -5px; background: #ff4d4d; color: white; border-radius: 50%; padding: 2px 6px; font-size: 10px; font-weight: bold;">0</span>
     </div>
 </div>
 

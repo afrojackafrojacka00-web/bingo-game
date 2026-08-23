@@ -3,6 +3,29 @@ const selectedCards = new Set();
 const takenCardsMap = {};
 const socket = io();
 
+
+
+
+// -------------------- CONNECTION STATUS LISTENERS --------------------
+socket.on('connect', () => {
+    const dot = document.getElementById('connectionDot');
+    if (dot) {
+        dot.classList.remove('offline');
+        dot.classList.add('online');
+        dot.title = "Connected";
+    }
+});
+
+socket.on('disconnect', () => {
+    const dot = document.getElementById('connectionDot');
+    if (dot) {
+        dot.classList.remove('online');
+        dot.classList.add('offline');
+        dot.title = "Disconnected";
+    }
+});
+
+
 // -------------------- REAL-TIME SOCKET LISTENERS --------------------
 socket.on('init_state', ({ status, timer, takenCards, readyPlayersCount }) => {
     Object.assign(takenCardsMap, takenCards);
@@ -533,3 +556,4 @@ function updateSelectedCount() {
         btn.disabled = count === 0;
     }
 }
+
