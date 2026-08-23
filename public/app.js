@@ -232,7 +232,6 @@ async function saveVerifiedTelegramPhone(phoneNumber) {
     }
 }
 
-
 function switchToRegister() {
     document.getElementById('loginForm').classList.add('hidden');
     document.getElementById('registerForm').classList.remove('hidden');
@@ -340,23 +339,69 @@ function getOptimizedImageUrl(url) {
     return url.replace('/upload/', '/upload/f_auto,q_auto,w_800/');
 }
 
+// Global cached notifications array
+let cachedNotifications = [];
+
+async function fetchNotifications(username) {
+    try {
+        const res = await fetch(`/api/notifications?username=${encodeURIComponent(username)}`);
+        const data = await res.json();
+
+        if (data.success) {
+            cachedNotifications = data.notifications || [];
+            updateNotificationBadge();
+            renderNotificationsList(cachedNotifications);
+        }
+    } catch (err) {
+        console.error("Failed to load announcements:", err);
+    }
+}
+
+function updateNotificationBadge() {
+    const badge = document.getElementById('notifBadge');
+    if (!badge) return;
+
+    // Retrieve last time user opened notifications
+    const lastSeenTime = parseInt(localStorage.getItem('lastNotifSeenTime') || '0', 10);
+
+    // Filter posts created AFTER the last time notifications were opened
+    const unreadPosts = cachedNotifications.filter(post => {
+        const postTime = new Date(post.created_at).getTime();
+        return postTime > lastSeenTime;
+    });
+
+    if (unreadPosts.length > 0) {
+        badge.innerText = unreadPosts.length;
+        badge.classList.remove('hidden');
+    } else {
+        badge.innerText = '0';
+        badge.classList.add('hidden');
+    }
+}
+
 async function toggleNotificationModal() {
     const modal = document.getElementById('notifModal');
     if (modal) {
         modal.classList.toggle('hidden');
         
-        // Fetch fresh notifications if modal is opened
-        if (!modal.classList.contains('hidden') && currentUsername) {
-            fetchNotifications(currentUsername);
+        // If modal is opened
+        if (!modal.classList.contains('hidden')) {
+            // Save current time as last seen time
+            localStorage.setItem('lastNotifSeenTime', Date.now().toString());
 
-            // Hide the badge visually
+            // Instantly clear the notification badge UI
             const badge = document.getElementById('notifBadge');
             if (badge) {
                 badge.innerText = '0';
                 badge.classList.add('hidden');
             }
 
-            // Mark notifications as read on the backend (if your server API supports it)
+            // Refresh list
+            if (currentUsername) {
+                fetchNotifications(currentUsername);
+            }
+
+            // Mark read on server
             try {
                 await fetch('/api/notifications/mark-read', {
                     method: 'POST',
@@ -364,7 +409,7 @@ async function toggleNotificationModal() {
                     body: JSON.stringify({ username: currentUsername })
                 });
             } catch (err) {
-                console.error("Failed to mark notifications as read:", err);
+                // Ignore API read mark errors
             }
         }
     }
@@ -407,7 +452,7 @@ function showHomeScreen(username) {
 
     // Load balance AND fetch live notifications from server
     loadUserData(username);
-    fetchNotifications(username); // <-- ADD THIS LINE
+    fetchNotifications(username);
 }
 
 window.logoutUser = function() {
@@ -494,33 +539,6 @@ function updateGridUI() {
         }
     });
 }
-
-
-
-async function fetchNotifications(username) {
-    try {
-        const res = await fetch(`/api/notifications?username=${encodeURIComponent(username)}`);
-        const data = await res.json();
-
-        if (data.success) {
-            const badge = document.getElementById('notifBadge');
-            if (badge) {
-                if (data.unreadCount > 0) {
-                    badge.innerText = data.unreadCount;
-                    badge.classList.remove('hidden');
-                } else {
-                    badge.classList.add('hidden');
-                }
-            }
-            renderNotificationsList(data.notifications);
-        }
-    } catch (err) {
-        console.error("Failed to load announcements:", err);
-    }
-}
-
-
-
 
 function updateSelectedCount() {
     const count = selectedCards.size;
