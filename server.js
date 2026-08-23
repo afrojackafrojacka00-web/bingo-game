@@ -496,50 +496,52 @@ app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) =>
     try {
         let finalImageUrl = imageUrl || null;
 
-        // If file was uploaded via Multer, req.file.path is Cloudinary's secure HTTP URL
+        // If a file was uploaded, req.file.path contains Cloudinary's secure HTTPS URL
         if (req.file && req.file.path) {
             finalImageUrl = req.file.path;
         }
 
-        // Save persistent post with Cloudinary URL in PostgreSQL
+        // 1. Insert post into Database for web users
         await pool.query(
             'INSERT INTO notifications (message, image_url) VALUES ($1, $2)',
-            [message, finalImageUrl]
+            [message || '', finalImageUrl]
         );
 
-        // Send to Telegram
-        const users = await pool.query('SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL');
+        // 2. Broadcast to Telegram users (if any exist)
         const botToken = process.env.TELEGRAM_BOT_TOKEN;
-
-        for (const user of users.rows) {
-            if (finalImageUrl) {
-                await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        chat_id: user.telegram_id, 
-                        photo: finalImageUrl, 
-                        caption: message, 
-                        parse_mode: 'HTML' 
-                    })
-                }).catch(() => {});
-            } else {
-                await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        chat_id: user.telegram_id, 
-                        text: message, 
-                        parse_mode: 'HTML' 
-                    })
-                }).catch(() => {});
+        if (botToken) {
+            const users = await pool.query('SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL');
+            
+            for (const user of users.rows) {
+                if (finalImageUrl) {
+                    await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            chat_id: user.telegram_id, 
+                            photo: finalImageUrl, 
+                            caption: message || '', 
+                            parse_mode: 'HTML' 
+                        })
+                    }).catch(() => {});
+                } else if (message) {
+                    await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            chat_id: user.telegram_id, 
+                            text: message, 
+                            parse_mode: 'HTML' 
+                        })
+                    }).catch(() => {});
+                }
             }
         }
 
-        res.json({ success: true, message: "Broadcast posted using Cloudinary permanent storage!" });
+        res.json({ success: true, message: "Broadcast posted successfully!" });
     } catch (err) {
-        console.error("Broadcast error:", err);
-        res.status(500).json({ success: false, message: "Server error during broadcast." });
+        console.error("BROADCAST ERROR DETAILED:", err);
+        res.status(500).json({ success: false, message: `Server Error: ${err.message}` });
     }
 });
 
@@ -612,40 +614,25 @@ app.delete('/api/admin/notifications/:id', async (req, res) => {
     }
 });
 
-// Optimized User Notifications Fetch
 app.get('/api/notifications', async (req, res) => {
     const { username } = req.query;
 
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
 
-    if (!username || username === 'null' || username === 'undefined') {
-        return res.json({ success: true, notifications: [], unreadCount: 0 });
-    }
-
     try {
-        const query = `
-            SELECT n.id, n.message, n.image_url, n.created_at,
-                   (n.id > COALESCE(r.last_read_id, 0)) AS is_unread
-            FROM notifications n
-            CROSS JOIN (
-                SELECT id, created_at FROM users WHERE LOWER(username) = LOWER($1)
-            ) u
-            LEFT JOIN user_notification_reads r ON r.user_id = u.id
-            WHERE n.created_at >= (u.created_at - INTERVAL '10 seconds')
-            ORDER BY n.id DESC
-            LIMIT 20;
-        `;
-        const result = await pool.query(query, [username]);
-        const unreadCount = result.rows.filter(row => row.is_unread).length;
+        // Fetch top 20 latest posts ordered by newest first
+        const result = await pool.query(
+            'SELECT id, message, image_url, created_at FROM notifications ORDER BY id DESC LIMIT 20'
+        );
 
         res.json({
             success: true,
             notifications: result.rows,
-            unreadCount
+            unreadCount: result.rows.length
         });
     } catch (err) {
         console.error("Notification Fetch Error:", err);
-        res.status(500).json({ success: false, message: "Server error" });
+        res.status(500).json({ success: false, message: "Server error fetching posts." });
     }
 });
 
