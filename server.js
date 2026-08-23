@@ -38,6 +38,7 @@ const gameState = {
 };
 
 // -------------------- DATABASE SCHEMA INITIALIZATION --------------------
+// -------------------- DATABASE SCHEMA INITIALIZATION --------------------
 const initDB = async () => {
     try {
         await pool.query(`
@@ -81,6 +82,24 @@ const initDB = async () => {
                 username VARCHAR(50) NOT NULL,
                 cards_selected INT[] NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS notifications (
+                id SERIAL PRIMARY KEY,
+                message TEXT,
+                image_url TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS user_notification_reads (
+                user_id INT REFERENCES users(id) ON DELETE CASCADE,
+                last_read_id INT DEFAULT 0,
+                PRIMARY KEY (user_id)
+            );
+
+            -- Indexes for high-speed searches and fast admin/user rendering
+            CREATE INDEX IF NOT EXISTS idx_notifications_id_desc ON notifications(id DESC);
+            CREATE INDEX IF NOT EXISTS idx_notifications_user_reads ON notifications(id DESC, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_users_username_lower ON users(LOWER(username));
         `);
 
         // Migration columns for existing tables
@@ -110,7 +129,7 @@ const initDB = async () => {
                 );
             }
         }
-        console.log("Database initialized cleanly.");
+        console.log("Database initialized cleanly with indexes.");
     } catch (err) {
         console.error("Database initialization error:", err);
     }
@@ -446,50 +465,6 @@ app.post('/api/set-password', async (req, res) => {
     }
 });
 
-// // 9. Broadcast Ads Endpoint (Supports Text, Photo URL, or Uploaded File)
-// app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) => {
-//     const { message, imageUrl, adminSecret } = req.body;
-    
-//     if (adminSecret !== process.env.ADMIN_SECRET) {
-//         return res.status(403).json({ success: false, message: "Unauthorized: Incorrect secret key." });
-//     }
-
-//     try {
-//         const users = await pool.query('SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL');
-//         const botToken = process.env.TELEGRAM_BOT_TOKEN;
-
-//         for (const user of users.rows) {
-//             if (req.file) {
-//                 const formData = new FormData();
-//                 formData.append('chat_id', user.telegram_id);
-//                 formData.append('caption', message || '');
-//                 formData.append('parse_mode', 'HTML');
-//                 formData.append('photo', new Blob([req.file.buffer], { type: req.file.mimetype }), req.file.originalname);
-
-//                 await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-//                     method: 'POST',
-//                     body: formData
-//                 }).catch(() => {});
-//             } else if (imageUrl) {
-//                 await fetch(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
-//                     method: 'POST',
-//                     headers: { 'Content-Type': 'application/json' },
-//                     body: JSON.stringify({ chat_id: user.telegram_id, photo: imageUrl, caption: message, parse_mode: 'HTML' })
-//                 }).catch(() => {});
-//             } else {
-//                 await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
-//                     method: 'POST',
-//                     headers: { 'Content-Type': 'application/json' },
-//                     body: JSON.stringify({ chat_id: user.telegram_id, text: message, parse_mode: 'HTML' })
-//                 }).catch(() => {});
-//             }
-//         }
-//         res.json({ success: true, message: "Broadcast sent successfully!" });
-//     } catch (err) {
-//         res.status(500).json({ success: false, message: "Server error during broadcast." });
-//     }
-// });
-
 const fs = require('fs');
 
 // Ensure public/uploads folder exists
@@ -596,7 +571,7 @@ app.put('/api/admin/notifications/:id', async (req, res) => {
     }
 });
 
-// 4. Delete Notification Post
+// Delete Notification Post & Remove Image File from Disk
 app.delete('/api/admin/notifications/:id', async (req, res) => {
     const { id } = req.params;
     const adminSecret = req.headers['x-admin-secret'];
@@ -606,15 +581,30 @@ app.delete('/api/admin/notifications/:id', async (req, res) => {
     }
 
     try {
+        // Fetch image URL before deleting
+        const fileQuery = await pool.query('SELECT image_url FROM notifications WHERE id = $1', [id]);
+        
+        if (fileQuery.rows.length > 0 && fileQuery.rows[0].image_url) {
+            const imageUrl = fileQuery.rows[0].image_url;
+            
+            // If it's a local upload, delete the physical file from disk
+            if (imageUrl.startsWith('/uploads/')) {
+                const filePath = path.join(__dirname, 'public', imageUrl);
+                fs.unlink(filePath, (err) => {
+                    if (err) console.error("Could not delete file from uploads folder:", err);
+                });
+            }
+        }
+
         await pool.query('DELETE FROM notifications WHERE id = $1', [id]);
-        res.json({ success: true, message: "Post deleted successfully!" });
+        res.json({ success: true, message: "Post and local file deleted successfully!" });
     } catch (err) {
+        console.error("Delete error:", err);
         res.status(500).json({ success: false, message: "Failed to delete post." });
     }
 });
 
-
-// Get User Notifications & Unread Count
+// Optimized User Notifications Fetch
 app.get('/api/notifications', async (req, res) => {
     const { username } = req.query;
 
@@ -626,17 +616,18 @@ app.get('/api/notifications', async (req, res) => {
 
     try {
         const query = `
-            SELECT n.*, 
+            SELECT n.id, n.message, n.image_url, n.created_at,
                    (n.id > COALESCE(r.last_read_id, 0)) AS is_unread
             FROM notifications n
-            JOIN users u ON LOWER(u.username) = LOWER($1)
+            CROSS JOIN (
+                SELECT id, created_at FROM users WHERE LOWER(username) = LOWER($1)
+            ) u
             LEFT JOIN user_notification_reads r ON r.user_id = u.id
             WHERE n.created_at >= (u.created_at - INTERVAL '10 seconds')
             ORDER BY n.id DESC
             LIMIT 20;
         `;
         const result = await pool.query(query, [username]);
-
         const unreadCount = result.rows.filter(row => row.is_unread).length;
 
         res.json({
