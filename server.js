@@ -465,6 +465,8 @@ app.post('/api/set-password', async (req, res) => {
     }
 });
 
+const fs = require('fs');
+
 const { v2: cloudinary } = require('cloudinary');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 
