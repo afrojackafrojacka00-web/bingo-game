@@ -521,29 +521,15 @@ app.post('/api/set-password', async (req, res) => {
 });
 
 
-// 1. Create Broadcast (Base64 stored in DB for Web, Direct Buffer to Telegram)
+// Pure Telegram Broadcast (No DB storage)
 app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) => {
     const { message, imageUrl, adminSecret } = req.body;
     
     if (adminSecret !== process.env.ADMIN_SECRET) {
-        return res.status(403).json({ success: false, message: "Unauthorized admin key." });
+        return res.status(403).json({ success: false, message: "Unauthorized key." });
     }
 
     try {
-        let finalImageUrl = imageUrl || null;
-
-        // Convert uploaded image to Base64 Data URL for web persistence
-        if (req.file) {
-            finalImageUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-        }
-
-        // Save persistent post in Database
-        await pool.query(
-            'INSERT INTO notifications (message, image_url) VALUES ($1, $2)',
-            [message, finalImageUrl]
-        );
-
-        // Telegram Broadcast
         const users = await pool.query('SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL');
         const botToken = process.env.TELEGRAM_BOT_TOKEN;
 
@@ -570,99 +556,14 @@ app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) =>
             }
         }
 
-        res.json({ success: true, message: "Broadcast sent to Telegram and published on Web!" });
+        res.json({ success: true, message: "Broadcast sent directly to Telegram users!" });
     } catch (err) {
         console.error("Broadcast error:", err);
         res.status(500).json({ success: false, message: "Server error during broadcast." });
     }
 });
 
-// 2. Get All Notifications for Admin Dashboard
-app.get('/api/admin/notifications', async (req, res) => {
-    const adminSecret = req.headers['x-admin-secret'];
-    if (adminSecret !== process.env.ADMIN_SECRET) {
-        return res.status(403).json({ success: false, message: "Unauthorized." });
-    }
 
-    try {
-        const result = await pool.query('SELECT * FROM notifications ORDER BY id DESC');
-        res.json({ success: true, notifications: result.rows });
-    } catch (err) {
-        res.status(500).json({ success: false, message: "Failed to fetch posts." });
-    }
-});
-
-// 3. Edit Notification Post
-app.put('/api/admin/notifications/:id', async (req, res) => {
-    const { id } = req.params;
-    const { message, imageUrl, adminSecret } = req.body;
-
-    if (adminSecret !== process.env.ADMIN_SECRET) {
-        return res.status(403).json({ success: false, message: "Unauthorized." });
-    }
-
-    try {
-        await pool.query(
-            'UPDATE notifications SET message = $1, image_url = $2 WHERE id = $3',
-            [message, imageUrl || null, id]
-        );
-        res.json({ success: true, message: "Post updated successfully!" });
-    } catch (err) {
-        res.status(500).json({ success: false, message: "Failed to update post." });
-    }
-});
-
-// 4. Delete Notification Post
-app.delete('/api/admin/notifications/:id', async (req, res) => {
-    const { id } = req.params;
-    const adminSecret = req.headers['x-admin-secret'];
-
-    if (adminSecret !== process.env.ADMIN_SECRET) {
-        return res.status(403).json({ success: false, message: "Unauthorized." });
-    }
-
-    try {
-        await pool.query('DELETE FROM notifications WHERE id = $1', [id]);
-        res.json({ success: true, message: "Post deleted successfully!" });
-    } catch (err) {
-        res.status(500).json({ success: false, message: "Failed to delete post." });
-    }
-});
-
-app.get('/api/notifications', async (req, res) => {
-    const { username } = req.query;
-
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-
-    if (!username || username === 'null' || username === 'undefined') {
-        return res.json({ success: true, notifications: [], unreadCount: 0 });
-    }
-
-    try {
-        const query = `
-            SELECT n.*, 
-                   (n.id > COALESCE(r.last_read_id, 0)) AS is_unread
-            FROM notifications n
-            JOIN users u ON LOWER(u.username) = LOWER($1)
-            LEFT JOIN user_notification_reads r ON r.user_id = u.id
-            WHERE n.created_at >= u.created_at
-            ORDER BY n.id DESC
-            LIMIT 20;
-        `;
-        const result = await pool.query(query, [username]);
-
-        const unreadCount = result.rows.filter(row => row.is_unread).length;
-
-        res.json({
-            success: true,
-            notifications: result.rows,
-            unreadCount
-        });
-    } catch (err) {
-        console.error("Notification Fetch Error:", err);
-        res.status(500).json({ success: false, message: "Server error" });
-    }
-});
 
 // 3. Mark Notifications as Read
 app.post('/api/notifications/mark-read', async (req, res) => {
