@@ -11,7 +11,14 @@ const multer = require('multer');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+const io = new Server(server, {
+    cors: { origin: "*" },
+    transports: ['websocket', 'polling'],
+    perMessageDeflate: false,
+    maxHttpBufferSize: 1e5,
+    pingInterval: 25000,
+    pingTimeout: 20000
+});
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
@@ -28,14 +35,10 @@ const pool = new Pool({
     ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
-// -------------------- IN-MEMORY GAME STATE --------------------
-const gameState = {
-    status: 'LOBBY_WAITING', // 'LOBBY_WAITING', 'GAME_ACTIVE'
-    gameId: null,
-    timer: 40,
-    selectedCards: new Map(), // cardNumber => username
-    readyPlayers: new Set()    // username
-};
+// -------------------- GAME CONFIG --------------------
+const STAKES = [10, 20, 50, 100, 200, 500];
+const ROUND_SECONDS = 40;
+const MIN_PLAYERS = 2;
 
 // -------------------- DATABASE SCHEMA INITIALIZATION --------------------
 // -------------------- DATABASE SCHEMA INITIALIZATION --------------------
@@ -100,12 +103,19 @@ const initDB = async () => {
             CREATE INDEX IF NOT EXISTS idx_notifications_id_desc ON notifications(id DESC);
             CREATE INDEX IF NOT EXISTS idx_notifications_user_reads ON notifications(id DESC, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_users_username_lower ON users(LOWER(username));
+            CREATE INDEX IF NOT EXISTS idx_game_participants_game ON game_participants(game_id);
+            CREATE INDEX IF NOT EXISTS idx_transactions_user_created ON transactions(user_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_game_sessions_status_created ON game_sessions(status, created_at DESC);
         `);
 
         // Migration columns for existing tables
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC(10,2) DEFAULT 10.00;');
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT;');
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE;');
+
+await pool.query('ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS stake NUMERIC(10,2) DEFAULT 0;');
+await pool.query('ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS prize_pool NUMERIC(10,2) DEFAULT 0;');
+
 
         // Seed 500 Bingo Cards if not already present
         const countRes = await pool.query('SELECT COUNT(*) FROM bingo_cards');
@@ -647,119 +657,164 @@ app.get('/api/notifications', async (req, res) => {
     }
 });
 
-// -------------------- SERVER-SIDE 40-SECOND TIMER LOOP --------------------
-setInterval(async () => {
-    if (gameState.status === 'LOBBY_WAITING') {
-        gameState.timer--;
 
-        if (gameState.timer <= 0) {
-            if (gameState.readyPlayers.size >= 2) {
-                gameState.status = 'GAME_ACTIVE';
 
-                try {
-                    const sessionRes = await pool.query(
-                        'INSERT INTO game_sessions (status) VALUES ($1) RETURNING id',
-                        ['IN_PROGRESS']
-                    );
-                    gameState.gameId = sessionRes.rows[0].id;
+// -------------------- HIGH-CONCURRENCY MULTI-ROOM GAME ENGINE --------------------
+// One room per stake. Users may select ANY number of cards from the 500-card catalog.
+// Cards are NOT globally exclusive: thousands of users can own the same card number.
+const DRAW_INTERVAL_MS = Number(process.env.DRAW_INTERVAL_MS || 2500);
+const ROOM_BROADCAST_MS = 1000;
+const MAX_CARDS_PER_PLAYER = Number(process.env.MAX_CARDS_PER_PLAYER || 500); // set 0 for no limit, catalog currently has 500
 
-                    const playerCardMap = {};
-                    gameState.selectedCards.forEach((username, cardNumber) => {
-                        if (gameState.readyPlayers.has(username)) {
-                            if (!playerCardMap[username]) playerCardMap[username] = [];
-                            playerCardMap[username].push(cardNumber);
-                        }
-                    });
+function createRoom(stake) {
+    return {
+        stake,
+        status: 'WAITING',
+        deadline: null,
+        gameId: null,
+        players: new Set(),
+        selectedCards: new Map(), // username => Set(cardNumber)
+        readyPlayers: new Set(),
+        drawn: new Set(),
+        drawOrder: [],
+        drawTimer: null,
+        drawIndex: 0,
+        lastTickSecond: null
+    };
+}
 
-                    for (const [username, cards] of Object.entries(playerCardMap)) {
-                        await pool.query(
-                            'INSERT INTO game_participants (game_id, username, cards_selected) VALUES ($1, $2, $3)',
-                            [gameState.gameId, username, cards]
-                        );
-                    }
-                } catch (err) {
-                    console.error("Error creating session in DB:", err);
-                }
+const gameRooms = new Map(STAKES.map(stake => [stake, createRoom(stake)]));
 
-                io.emit('game_started', {
-                    gameId: gameState.gameId,
-                    players: Array.from(gameState.readyPlayers)
-                });
-            } else {
-                gameState.selectedCards.clear();
-                gameState.readyPlayers.clear();
-                gameState.timer = 40;
+function remainingSeconds(room) {
+    if (room.status !== 'JOINING' || !room.deadline) return room.status === 'WAITING' ? ROUND_SECONDS : 0;
+    return Math.max(0, Math.ceil((room.deadline - Date.now()) / 1000));
+}
+function roomSnapshot(room) {
+    const activeCount = room.status === 'PLAYING' ? room.readyPlayers.size : room.players.size;
+    return { stake: room.stake, status: room.status, timer: remainingSeconds(room), players: room.players.size,
+        readyPlayers: room.readyPlayers.size, prizePool: Number((activeCount * room.stake).toFixed(2)), gameId: room.gameId };
+}
+function allRoomsSnapshot() { return STAKES.map(stake => roomSnapshot(gameRooms.get(stake))); }
+function emitRoomsState() { io.emit('rooms_state', allRoomsSnapshot()); }
+function roomName(stake) { return `stake_${stake}`; }
 
-                io.emit('lobby_reset', { 
-                    message: "Not enough ready players. Cards reset for a fair round!" 
-                });
-            }
+async function getUserIdAndBalance(username, client = pool) {
+    const result = await client.query('SELECT id, username, balance FROM users WHERE LOWER(username)=LOWER($1) FOR UPDATE', [username]);
+    return result.rows[0] || null;
+}
+async function refundStake(stake, username, reason) {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const user = await getUserIdAndBalance(username, client);
+        if (!user) throw new Error('User not found');
+        await client.query('UPDATE users SET balance=balance+$1 WHERE id=$2', [stake, user.id]);
+        await client.query('INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)', [user.id, stake, reason]);
+        await client.query('COMMIT');
+    } catch (e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
+}
+function userCards(room, username) { return room.selectedCards.get(username) || new Set(); }
+function removePlayer(room, username) { room.players.delete(username); room.readyPlayers.delete(username); room.selectedCards.delete(username); }
+function clearDrawTimer(room) { if (room.drawTimer) clearInterval(room.drawTimer); room.drawTimer=null; }
+async function resetRoom(room, message=null) {
+    clearDrawTimer(room); room.status='WAITING'; room.deadline=null; room.gameId=null; room.players.clear(); room.selectedCards.clear(); room.readyPlayers.clear(); room.drawn.clear(); room.drawOrder=[]; room.drawIndex=0; room.lastTickSecond=null;
+    io.to(roomName(room.stake)).emit('room_reset',{stake:room.stake,message});
+    emitRoomsState();
+}
+function shuffledBingoNumbers() { const a=Array.from({length:75},(_,i)=>i+1); for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
+function isWinningGrid(grid, drawn) {
+    const hit=(v,r,c)=>v==='FREE'||drawn.has(Number(v));
+    for(let r=0;r<5;r++) if([0,1,2,3,4].every(c=>hit(grid[r][c],r,c))) return true;
+    for(let c=0;c<5;c++) if([0,1,2,3,4].every(r=>hit(grid[r][c],r,c))) return true;
+    if([0,1,2,3,4].every(i=>hit(grid[i][i],i,i))) return true;
+    if([0,1,2,3,4].every(i=>hit(grid[i][4-i],i,4-i))) return true;
+    return false;
+}
+const cardGridCache = new Map();
+async function getCardGrid(cardNumber) {
+    if(cardGridCache.has(cardNumber)) return cardGridCache.get(cardNumber);
+    const r=await pool.query('SELECT grid FROM bingo_cards WHERE card_number=$1',[cardNumber]);
+    if(!r.rowCount) return null; const grid=r.rows[0].grid; cardGridCache.set(cardNumber,grid); return grid;
+}
+async function startRoomGame(room) {
+    room.status='PLAYING'; room.deadline=null;
+    const participants=Array.from(room.readyPlayers);
+    const prize=participants.length*room.stake;
+    const client=await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const sr=await client.query('INSERT INTO game_sessions(status,stake,prize_pool) VALUES($1,$2,$3) RETURNING id',['IN_PROGRESS',room.stake,prize]);
+        room.gameId=sr.rows[0].id;
+        for(const username of participants) {
+            const cards=Array.from(userCards(room,username));
+            await client.query('INSERT INTO game_participants(game_id,username,cards_selected) VALUES($1,$2,$3)',[room.gameId,username,cards]);
+        }
+        await client.query('COMMIT');
+    } catch(e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
+    room.drawOrder=shuffledBingoNumbers(); room.drawIndex=0; room.drawn.clear();
+    io.to(roomName(room.stake)).emit('game_started',{stake:room.stake,gameId:room.gameId,prizePool:prize,drawn:[]});
+    emitRoomsState();
+    room.drawTimer=setInterval(()=>{
+        if(room.status!=='PLAYING'||room.drawIndex>=room.drawOrder.length){clearDrawTimer(room);return;}
+        const number=room.drawOrder[room.drawIndex++]; room.drawn.add(number);
+        io.to(roomName(room.stake)).emit('number_drawn',{stake:room.stake,number,drawIndex:room.drawIndex});
+    },DRAW_INTERVAL_MS);
+}
+
+// Single scheduler: six rooms, no per-player timers. Only room subscribers receive room ticks.
+setInterval(async()=>{
+    for(const room of gameRooms.values()) {
+        if(room.status!=='JOINING') continue;
+        const seconds=remainingSeconds(room);
+        if(seconds!==room.lastTickSecond){room.lastTickSecond=seconds;io.to(roomName(room.stake)).emit('room_tick',roomSnapshot(room));}
+        if(room.deadline && Date.now()<room.deadline) continue;
+        const unready=Array.from(room.players).filter(u=>!room.readyPlayers.has(u));
+        for(const u of unready){try{await refundStake(room.stake,u,'GAME_REFUND_UNREADY');}catch(e){console.error('refund',e)} removePlayer(room,u);}
+        if(room.readyPlayers.size>=MIN_PLAYERS){
+            try{await startRoomGame(room);}catch(e){console.error('start game',e);for(const u of Array.from(room.players)){try{await refundStake(room.stake,u,'GAME_REFUND_START_ERROR')}catch(x){console.error(x)}} await resetRoom(room,'The game could not start. Stakes were refunded.');}
         } else {
-            io.emit('timer_tick', { timer: gameState.timer, status: gameState.status });
+            for(const u of Array.from(room.players)){try{await refundStake(room.stake,u,'GAME_REFUND_NOT_ENOUGH_PLAYERS')}catch(e){console.error(e)}}
+            await resetRoom(room,'Not enough ready players. Your stake was refunded.');
         }
     }
-}, 1000);
+},ROOM_BROADCAST_MS);
 
-// -------------------- REAL-TIME SOCKET.IO ENGINE --------------------
-io.on('connection', (socket) => {
-    socket.emit('init_state', {
-        status: gameState.status,
-        timer: gameState.timer,
-        takenCards: Object.fromEntries(gameState.selectedCards),
-        readyPlayersCount: gameState.readyPlayers.size
+io.on('connection',(socket)=>{
+    socket.emit('rooms_state',allRoomsSnapshot());
+    socket.on('rooms_state_request',()=>socket.emit('rooms_state',allRoomsSnapshot()));
+    socket.on('subscribe_room',({stake,username},cb=()=>{})=>{
+        stake=Number(stake); const room=gameRooms.get(stake); if(!room) return cb({success:false});
+        socket.join(roomName(stake));
+        cb({success:true,state:{...roomSnapshot(room),selectedCards:Array.from(userCards(room,username)),drawn:Array.from(room.drawn)}});
     });
-
-    socket.on('toggle_card', ({ cardNumber, username }) => {
-        if (gameState.status !== 'LOBBY_WAITING') {
-            return socket.emit('error_message', { message: "Card selection is locked during active gameplay!" });
-        }
-
-        const currentOwner = gameState.selectedCards.get(cardNumber);
-        if (currentOwner) {
-            if (currentOwner === username) {
-                gameState.selectedCards.delete(cardNumber);
-                io.emit('card_freed', { cardNumber });
-            } else {
-                socket.emit('error_message', { message: `Card ${cardNumber} is taken by ${currentOwner}` });
-            }
-        } else {
-            gameState.selectedCards.set(cardNumber, username);
-            io.emit('card_taken', { cardNumber, username });
-        }
+    socket.on('unsubscribe_room',({stake})=>socket.leave(roomName(Number(stake))));
+    socket.on('join_room',async({stake,username},cb=()=>{})=>{
+        stake=Number(stake); const room=gameRooms.get(stake); if(!room||!username) return cb({success:false,message:'Invalid game room.'});
+        if(room.status==='PLAYING') return cb({success:false,message:'This game is already playing.'});
+        for(const [otherStake,r] of gameRooms) if(otherStake!==stake&&r.players.has(username)) return cb({success:false,message:`You are already in the ${otherStake} Birr room.`});
+        if(room.players.has(username)){socket.join(roomName(stake));return cb({success:true,alreadyJoined:true,room:roomSnapshot(room)});}
+        const client=await pool.connect();
+        try{await client.query('BEGIN');const user=await getUserIdAndBalance(username,client);if(!user)throw new Error('User not found.');if(Number(user.balance)<stake)throw new Error('Insufficient balance.');await client.query('UPDATE users SET balance=balance-$1 WHERE id=$2',[stake,user.id]);await client.query('INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',[user.id,-stake,'GAME_ENTRY']);await client.query('COMMIT');
+            room.players.add(username);room.selectedCards.set(username,new Set());if(room.status==='WAITING'){room.status='JOINING';room.deadline=Date.now()+ROUND_SECONDS*1000;room.lastTickSecond=null;}socket.join(roomName(stake));io.to(roomName(stake)).emit('room_state',roomSnapshot(room));emitRoomsState();cb({success:true,room:roomSnapshot(room),balance:Number(user.balance)-stake});
+        }catch(e){await client.query('ROLLBACK');cb({success:false,message:e.message||'Unable to join room.'});}finally{client.release();}
     });
-
-    socket.on('player_ready', ({ username }) => {
-        if (gameState.status !== 'LOBBY_WAITING') return;
-
-        const userHasCard = Array.from(gameState.selectedCards.values()).includes(username);
-        if (!userHasCard) {
-            return socket.emit('error_message', { message: "Please select at least one card before starting!" });
-        }
-
-        gameState.readyPlayers.add(username);
-        io.emit('ready_count_updated', { readyCount: gameState.readyPlayers.size });
+    socket.on('leave_room',async({stake,username},cb=()=>{})=>{
+        stake=Number(stake);const room=gameRooms.get(stake);if(!room||!room.players.has(username))return cb({success:false,message:'You are not in this room.'});if(room.status==='PLAYING')return cb({success:false,message:'You cannot leave after the game starts.'});
+        try{await refundStake(stake,username,'GAME_REFUND_LEFT_ROOM');removePlayer(room,username);socket.leave(roomName(stake));if(!room.players.size){room.status='WAITING';room.deadline=null;room.lastTickSecond=null;}io.to(roomName(stake)).emit('room_state',roomSnapshot(room));emitRoomsState();cb({success:true});}catch(e){cb({success:false,message:'Refund failed. Please try again.'});}
     });
-
-    socket.on('claim_bingo', async ({ username }) => {
-        if (gameState.status !== 'GAME_ACTIVE' || !gameState.readyPlayers.has(username)) {
-            return socket.emit('error_message', { message: "Invalid Bingo claim." });
-        }
-
-        const winningUser = username;
-
-        if (gameState.gameId) {
-            pool.query('UPDATE game_sessions SET status = $1, winner_username = $2, ended_at = NOW() WHERE id = $3', ['COMPLETED', winningUser, gameState.gameId]).catch(console.error);
-            pool.query('UPDATE users SET wins = wins + 1 WHERE username = $1', [winningUser]).catch(console.error);
-        }
-
-        gameState.selectedCards.clear();
-        gameState.readyPlayers.clear();
-        gameState.status = 'LOBBY_WAITING';
-        gameState.timer = 40;
-        gameState.gameId = null;
-
-        io.emit('game_ended', { winner: winningUser });
+    socket.on('toggle_card',({stake,cardNumber,username},cb=()=>{})=>{
+        stake=Number(stake);cardNumber=Number(cardNumber);const room=gameRooms.get(stake);if(!room||room.status!=='JOINING'||!room.players.has(username))return cb({success:false,message:'Card selection is closed.'});if(!Number.isInteger(cardNumber)||cardNumber<1||cardNumber>500)return cb({success:false,message:'Invalid card number.'});if(room.readyPlayers.has(username))return cb({success:false,message:'You are already ready.'});
+        const cards=userCards(room,username);if(cards.has(cardNumber)){cards.delete(cardNumber);}else{if(MAX_CARDS_PER_PLAYER>0&&cards.size>=MAX_CARDS_PER_PLAYER)return cb({success:false,message:`Maximum ${MAX_CARDS_PER_PLAYER} cards.`});cards.add(cardNumber);}room.selectedCards.set(username,cards);socket.emit('my_cards',{stake,cards:Array.from(cards)});cb({success:true,count:cards.size});
+    });
+    socket.on('player_ready',({stake,username},cb=()=>{})=>{stake=Number(stake);const room=gameRooms.get(stake);if(!room||room.status!=='JOINING'||!room.players.has(username))return cb({success:false,message:'Room is not accepting READY.'});if(!userCards(room,username).size)return cb({success:false,message:'Select at least one card.'});room.readyPlayers.add(username);io.to(roomName(stake)).emit('room_state',roomSnapshot(room));emitRoomsState();cb({success:true});});
+    socket.on('claim_bingo',async({stake,username,cardNumber},cb=()=>{})=>{
+        stake=Number(stake);cardNumber=Number(cardNumber);const room=gameRooms.get(stake);if(!room||room.status!=='PLAYING'||!room.readyPlayers.has(username)||!userCards(room,username).has(cardNumber))return cb({success:false,message:'Invalid Bingo claim.'});
+        try{const grid=await getCardGrid(cardNumber);if(!grid||!isWinningGrid(grid,room.drawn))return cb({success:false,message:'That card does not have Bingo yet.'});
+            // Lock the room synchronously before the first DB await so concurrent claims cannot both win.
+            room.status='FINISHING';clearDrawTimer(room);const prize=room.readyPlayers.size*room.stake;const client=await pool.connect();try{await client.query('BEGIN');const user=await getUserIdAndBalance(username,client);if(!user)throw new Error('Winner not found');await client.query('UPDATE game_sessions SET status=$1,winner_username=$2,ended_at=NOW() WHERE id=$3',['COMPLETED',username,room.gameId]);await client.query('UPDATE users SET wins=wins+1,balance=balance+$1 WHERE id=$2',[prize,user.id]);await client.query('INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',[user.id,prize,'GAME_WIN']);await client.query('COMMIT');}catch(e){await client.query('ROLLBACK');room.status='PLAYING';throw e;}finally{client.release();}
+            io.to(roomName(stake)).emit('game_ended',{stake,winner:username,prize,cardNumber});await resetRoom(room,`Game finished. ${username} won ${prize} Birr!`);cb({success:true});
+        }catch(e){console.error('claim',e);cb({success:false,message:e.message||'Unable to complete claim.'});}
     });
 });
 
-server.listen(PORT, () => console.log(`Zero-Lag Bingo Server live on port ${PORT}`));
+server.listen(PORT,()=>console.log(`Bingo server listening on ${PORT}`));
