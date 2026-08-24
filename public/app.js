@@ -271,11 +271,13 @@ function toggleCard(cardNumber) {
 function updateGridUI() {
     document.querySelectorAll('.card-item').forEach(el => {
         const cardNumber = Number(el.dataset.card);
-        el.classList.toggle('selected', selectedCards.has(cardNumber));
-        el.classList.remove('taken');
+        const isMine = selectedCards.has(cardNumber);
+        const isTaken = !!takenCardsMap[cardNumber];
+
+        el.classList.toggle('selected', isMine);
+        el.classList.toggle('taken', isTaken && !isMine);
     });
 }
-
 function updateSelectedCount() {
     const count = selectedCards.size;
     document.getElementById('selectedCount').innerText = count;
@@ -288,6 +290,17 @@ function syncRoomUI(room) {
     document.getElementById('lobbyTimer').innerText = `${Math.max(0, room.timer)}s`;
     document.getElementById('readyCount').innerText = room.readyPlayers || 0;
     document.getElementById('lobbyStatus').innerText = formatStatus(room);
+
+    // Track taken cards in this room
+    if (room.takenCards) {
+        Object.keys(takenCardsMap).forEach(k => delete takenCardsMap[k]);
+        room.takenCards.forEach(cardNum => {
+            if (!selectedCards.has(Number(cardNum))) {
+                takenCardsMap[cardNum] = true;
+            }
+        });
+        updateGridUI();
+    }
 
     renderMyGame();
 }

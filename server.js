@@ -691,8 +691,23 @@ function remainingSeconds(room) {
 }
 function roomSnapshot(room) {
     const activeCount = room.status === 'PLAYING' ? room.readyPlayers.size : room.players.size;
-    return { stake: room.stake, status: room.status, timer: remainingSeconds(room), players: room.players.size,
-        readyPlayers: room.readyPlayers.size, prizePool: Number((activeCount * room.stake).toFixed(2)), gameId: room.gameId };
+    
+    // Collect all taken cards across all players in this room
+    const takenCards = [];
+    for (const cards of room.selectedCards.values()) {
+        takenCards.push(...Array.from(cards));
+    }
+
+    return { 
+        stake: room.stake, 
+        status: room.status, 
+        timer: remainingSeconds(room), 
+        players: room.players.size,
+        readyPlayers: room.readyPlayers.size, 
+        prizePool: Number((activeCount * room.stake).toFixed(2)), 
+        gameId: room.gameId,
+        takenCards 
+    };
 }
 function allRoomsSnapshot() { return STAKES.map(stake => roomSnapshot(gameRooms.get(stake))); }
 function emitRoomsState() { io.emit('rooms_state', allRoomsSnapshot()); }
@@ -754,11 +769,37 @@ async function startRoomGame(room) {
     room.drawOrder=shuffledBingoNumbers(); room.drawIndex=0; room.drawn.clear();
     io.to(roomName(room.stake)).emit('game_started',{stake:room.stake,gameId:room.gameId,prizePool:prize,drawn:[]});
     emitRoomsState();
-    room.drawTimer=setInterval(()=>{
-        if(room.status!=='PLAYING'||room.drawIndex>=room.drawOrder.length){clearDrawTimer(room);return;}
-        const number=room.drawOrder[room.drawIndex++]; room.drawn.add(number);
-        io.to(roomName(room.stake)).emit('number_drawn',{stake:room.stake,number,drawIndex:room.drawIndex});
-    },DRAW_INTERVAL_MS);
+    room.drawTimer = setInterval(async () => {
+    if (room.status !== 'PLAYING') {
+        clearDrawTimer(room);
+        return;
+    }
+
+    // 1. If all active/ready players disconnected or left, reset the room automatically
+    if (room.readyPlayers.size === 0) {
+        clearDrawTimer(room);
+        if (room.gameId) {
+            await pool.query("UPDATE game_sessions SET status = 'CANCELLED', ended_at = NOW() WHERE id = $1", [room.gameId]);
+        }
+        await resetRoom(room, "Game ended because all players left.");
+        return;
+    }
+
+    // 2. Draw next number
+    if (room.drawIndex < room.drawOrder.length) {
+        const number = room.drawOrder[room.drawIndex++];
+        room.drawn.add(number);
+        io.to(roomName(room.stake)).emit('number_drawn', { stake: room.stake, number, drawIndex: room.drawIndex });
+    } else {
+        // 3. All 75 numbers called and no winner claimed
+        clearDrawTimer(room);
+        if (room.gameId) {
+            await pool.query("UPDATE game_sessions SET status = 'EXHAUSTED', ended_at = NOW() WHERE id = $1", [room.gameId]);
+        }
+        io.to(roomName(room.stake)).emit('game_ended', { stake: room.stake, winner: 'No One', prize: 0 });
+        await resetRoom(room, "All numbers 1-75 were called with no winner. Ready for the next round!");
+    }
+}, DRAW_INTERVAL_MS);
 }
 
 // Single scheduler: six rooms, no per-player timers. Only room subscribers receive room ticks.
@@ -798,14 +839,75 @@ io.on('connection',(socket)=>{
             room.players.add(username);room.selectedCards.set(username,new Set());if(room.status==='WAITING'){room.status='JOINING';room.deadline=Date.now()+ROUND_SECONDS*1000;room.lastTickSecond=null;}socket.join(roomName(stake));io.to(roomName(stake)).emit('room_state',roomSnapshot(room));emitRoomsState();cb({success:true,room:roomSnapshot(room),balance:Number(user.balance)-stake});
         }catch(e){await client.query('ROLLBACK');cb({success:false,message:e.message||'Unable to join room.'});}finally{client.release();}
     });
-    socket.on('leave_room',async({stake,username},cb=()=>{})=>{
-        stake=Number(stake);const room=gameRooms.get(stake);if(!room||!room.players.has(username))return cb({success:false,message:'You are not in this room.'});if(room.status==='PLAYING')return cb({success:false,message:'You cannot leave after the game starts.'});
-        try{await refundStake(stake,username,'GAME_REFUND_LEFT_ROOM');removePlayer(room,username);socket.leave(roomName(stake));if(!room.players.size){room.status='WAITING';room.deadline=null;room.lastTickSecond=null;}io.to(roomName(stake)).emit('room_state',roomSnapshot(room));emitRoomsState();cb({success:true});}catch(e){cb({success:false,message:'Refund failed. Please try again.'});}
-    });
-    socket.on('toggle_card',({stake,cardNumber,username},cb=()=>{})=>{
-        stake=Number(stake);cardNumber=Number(cardNumber);const room=gameRooms.get(stake);if(!room||room.status!=='JOINING'||!room.players.has(username))return cb({success:false,message:'Card selection is closed.'});if(!Number.isInteger(cardNumber)||cardNumber<1||cardNumber>500)return cb({success:false,message:'Invalid card number.'});if(room.readyPlayers.has(username))return cb({success:false,message:'You are already ready.'});
-        const cards=userCards(room,username);if(cards.has(cardNumber)){cards.delete(cardNumber);}else{if(MAX_CARDS_PER_PLAYER>0&&cards.size>=MAX_CARDS_PER_PLAYER)return cb({success:false,message:`Maximum ${MAX_CARDS_PER_PLAYER} cards.`});cards.add(cardNumber);}room.selectedCards.set(username,cards);socket.emit('my_cards',{stake,cards:Array.from(cards)});cb({success:true,count:cards.size});
-    });
+    socket.on('leave_room', async ({ stake, username }, cb = () => {}) => {
+    stake = Number(stake);
+    const room = gameRooms.get(stake);
+    if (!room || !room.players.has(username)) return cb({ success: false, message: 'You are not in this room.' });
+    
+    if (room.status === 'PLAYING') {
+        removePlayer(room, username);
+        socket.leave(roomName(stake));
+        io.to(roomName(stake)).emit('room_state', roomSnapshot(room));
+        emitRoomsState();
+        return cb({ success: true, message: 'You left the playing game. Stake forfeited.' });
+    }
+
+    try {
+        await refundStake(stake, username, 'GAME_REFUND_LEFT_ROOM');
+        removePlayer(room, username);
+        socket.leave(roomName(stake));
+        if (!room.players.size) {
+            room.status = 'WAITING';
+            room.deadline = null;
+            room.lastTickSecond = null;
+        }
+        io.to(roomName(stake)).emit('room_state', roomSnapshot(room));
+        emitRoomsState();
+        cb({ success: true });
+    } catch (e) {
+        cb({ success: false, message: 'Refund failed. Please try again.' });
+    }
+});
+    socket.on('toggle_card', ({ stake, cardNumber, username }, cb = () => {}) => {
+    stake = Number(stake);
+    cardNumber = Number(cardNumber);
+    const room = gameRooms.get(stake);
+    
+    if (!room || room.status !== 'JOINING' || !room.players.has(username)) {
+        return cb({ success: false, message: 'Card selection is closed.' });
+    }
+    if (!Number.isInteger(cardNumber) || cardNumber < 1 || cardNumber > 500) {
+        return cb({ success: false, message: 'Invalid card number.' });
+    }
+    if (room.readyPlayers.has(username)) {
+        return cb({ success: false, message: 'You are already ready.' });
+    }
+
+    const cards = userCards(room, username);
+
+    if (cards.has(cardNumber)) {
+        cards.delete(cardNumber);
+    } else {
+        // Check if another player in the room already claimed this card
+        for (const [owner, ownerCards] of room.selectedCards.entries()) {
+            if (owner !== username && ownerCards.has(cardNumber)) {
+                return cb({ success: false, message: `Card ${cardNumber} is already taken by another player!` });
+            }
+        }
+        
+        if (MAX_CARDS_PER_PLAYER > 0 && cards.size >= MAX_CARDS_PER_PLAYER) {
+            return cb({ success: false, message: `Maximum ${MAX_CARDS_PER_PLAYER} cards.` });
+        }
+        cards.add(cardNumber);
+    }
+
+    room.selectedCards.set(username, cards);
+    socket.emit('my_cards', { stake, cards: Array.from(cards) });
+    
+    // Broadcast updated taken cards list to everyone in the room
+    io.to(roomName(stake)).emit('room_state', roomSnapshot(room));
+    cb({ success: true, count: cards.size });
+});
     socket.on('player_ready',({stake,username},cb=()=>{})=>{stake=Number(stake);const room=gameRooms.get(stake);if(!room||room.status!=='JOINING'||!room.players.has(username))return cb({success:false,message:'Room is not accepting READY.'});if(!userCards(room,username).size)return cb({success:false,message:'Select at least one card.'});room.readyPlayers.add(username);io.to(roomName(stake)).emit('room_state',roomSnapshot(room));emitRoomsState();cb({success:true});});
     socket.on('claim_bingo',async({stake,username,cardNumber},cb=()=>{})=>{
         stake=Number(stake);cardNumber=Number(cardNumber);const room=gameRooms.get(stake);if(!room||room.status!=='PLAYING'||!room.readyPlayers.has(username)||!userCards(room,username).has(cardNumber))return cb({success:false,message:'Invalid Bingo claim.'});
