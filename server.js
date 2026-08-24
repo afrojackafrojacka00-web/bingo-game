@@ -52,7 +52,7 @@ const initDB = async () => {
                 telegram_id BIGINT UNIQUE,
                 phone_number VARCHAR(30),
                 phone_verified BOOLEAN DEFAULT FALSE,
-                balance NUMERIC(10,2) DEFAULT 10.00,
+                balance NUMERIC(10,2) DEFAULT 0.00,
                 wins INT DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
@@ -99,8 +99,19 @@ const initDB = async () => {
                 PRIMARY KEY (user_id)
             );
 
+            CREATE TABLE IF NOT EXISTS user_notifications (
+                id BIGSERIAL PRIMARY KEY,
+                user_id INT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                message TEXT,
+                image_url TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                read_at TIMESTAMP NULL
+            );
+
             -- Indexes for high-speed searches and fast admin/user rendering
             CREATE INDEX IF NOT EXISTS idx_notifications_id_desc ON notifications(id DESC);
+            CREATE INDEX IF NOT EXISTS idx_user_notifications_user_created ON user_notifications(user_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_user_notifications_unread ON user_notifications(user_id) WHERE read_at IS NULL;
             CREATE INDEX IF NOT EXISTS idx_notifications_user_reads ON notifications(id DESC, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_users_username_lower ON users(LOWER(username));
             CREATE INDEX IF NOT EXISTS idx_game_participants_game ON game_participants(game_id);
@@ -109,7 +120,7 @@ const initDB = async () => {
         `);
 
         // Migration columns for existing tables
-        await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC(10,2) DEFAULT 10.00;');
+        await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC(10,2) DEFAULT 0.00;');
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT;');
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE;');
 
@@ -156,6 +167,15 @@ async function createNotificationBaseline(client, userId) {
         VALUES ($1, $2)
         ON CONFLICT (user_id) DO NOTHING
     `, [userId, lastReadId]);
+}
+
+
+async function createPersonalNotification(client, userId, message, imageUrl = null) {
+    await client.query(
+        `INSERT INTO user_notifications (user_id, message, image_url)
+         VALUES ($1, $2, $3)`,
+        [userId, message || '', imageUrl]
+    );
 }
 
 // Helper: Verify Telegram Auth Data
@@ -243,40 +263,42 @@ async function sendTelegramWelcomeMessage(telegramId, username, phoneNumber) {
 
 // 1. Web Registration Endpoint
 app.post('/api/register', async (req, res) => {
-    const { username, password, phoneNumber, initData } = req.body;
-    if (!username || !password) return res.status(400).json({ success: false, message: "Missing fields." });
+    const { username, password, phoneNumber } = req.body;
+    if (!username || !password) {
+        return res.status(400).json({ success: false, message: 'Missing fields.' });
+    }
 
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        let telegramId = null;
-        if (initData) {
-            const { isValid, user } = verifyTelegramAuth(initData, process.env.TELEGRAM_BOT_TOKEN);
-            if (isValid && user?.id) telegramId = user.id;
-        }
-
-        const hashedPassword = await bcrypt.hash(password, 10);
+        const hashedPassword = await bcrypt.hash(password, 12);
         const userRes = await client.query(
-            'INSERT INTO users (username, password, telegram_id, phone_number, balance) VALUES ($1, $2, $3, $4, 10.00) RETURNING id, username',
-            [username, hashedPassword, telegramId, phoneNumber || null]
+            `INSERT INTO users (username, password, telegram_id, phone_number, balance)
+             VALUES ($1, $2, NULL, $3, 0.00)
+             RETURNING id, username`,
+            [username, hashedPassword, phoneNumber || null]
         );
 
         const userId = userRes.rows[0].id;
 
-        // Record 10 Birr Welcome Transaction
-        await client.query(
-            'INSERT INTO transactions (user_id, amount, type) VALUES ($1, $2, $3)',
-            [userId, 10.00, 'WELCOME_BONUS']
-        );
-
+        // Old global notifications must not appear for this new account.
         await createNotificationBaseline(client, userId);
+
+        // This welcome belongs only to this new website account.
+        await createPersonalNotification(
+            client,
+            userId,
+            `Welcome ${userRes.rows[0].username}! 🎉\n\nYour account has been created successfully.\n\nBalance: 0.00 Birr.`,
+            null
+        );
 
         await client.query('COMMIT');
         res.json({ success: true, username: userRes.rows[0].username });
     } catch (err) {
         await client.query('ROLLBACK');
-        res.status(400).json({ success: false, message: "Username or Telegram account taken." });
+        console.error('Registration error:', err);
+        res.status(400).json({ success: false, message: 'Username already taken or registration failed.' });
     } finally {
         client.release();
     }
@@ -669,78 +691,97 @@ app.delete('/api/admin/notifications/:id', async (req, res) => {
 
 app.get('/api/notifications', async (req, res) => {
     const { username } = req.query;
-    if (!username) return res.status(400).json({ success: false, message: 'Username required.' });
+    if (!username) {
+        return res.status(400).json({ success: false, message: 'Username required.' });
+    }
 
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
 
     try {
         const userResult = await pool.query(
-            'SELECT id FROM users WHERE LOWER(username)=LOWER($1)',
+            `SELECT id, created_at FROM users WHERE LOWER(username) = LOWER($1)`,
             [username]
         );
         if (!userResult.rowCount) {
             return res.status(404).json({ success: false, message: 'User not found.' });
         }
 
-        const userId = userResult.rows[0].id;
-        let readResult = await pool.query(
-            'SELECT last_read_id FROM user_notification_reads WHERE user_id=$1',
-            [userId]
+        const user = userResult.rows[0];
+        const readResult = await pool.query(
+            'SELECT last_read_id FROM user_notification_reads WHERE user_id = $1',
+            [user.id]
+        );
+        const lastReadId = Number(readResult.rows[0]?.last_read_id || 0);
+
+        // Global announcements are visible only if created after this account.
+        const globalResult = await pool.query(
+            `SELECT id, message, image_url, created_at, false AS personal,
+                    CASE WHEN id > $2 THEN true ELSE false END AS unread
+             FROM notifications
+             WHERE created_at >= $1
+             ORDER BY created_at DESC
+             LIMIT 50`,
+            [user.created_at, lastReadId]
         );
 
-        if (!readResult.rowCount) {
-            // Existing accounts created before this update keep old notifications unread.
-            await pool.query(
-                'INSERT INTO user_notification_reads(user_id,last_read_id) VALUES($1,0) ON CONFLICT(user_id) DO NOTHING',
-                [userId]
-            );
-            readResult = { rows: [{ last_read_id: 0 }] };
-        }
-
-        const lastReadId = Number(readResult.rows[0].last_read_id || 0);
-        const result = await pool.query(
-            'SELECT id, message, image_url, created_at FROM notifications ORDER BY id DESC LIMIT 50'
-        );
-        const unread = await pool.query(
-            'SELECT COUNT(*)::int AS count FROM notifications WHERE id > $1',
-            [lastReadId]
+        // Personal notifications, including the website welcome message.
+        const personalResult = await pool.query(
+            `SELECT id, message, image_url, created_at, true AS personal,
+                    CASE WHEN read_at IS NULL THEN true ELSE false END AS unread
+             FROM user_notifications
+             WHERE user_id = $1
+             ORDER BY created_at DESC
+             LIMIT 50`,
+            [user.id]
         );
 
-        res.json({
-            success: true,
-            notifications: result.rows,
-            unreadCount: Number(unread.rows[0].count || 0)
-        });
+        const notifications = [...globalResult.rows, ...personalResult.rows]
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+            .slice(0, 50);
+
+        const unreadCount = notifications.filter(n => n.unread).length;
+
+        res.json({ success: true, notifications, unreadCount });
     } catch (err) {
         console.error('Notification Fetch Error:', err);
-        res.status(500).json({ success: false, message: 'Server error fetching posts.' });
+        res.status(500).json({ success: false, message: 'Server error fetching notifications.' });
     }
 });
 
 app.post('/api/notifications/mark-read', async (req, res) => {
     const { username } = req.body;
-    if (!username) return res.status(400).json({ success: false, message: 'Username required.' });
+    if (!username) {
+        return res.status(400).json({ success: false, message: 'Username required.' });
+    }
 
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+
         const userResult = await client.query(
-            'SELECT id FROM users WHERE LOWER(username)=LOWER($1)',
+            'SELECT id, created_at FROM users WHERE LOWER(username) = LOWER($1)',
             [username]
         );
         if (!userResult.rowCount) throw new Error('User not found.');
 
+        const user = userResult.rows[0];
         const latest = await client.query(
-            'SELECT COALESCE(MAX(id),0) AS latest_id FROM notifications'
+            'SELECT COALESCE(MAX(id), 0) AS latest_id FROM notifications WHERE created_at >= $1',
+            [user.created_at]
         );
-        const latestId = Number(latest.rows[0].latest_id || 0);
 
-        await client.query(`
-            INSERT INTO user_notification_reads(user_id,last_read_id)
-            VALUES($1,$2)
-            ON CONFLICT(user_id) DO UPDATE SET
-                last_read_id=GREATEST(user_notification_reads.last_read_id, EXCLUDED.last_read_id)
-        `, [userResult.rows[0].id, latestId]);
+        await client.query(
+            `INSERT INTO user_notification_reads (user_id, last_read_id)
+             VALUES ($1, $2)
+             ON CONFLICT (user_id) DO UPDATE SET
+             last_read_id = GREATEST(user_notification_reads.last_read_id, EXCLUDED.last_read_id)`,
+            [user.id, Number(latest.rows[0].latest_id || 0)]
+        );
+
+        await client.query(
+            'UPDATE user_notifications SET read_at = NOW() WHERE user_id = $1 AND read_at IS NULL',
+            [user.id]
+        );
 
         await client.query('COMMIT');
         res.json({ success: true, unreadCount: 0 });
