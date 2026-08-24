@@ -3,6 +3,10 @@ let currentStake = null;
 let pendingStake = null;
 let currentRoom = null;
 let cachedCards = null;
+let lobbyTimerInterval = null;
+let lobbyDeadline = null;
+let lobbyServerOffset = 0;
+let notificationRefreshTimer = null;
 const selectedCards = new Set();
 const takenCardsMap = {};
 const socket = io();
@@ -19,6 +23,7 @@ socket.on('room_state', state => {
     if (currentStake === Number(state.stake)) {
         currentRoom = state;
         syncRoomUI(state);
+        startLobbyTimer(state);
     }
     renderRooms();
 });
@@ -27,6 +32,7 @@ socket.on('room_tick', state => {
     if (currentStake === Number(state.stake)) {
         currentRoom = { ...currentRoom, ...state };
         syncRoomUI(currentRoom);
+        startLobbyTimer(currentRoom);
     }
     updateRoomInList(state);
 });
@@ -49,6 +55,7 @@ socket.on('number_drawn', ({ stake, number }) => {
 
 socket.on('game_started', ({ stake, gameId, prizePool, drawn }) => {
     if (Number(stake) !== currentStake) return;
+    stopLobbyTimer();
     currentRoom = { ...currentRoom, status: 'PLAYING', gameId, prizePool, drawn: drawn || [] };
     hide('selectionBox');
     show('gamePlayBox');
@@ -65,8 +72,12 @@ socket.on('game_ended', async ({ stake, winner, prize }) => {
     returnToRooms();
 });
 
-socket.on('room_reset', ({ stake, message }) => {
+socket.on('room_reset', async ({ stake, message }) => {
     if (Number(stake) !== currentStake) return;
+    stopLobbyTimer();
+    resetReadyButton();
+    selectedCards.clear();
+    await loadUserData(currentUsername);
     if (message) alert(message);
     returnToRooms();
 });
@@ -91,6 +102,47 @@ function showNotification(message) {
     setTimeout(() => {
         if (el.innerText === message) hide('lockoutNotice');
     }, 4000);
+}
+
+
+function stopLobbyTimer() {
+    if (lobbyTimerInterval) {
+        clearInterval(lobbyTimerInterval);
+        lobbyTimerInterval = null;
+    }
+}
+
+function startLobbyTimer(room) {
+    stopLobbyTimer();
+
+    if (!room || room.status !== 'JOINING' || !room.deadline) return;
+
+    lobbyDeadline = Number(room.deadline);
+    lobbyServerOffset = Number(room.serverNow || Date.now()) - Date.now();
+
+    const update = () => {
+        const estimatedServerNow = Date.now() + lobbyServerOffset;
+        const remaining = Math.max(
+            0,
+            Math.ceil((lobbyDeadline - estimatedServerNow) / 1000)
+        );
+
+        const timer = document.getElementById('lobbyTimer');
+        if (timer) timer.innerText = `${remaining}s`;
+
+        if (remaining <= 0) stopLobbyTimer();
+    };
+
+    update();
+    lobbyTimerInterval = setInterval(update, 250);
+}
+
+function resetReadyButton() {
+    const btn = document.getElementById('playGameBtn');
+    if (!btn) return;
+    delete btn.dataset.ready;
+    btn.innerText = 'READY';
+    btn.disabled = selectedCards.size === 0;
 }
 
 function formatStatus(room) {
@@ -185,6 +237,19 @@ function confirmJoin() {
                 currentRoom = { ...currentRoom, ...response2.state };
                 selectedCards.clear();
                 (response2.state.selectedCards || []).forEach(c => selectedCards.add(Number(c)));
+
+                if (response2.state.isReady) {
+                    const btn = document.getElementById('playGameBtn');
+                    if (btn) {
+                        btn.disabled = true;
+                        btn.dataset.ready = '1';
+                        btn.innerText = 'READY — Waiting for start...';
+                    }
+                } else {
+                    resetReadyButton();
+                }
+
+                startLobbyTimer(currentRoom);
             }
         });
         await loadUserData(currentUsername);
@@ -207,7 +272,13 @@ function showHome() {
 }
 
 function returnToRooms() {
-    if (currentStake) socket.emit('unsubscribe_room', { stake: currentStake });
+    stopLobbyTimer();
+    resetReadyButton();
+
+    if (currentStake) {
+        socket.emit('unsubscribe_room', { stake: currentStake });
+    }
+
     currentStake = null;
     currentRoom = null;
     selectedCards.clear();
@@ -263,9 +334,21 @@ function renderCardNumbers(cardNumbers) {
 
 function toggleCard(cardNumber) {
     if (!currentStake || currentRoom?.status !== 'JOINING') return;
-    socket.emit('toggle_card', { stake: currentStake, cardNumber, username: currentUsername }, response => {
-        if (!response?.success) showNotification(response?.message || 'Could not update card.');
-    });
+
+    socket.emit(
+        'toggle_card',
+        { stake: currentStake, cardNumber, username: currentUsername },
+        response => {
+            if (!response?.success) {
+                return showNotification(response?.message || 'Could not update card.');
+            }
+
+            if (response.balance !== undefined) {
+                const balance = document.getElementById('balanceDisplay');
+                if (balance) balance.innerText = Number(response.balance).toFixed(2);
+            }
+        }
+    );
 }
 
 function updateGridUI() {
@@ -278,20 +361,34 @@ function updateGridUI() {
         el.classList.toggle('taken', isTaken && !isMine);
     });
 }
+
 function updateSelectedCount() {
     const count = selectedCards.size;
     document.getElementById('selectedCount').innerText = count;
+
     const btn = document.getElementById('playGameBtn');
-    if (btn && !btn.dataset.ready) btn.disabled = count === 0;
+    if (!btn) return;
+
+    if (btn.dataset.ready === '1') {
+        btn.disabled = true;
+        return;
+    }
+
+    btn.disabled = count === 0;
 }
 
 function syncRoomUI(room) {
     if (!room) return;
-    document.getElementById('lobbyTimer').innerText = `${Math.max(0, room.timer)}s`;
-    document.getElementById('readyCount').innerText = room.readyPlayers || 0;
-    document.getElementById('lobbyStatus').innerText = formatStatus(room);
 
-    // Track taken cards in this room
+    const timer = document.getElementById('lobbyTimer');
+    if (timer) timer.innerText = `${Math.max(0, Number(room.timer || 0))}s`;
+
+    const readyCount = document.getElementById('readyCount');
+    if (readyCount) readyCount.innerText = room.readyPlayers || 0;
+
+    const lobbyStatus = document.getElementById('lobbyStatus');
+    if (lobbyStatus) lobbyStatus.innerText = formatStatus(room);
+
     if (room.takenCards) {
         Object.keys(takenCardsMap).forEach(k => delete takenCardsMap[k]);
         room.takenCards.forEach(cardNum => {
@@ -307,11 +404,23 @@ function syncRoomUI(room) {
 
 function launchGame() {
     if (!currentStake || selectedCards.size === 0) return;
-    socket.emit('player_ready', { stake: currentStake, username: currentUsername }, response => {
-        if (!response?.success) return showNotification(response?.message || 'Could not mark ready.');
-        const btn = document.getElementById('playGameBtn');
-        btn.disabled = true; btn.dataset.ready = '1'; btn.innerText = 'READY — Waiting for start...';
-    });
+
+    socket.emit(
+        'player_ready',
+        { stake: currentStake, username: currentUsername },
+        response => {
+            if (!response?.success) {
+                return showNotification(response?.message || 'Could not mark ready.');
+            }
+
+            const btn = document.getElementById('playGameBtn');
+            if (!btn) return;
+
+            btn.disabled = true;
+            btn.dataset.ready = '1';
+            btn.innerText = 'READY — Waiting for start...';
+        }
+    );
 }
 
 function claimBingo(cardNumber) {
@@ -376,8 +485,14 @@ async function showHomeScreen(username) {
     hide('authBox'); show('headerBar'); show('bottomNav');
     switchTab('tabGames', document.querySelector('.nav-item'));
     showHome();
+
     await loadUserData(username);
     await fetchNotifications(username);
+
+    if (notificationRefreshTimer) clearInterval(notificationRefreshTimer);
+    notificationRefreshTimer = setInterval(() => {
+        if (currentUsername) fetchNotifications(currentUsername);
+    }, 10000);
 }
 
 function switchToRegister() { hide('loginForm'); show('registerForm'); }
@@ -424,6 +539,11 @@ function switchTab(tabId, navElement) {
 }
 
 function logoutUser() {
+    stopLobbyTimer();
+    if (notificationRefreshTimer) {
+        clearInterval(notificationRefreshTimer);
+        notificationRefreshTimer = null;
+    }
     if (currentStake && currentRoom?.status !== 'PLAYING') {
         socket.emit('leave_room', { stake: currentStake, username: currentUsername });
     }
@@ -470,33 +590,83 @@ async function saveVerifiedTelegramPhone(phoneNumber) {
 let cachedNotifications = [];
 
 async function fetchNotifications(username) {
+    if (!username) return;
+
     try {
-        const res = await fetch(`/api/notifications?username=${encodeURIComponent(username)}`);
+        const res = await fetch(
+            `/api/notifications?username=${encodeURIComponent(username)}`,
+            { cache: 'no-store' }
+        );
         const data = await res.json();
         if (!data.success) return;
+
         cachedNotifications = data.notifications || [];
+
+        const unread = Number(data.unreadCount || 0);
         const badge = document.getElementById('notifBadge');
-        const seen = localStorage.getItem(`notifSeen_${username}`) === 'true';
-        const unread = seen ? 0 : (data.unreadCount || 0);
-        badge.innerText = unread;
-        badge.classList.toggle('hidden', unread === 0);
+
+        if (badge) {
+            badge.innerText = unread > 99 ? '99+' : unread;
+            badge.classList.toggle('hidden', unread <= 0);
+        }
+
         renderNotificationsList(cachedNotifications);
-    } catch (err) { console.error(err); }
+    } catch (err) {
+        console.error('Notification error:', err);
+    }
 }
 
 function renderNotificationsList(posts) {
-    document.getElementById('notifListContainer').innerHTML = posts.length ? posts.map(post => `
-      <div style="background:#252525;border:1px solid #333;border-radius:10px;padding:12px;margin-bottom:10px;">
-        ${post.image_url ? `<img src="${post.image_url}" style="width:100%;border-radius:8px;margin-bottom:10px;" onerror="this.remove()">` : ''}
-        <div style="line-height:1.5">${String(post.message || '').replace(/\n/g,'<br>')}</div>
-        <div class="small" style="margin-top:8px">${new Date(post.created_at).toLocaleString()}</div>
-      </div>`).join('') : '<p class="small">No announcements yet.</p>';
+    const container = document.getElementById('notifListContainer');
+    if (!container) return;
+
+    container.innerHTML = posts.length
+        ? posts.map(post => `
+            <div style="background:#252525;border:1px solid #333;border-radius:10px;padding:12px;margin-bottom:10px;">
+                ${post.image_url
+                    ? `<img src="${post.image_url}" style="width:100%;border-radius:8px;margin-bottom:10px;" onerror="this.remove()">`
+                    : ''}
+                <div style="line-height:1.5">${String(post.message || '').replace(/\n/g, '<br>')}</div>
+                <div class="small" style="margin-top:8px">${new Date(post.created_at).toLocaleString()}</div>
+            </div>
+        `).join('')
+        : '<p class="small">No announcements yet.</p>';
 }
 
-function toggleNotificationModal() {
-    document.getElementById('notifModal').classList.toggle('hidden');
-    if (!document.getElementById('notifModal').classList.contains('hidden') && currentUsername) {
-        localStorage.setItem(`notifSeen_${currentUsername}`, 'true');
-        hide('notifBadge');
+async function markNotificationsAsRead() {
+    if (!currentUsername) return;
+
+    try {
+        const res = await fetch('/api/notifications/mark-read', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: currentUsername })
+        });
+
+        const data = await res.json();
+        if (!data.success) return;
+
+        const badge = document.getElementById('notifBadge');
+        if (badge) {
+            badge.innerText = '0';
+            badge.classList.add('hidden');
+        }
+    } catch (err) {
+        console.error('Mark read error:', err);
     }
 }
+
+async function toggleNotificationModal() {
+    const modal = document.getElementById('notifModal');
+    if (!modal) return;
+
+    const isOpening = modal.classList.contains('hidden');
+    modal.classList.toggle('hidden');
+
+    if (isOpening) {
+        await fetchNotifications(currentUsername);
+        await markNotificationsAsRead();
+    }
+}
+
+
