@@ -11,8 +11,18 @@ const selectedCards = new Set();
 const takenCardsMap = {};
 const socket = io();
 
-socket.on('connect', () => setConnection(true));
+socket.on('connect', () => {
+    setConnection(true);
+    // Covers first load AND every automatic reconnect (screen wake, dropped
+    // signal, backgrounded app, etc.) — re-sync so the UI never gets stuck
+    // showing a stale screen after the connection comes back.
+    resyncCurrentRoom();
+});
 socket.on('disconnect', () => setConnection(false));
+
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') resyncCurrentRoom();
+});
 
 socket.on('rooms_state', rooms => {
     window.latestRooms = rooms || [];
@@ -67,7 +77,12 @@ socket.on('game_started', ({ stake, gameId, prizePool, drawn }) => {
 
 socket.on('game_ended', async ({ stake, winner, prize }) => {
     if (Number(stake) !== currentStake) return;
-    alert(`🏆 ${winner} won ${Number(prize).toFixed(2)} Birr!`);
+    // A real winner gets an alert here. When nobody wins (all 75 numbers called),
+    // the room_reset message right below already explains what happened —
+    // showing both would just double up the popups.
+    if (winner && winner !== 'No One') {
+        alert(`🏆 ${winner} won ${Number(prize).toFixed(2)} Birr!`);
+    }
     await loadUserData(currentUsername);
     returnToRooms();
 });
@@ -83,6 +98,96 @@ socket.on('room_reset', async ({ stake, message }) => {
 });
 
 socket.on('error_message', ({ message }) => showNotification(message));
+
+// ---------------- RECONNECT / RESYNC ----------------
+// Everything a player does mid-game lives on the server (readyPlayers,
+// selectedCards, the draw timer) and is keyed by username, not by socket id —
+// so a dropped connection never removes anyone from a running game. What it
+// DOES lose is Socket.IO "room" membership, which is how the server delivers
+// number_drawn / game_ended / room_reset broadcasts. This function re-joins
+// the room and pulls the true current state any time the connection comes
+// back or the tab/screen becomes visible again, so the player either catches
+// back up to a still-running game or is dropped straight to the lobby if it
+// already finished while they were away.
+async function resyncCurrentRoom() {
+    if (!currentStake || !currentUsername) return;
+    const stake = currentStake;
+
+    socket.emit('subscribe_room', { stake, username: currentUsername }, async response => {
+        if (currentStake !== stake) return; // user already navigated away
+        if (!response?.success || !response.state) return;
+
+        const state = response.state;
+
+        if (!state.playerInRoom) {
+            // The round finished (won, exhausted, or cancelled) while we were
+            // disconnected/backgrounded. Land everyone back in the lobby.
+            stopLobbyTimer();
+            resetReadyButton();
+            currentStake = null;
+            currentRoom = null;
+            selectedCards.clear();
+            Object.keys(takenCardsMap).forEach(k => delete takenCardsMap[k]);
+            hide('selectionBox');
+            hide('gamePlayBox');
+            await loadUserData(currentUsername);
+            showNotification('Your previous game has ended. You are back in the lobby.');
+            hide('homeBox');
+            show('roomsBox');
+            renderRooms();
+            return;
+        }
+
+        currentRoom = { ...currentRoom, ...state };
+        selectedCards.clear();
+        (state.selectedCards || []).forEach(c => selectedCards.add(Number(c)));
+        Object.keys(takenCardsMap).forEach(k => delete takenCardsMap[k]);
+        (state.takenCards || []).forEach(cardNum => {
+            if (!selectedCards.has(Number(cardNum))) takenCardsMap[cardNum] = true;
+        });
+
+        if (state.status === 'PLAYING') {
+            hide('homeBox');
+            hide('roomsBox');
+            hide('selectionBox');
+            show('gamePlayBox');
+            document.getElementById('activeStake').innerText = `${stake} Birr`;
+            document.getElementById('activePrize').innerText = `${Number(state.prizePool).toFixed(2)} Birr`;
+            currentRoom.drawn = state.drawn || [];
+            renderMyGameCards();
+            document.querySelectorAll('#myGameCards .game-card-choice').forEach(btn => btn.disabled = false);
+            updateCalledNumbers();
+        } else if (state.status === 'JOINING') {
+            hide('homeBox');
+            hide('roomsBox');
+            hide('gamePlayBox');
+            show('selectionBox');
+            await ensureCardsCached();
+            renderCardNumbers(cachedCards);
+            syncRoomUI(currentRoom);
+            startLobbyTimer(currentRoom);
+
+            const btn = document.getElementById('playGameBtn');
+            if (state.isReady) {
+                if (btn) {
+                    btn.disabled = true;
+                    btn.dataset.ready = '1';
+                    btn.innerText = 'READY — Waiting for start...';
+                }
+            } else {
+                resetReadyButton();
+            }
+        }
+    });
+}
+
+async function ensureCardsCached() {
+    if (cachedCards) return;
+    const res = await fetch('/api/cards/numbers');
+    const data = await res.json();
+    if (data.success) cachedCards = data.cardNumbers;
+}
+
 
 function setConnection(online) {
     const dot = document.getElementById('connectionDot');
@@ -307,12 +412,8 @@ async function openSelection() {
     show('selectionBox');
     document.getElementById('selectionTitle').innerText = `🎟️ ${currentStake} Birr — Select Cards`;
 
-    if (!cachedCards) {
-        const res = await fetch('/api/cards/numbers');
-        const data = await res.json();
-        if (!data.success) return showNotification('Failed to load cards.');
-        cachedCards = data.cardNumbers;
-    }
+    await ensureCardsCached();
+    if (!cachedCards) return showNotification('Failed to load cards.');
     renderCardNumbers(cachedCards);
 }
 
@@ -425,15 +526,27 @@ function launchGame() {
 
 function claimBingo(cardNumber) {
     if (!currentStake || !cardNumber) return;
+    const stake = currentStake; // captured now, compared below in case a broadcast beats the ack
 
     document.querySelectorAll('#myGameCards .game-card-choice').forEach(btn => btn.disabled = true);
 
-    socket.emit('claim_bingo', { stake: currentStake, username: currentUsername, cardNumber }, response => {
+    socket.emit('claim_bingo', { stake, username: currentUsername, cardNumber }, async response => {
         if (!response?.success) {
             showNotification(response?.message || 'Bingo is not valid yet.');
             document.querySelectorAll('#myGameCards .game-card-choice').forEach(btn => btn.disabled = false);
+            return;
         }
-        // On success, the server broadcasts game_ended / room_reset, which returns everyone to the lobby.
+
+        // Success is confirmed directly by the server, independent of whether
+        // this socket was still in the room to receive the game_ended/room_reset
+        // broadcast — this is what fixes the "I clicked Claim and nothing
+        // happened" case. If the broadcast already handled this (currentStake
+        // was cleared by it before this ack arrived), don't do it twice.
+        if (currentStake !== stake) return;
+
+        alert(`🏆 You won ${Number(response.prize || 0).toFixed(2)} Birr!`);
+        await loadUserData(currentUsername);
+        returnToRooms();
     });
 }
 

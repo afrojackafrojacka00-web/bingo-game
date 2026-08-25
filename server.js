@@ -1309,7 +1309,8 @@ io.on('connection', socket => {
                 selectedCards: Array.from(userCards(room, username)),
                 drawn: Array.from(room.drawn),
                 amountPaid: getPlayerPaid(room, username),
-                isReady: room.readyPlayers.has(username)
+                isReady: room.readyPlayers.has(username),
+                playerInRoom: room.players.has(username)
             }
         });
     });
@@ -1625,6 +1626,11 @@ io.on('connection', socket => {
                 client.release();
             }
 
+            // Confirm directly to the claimer first — this must reach them even if their
+            // socket had drifted out of the room (e.g. after a reconnect), since acks are
+            // delivered point-to-point and don't depend on room membership.
+            cb({ success: true, winner: username, prize, cardNumber });
+
             io.to(roomName(stake)).emit('game_ended', {
                 stake,
                 winner: username,
@@ -1633,7 +1639,6 @@ io.on('connection', socket => {
             });
 
             await resetRoom(room, `Game finished. ${username} won ${prize} Birr!`);
-            cb({ success: true });
         } catch (err) {
             console.error('claim', err);
             cb({
