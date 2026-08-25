@@ -1120,43 +1120,47 @@ function shuffledBingoNumbers() {
 
 
 const PATTERN_NAMES = {
-  any_one_line:'Any One Line', any_two_lines:'Any Two Lines', any_square:'Any Square (2×2)',
-  full:'Full House', x:'X', t:'T', reverse_t:'Reverse T', cross:'Cross', vertical_line:'One Vertical Line', horizontal_line:'One Horizontal Line',
-  big_l:'Big L', reverse_l:'Reverse L', 'N':'N', 'H':'H', 'Reverse H':'Reverse H', 'Z':'Z', 'K':'K', 'E':'E', 'M':'M', 'Five Dots':'Five Dots'
+  'N':'N','H':'H','Reverse H':'Reverse H','Z':'Z','K':'K','E':'E',
+  'Three Horizontal Lines':'Three Horizontal Lines','Three Vertical Lines':'Three Vertical Lines',
+  '5':'5','M':'M','cross':'Cross','vertical_line':'One Vertical Line','Five Dots':'Five Dots',
+  'horizontal_line':'One Horizontal Line','full':'Full House','x':'X','t':'T','reverse_t':'Reverse T',
+  'big_l':'Big L','reverse_l':'Reverse L','Top Triangle':'Top Triangle','Bottom Triangle':'Bottom Triangle',
+  'half_above':'Half Above','half_below':'Half Below','any_square':'Any Square (2×2)',
+  'any_one_line':'Any One Line','any_two_lines':'Any Two Lines'
 };
 const P=(...cells)=>cells;
 const ROWS=Array.from({length:5},(_,r)=>P(...Array.from({length:5},(_,c)=>[r,c])));
 const COLS=Array.from({length:5},(_,c)=>P(...Array.from({length:5},(_,r)=>[r,c])));
 const DIAGS=[P([0,0],[1,1],[2,2],[3,3],[4,4]),P([0,4],[1,3],[2,2],[3,1],[4,0])];
+const ANY_ONE_LINE_PATTERNS=[...ROWS,...COLS,...DIAGS,[[0,0],[4,0],[0,4],[4,4]],[[1,1],[3,1],[1,3],[3,3]],[[2,1],[1,2],[2,2],[3,2],[2,3]]];
+const ANY_TWO_LINE_PATTERNS=[...ROWS,...COLS,...DIAGS,[[0,0],[4,0],[0,4],[4,4]],[[1,1],[3,1],[1,3],[3,3]]];
 const FIXED_PATTERNS={
- full:P(...Array.from({length:25},(_,i)=>[Math.floor(i/5),i%5]).filter(([r,c])=>!(r===2&&c===2))),
- x:P([0,0],[1,1],[2,2],[3,3],[4,4],[0,4],[1,3],[3,1],[4,0]),
- t:P([0,0],[0,1],[0,2],[0,3],[0,4],[1,2],[2,2],[3,2],[4,2]),
- reverse_t:P([4,0],[4,1],[4,2],[4,3],[4,4],[0,2],[1,2],[2,2],[3,2]),
- cross:P([2,0],[2,1],[2,2],[2,3],[2,4],[0,2],[1,2],[3,2],[4,2]),
- vertical_line:COLS[2], horizontal_line:ROWS[2],
- big_l:P([0,0],[1,0],[2,0],[3,0],[4,0],[4,1],[4,2],[4,3],[4,4]),
- reverse_l:P([0,0],[0,1],[0,2],[0,3],[0,4],[1,4],[2,4],[3,4],[4,4]),
- 'N':P([0,0],[1,0],[2,0],[3,0],[4,0],[1,1],[2,2],[3,3],[4,4],[0,4],[1,4],[2,4],[3,4]),
- 'H':P([0,0],[1,0],[2,0],[3,0],[4,0],[2,1],[2,2],[2,3],[0,4],[1,4],[2,4],[3,4],[4,4]),
- 'Reverse H':P([0,0],[0,1],[0,2],[0,3],[0,4],[1,2],[2,2],[3,2],[4,0],[4,1],[4,2],[4,3],[4,4]),
- 'Z':P([0,0],[0,1],[0,2],[0,3],[0,4],[1,3],[2,2],[3,1],[4,0],[4,1],[4,2],[4,3],[4,4]),
- 'K':P([0,0],[1,0],[2,0],[3,0],[4,0],[0,3],[1,2],[2,1],[3,2],[4,3]),
- 'E':P([0,0],[1,0],[2,0],[3,0],[4,0],[0,1],[0,2],[0,3],[0,4],[2,1],[2,2],[2,3],[2,4],[4,1],[4,2],[4,3],[4,4]),
- 'M':P([0,0],[1,0],[2,0],[3,0],[4,0],[1,1],[2,2],[1,3],[0,4],[1,4],[2,4],[3,4],[4,4]),
- 'Five Dots':P([0,0],[0,4],[2,2],[4,0],[4,4])
+'N':[[0,0],[1,0],[2,0],[3,0],[4,0],[1,1],[2,2],[3,3],[4,4],[0,4],[1,4],[2,4],[3,4]],
+'H':[[0,0],[1,0],[2,0],[3,0],[4,0],[2,1],[2,2],[2,3],[0,4],[1,4],[2,4],[3,4],[4,4]],
+'Reverse H':[[0,0],[0,1],[0,2],[0,3],[0,4],[1,2],[2,2],[3,2],[4,0],[4,1],[4,2],[4,3],[4,4]],
+'Z':[[0,0],[0,1],[0,2],[0,3],[0,4],[1,3],[2,2],[3,1],[4,0],[4,1],[4,2],[4,3],[4,4]],
+'K':[[0,0],[1,0],[2,0],[3,0],[4,0],[0,3],[1,2],[2,1],[3,2],[4,3]],
+'E':[[0,0],[1,0],[2,0],[3,0],[4,0],[0,1],[0,2],[0,3],[0,4],[2,1],[2,2],[2,3],[2,4],[4,1],[4,2],[4,3],[4,4]],
+'Three Horizontal Lines':[[0,0],[2,0],[4,0],[0,1],[0,2],[0,3],[0,4],[2,1],[2,2],[2,3],[2,4],[4,1],[4,2],[4,3],[4,4]],
+'Three Vertical Lines':[[0,0],[1,0],[2,0],[3,0],[4,0],[0,2],[1,2],[2,2],[3,2],[4,2],[0,4],[1,4],[2,4],[3,4],[4,4]],
+'5':[[0,0],[1,0],[2,0],[3,4],[4,0],[0,1],[0,2],[0,3],[0,4],[2,1],[2,2],[2,3],[2,4],[4,1],[4,2],[4,3],[4,4]],
+'M':[[0,0],[1,0],[2,0],[3,0],[4,0],[1,1],[2,2],[1,3],[0,4],[1,4],[2,4],[3,4],[4,4]],
+'cross':[[2,0],[2,1],[3,2],[2,4],[2,2],[0,2],[1,2],[2,3],[4,2]],
+'vertical_line':[[0,2],[1,2],[2,2],[3,2],[4,2]], 'Five Dots':[[0,0],[0,4],[2,2],[4,0],[4,4]], 'horizontal_line':[[2,0],[2,1],[2,2],[2,3],[2,4]],
+'full':Array.from({length:25},(_,i)=>[Math.floor(i/5),i%5]).filter(([r,c])=>!(r===2&&c===2)),
+'x':[[0,0],[1,1],[2,2],[3,3],[4,4],[0,4],[1,3],[3,1],[4,0]],
+'t':[[0,0],[0,1],[0,2],[0,3],[0,4],[1,2],[2,2],[3,2],[4,2]], 'reverse_t':[[4,0],[4,1],[4,2],[4,3],[4,4],[0,2],[1,2],[2,2],[3,2]],
+'big_l':[[0,0],[1,0],[2,0],[3,0],[4,0],[4,1],[4,2],[4,3],[4,4]], 'reverse_l':[[0,0],[0,1],[0,2],[0,3],[0,4],[1,4],[2,4],[3,4],[4,4]],
+'Top Triangle':[[0,0],[1,0],[2,0],[3,0],[4,0],[0,1],[1,1],[2,1],[3,1],[2,1],[0,2],[1,2],[2,2],[0,3],[1,3],[0,4]],
+'Bottom Triangle':[[4,0],[4,1],[4,2],[4,3],[4,4],[3,1],[3,2],[3,3],[3,4],[2,2],[2,3],[2,4],[1,3],[1,4],[0,4]],
+'half_above':Array.from({length:15},(_,i)=>[Math.floor(i/5),i%5]), 'half_below':Array.from({length:15},(_,i)=>[Math.floor(i/5)+2,i%5])
 };
-function getPatternsForGame(pattern){
- if(pattern==='any_one_line') return [...ROWS,...COLS,...DIAGS];
- if(pattern==='any_two_lines') return [...ROWS,...COLS,...DIAGS];
- if(pattern==='any_square'){const a=[];for(let r=0;r<4;r++)for(let c=0;c<4;c++)a.push(P([r,c],[r,c+1],[r+1,c],[r+1,c+1]));return a;}
- return FIXED_PATTERNS[pattern]?[FIXED_PATTERNS[pattern]]:[];
-}
-function cellHit(grid,r,c,drawn){const v=grid[r][c]; return v==='FREE'||v===0||(r===2&&c===2)||drawn.has(Number(v));}
-function completedPatterns(grid,drawn,pattern){const ps=getPatternsForGame(pattern);const done=ps.filter(cells=>cells.every(([r,c])=>cellHit(grid,r,c,drawn))); if(pattern==='any_two_lines') return done.length>=2?done:[]; return done;}
-function latestNumberIsInWinningPattern(grid, winningCells, latest){ if(!latest) return false; return winningCells.some(([r,c])=>Number(grid[r][c])===Number(latest)); }
-function winningClaim(grid,drawn,pattern,latest){ const wins=completedPatterns(grid,drawn,pattern); if(!wins.length)return {ok:false}; if(pattern==='any_two_lines'){ const pair=wins.slice(0,2); const cells=[...new Map(pair.flat().map(x=>[x.join(','),x])).values()]; return {ok:latestNumberIsInWinningPattern(grid,cells,latest),cells}; } const cells=wins[0]; return {ok:latestNumberIsInWinningPattern(grid,cells,latest),cells}; }
-function isWinningGrid(grid,drawn,pattern=DEFAULT_GAME_PATTERN){ return completedPatterns(grid,drawn,pattern).length>0; }
+function getPatternsForGame(pattern){if(pattern==='any_one_line')return ANY_ONE_LINE_PATTERNS;if(pattern==='any_two_lines')return ANY_TWO_LINE_PATTERNS;if(pattern==='any_square'){const out=[];for(let r=0;r<4;r++)for(let c=0;c<4;c++)out.push([[r,c],[r,c+1],[r+1,c],[r+1,c+1]]);return out;}return FIXED_PATTERNS[pattern]?[FIXED_PATTERNS[pattern]]:[];}
+function cellHit(grid,r,c,drawn){const v=grid[r][c];return v==='FREE'||v===0||(r===2&&c===2)||drawn.has(Number(v));}
+function completedPatterns(grid,drawn,pattern){const done=getPatternsForGame(pattern).filter(cells=>cells.every(([r,c])=>cellHit(grid,r,c,drawn)));return pattern==='any_two_lines'?(done.length>=2?done:[]):done;}
+function latestNumberIsInWinningPattern(grid,cells,latest){return !!latest&&cells.some(([r,c])=>Number(grid[r][c])===Number(latest));}
+function winningClaim(grid,drawn,pattern,latest){const wins=completedPatterns(grid,drawn,pattern);if(!wins.length)return {ok:false};if(pattern==='any_two_lines'){for(let i=0;i<wins.length;i++)for(let j=i+1;j<wins.length;j++){const cells=[...new Map([...wins[i],...wins[j]].map(x=>[x.join(','),x])).values()];if(latestNumberIsInWinningPattern(grid,cells,latest))return {ok:true,cells};}return {ok:false};}for(const cells of wins)if(latestNumberIsInWinningPattern(grid,cells,latest))return {ok:true,cells};return {ok:false};}
+function isWinningGrid(grid,drawn,pattern=DEFAULT_GAME_PATTERN){return completedPatterns(grid,drawn,pattern).length>0;}
 
 const cardGridCache = new Map();
 

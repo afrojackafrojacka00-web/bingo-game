@@ -246,7 +246,7 @@ function renderRooms() {
         return `<div class="room-row">
             <div>
                 <div class="room-stake">💰 ${Number(room.stake).toFixed(0)} Birr</div>
-                <div class="room-meta">🃏 ${room.totalCards || 0} cards playing</div>
+                <div class="room-meta">Players | ${room.totalCards || 0}</div>
             </div>
             <div class="room-status ${statusClass}">
                 🏆 ${Number(room.prizePool).toFixed(2)} Birr<br>
@@ -502,38 +502,10 @@ function launchGame() {
     );
 }
 
-function claimBingo(cardNumber) {
-    if (!currentStake || !cardNumber) return;
-    const stake = currentStake; // captured now, compared below in case a broadcast beats the ack
+// Legacy claim UI removed; live game claims only use game.html.
 
-    document.querySelectorAll('#myGameCards .game-card-choice').forEach(btn => btn.disabled = true);
+function renderMyGameCards(){ document.getElementById('myGameCards').innerHTML=''; }
 
-    socket.emit('claim_bingo', { stake, username: currentUsername, cardNumber }, async response => {
-        if (!response?.success) {
-            showNotification(response?.message || 'Bingo is not valid yet.');
-            document.querySelectorAll('#myGameCards .game-card-choice').forEach(btn => btn.disabled = false);
-            return;
-        }
-
-        // Success is confirmed directly by the server, independent of whether
-        // this socket was still in the room to receive the game_ended/room_reset
-        // broadcast — this is what fixes the "I clicked Claim and nothing
-        // happened" case. If the broadcast already handled this (currentStake
-        // was cleared by it before this ack arrived), don't do it twice.
-        if (currentStake !== stake) return;
-
-        alert(`🏆 You won ${Number(response.prize || 0).toFixed(2)} Birr!`);
-        await loadUserData(currentUsername);
-        returnToRooms();
-    });
-}
-
-function renderMyGameCards() {
-    const wrap = document.getElementById('myGameCards');
-    if (!wrap) return;
-    wrap.innerHTML = Array.from(selectedCards).sort((a,b)=>a-b).map(card =>
-        `<button class="game-card-choice" onclick="claimBingo(${card})">CARD ${card}<small>Claim Bingo</small></button>`).join('');
-}
 function updateCalledNumbers() {
     const el = document.getElementById('calledNumbers');
     if (!el) return;
