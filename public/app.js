@@ -1,3 +1,5 @@
+
+
 let currentUsername = "";
 let currentStake = null;
 let pendingStake = null;
@@ -63,16 +65,10 @@ socket.on('number_drawn', ({ stake, number }) => {
     updateCalledNumbers();
 });
 
-socket.on('game_started', ({ stake, gameId, prizePool, drawn }) => {
+socket.on('game_started', ({ stake, gameId }) => {
     if (Number(stake) !== currentStake) return;
-    stopLobbyTimer();
-    currentRoom = { ...currentRoom, status: 'PLAYING', gameId, prizePool, drawn: drawn || [] };
-    hide('selectionBox');
-    show('gamePlayBox');
-    document.getElementById('activeStake').innerText = `${stake} Birr`;
-    document.getElementById('activePrize').innerText = `${Number(prizePool).toFixed(2)} Birr`;
-    renderMyGameCards();
-    updateCalledNumbers();
+    localStorage.setItem('bingoActiveGame', JSON.stringify({username: currentUsername, stake:Number(stake), gameId}));
+    window.location.href = `/game.html?stake=${encodeURIComponent(stake)}`;
 });
 
 socket.on('game_ended', async ({ stake, winner, prize }) => {
@@ -610,6 +606,9 @@ async function showHomeScreen(username) {
     await loadUserData(username);
     await fetchNotifications(username);
 
+    const returnStake = Number(new URLSearchParams(location.search).get('returnStake') || 0);
+    if (returnStake) setTimeout(()=>{ pendingStake=returnStake; confirmJoin(); }, 500);
+
     if (notificationRefreshTimer) clearInterval(notificationRefreshTimer);
     notificationRefreshTimer = setInterval(() => {
         if (currentUsername) fetchNotifications(currentUsername);
@@ -967,6 +966,8 @@ async function toggleNotificationModal() {
         await markNotificationsAsRead();
     }
 }
+
+
 
 
 

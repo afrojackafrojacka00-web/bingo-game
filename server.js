@@ -1,3 +1,6 @@
+
+
+
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -129,6 +132,10 @@ const initDB = async () => {
 
 await pool.query('ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS stake NUMERIC(10,2) DEFAULT 0;');
 await pool.query('ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS prize_pool NUMERIC(10,2) DEFAULT 0;');
+        await pool.query("ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS winning_pattern VARCHAR(100) DEFAULT 'any_one_line';");
+        await pool.query('ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS draw_interval_seconds INT DEFAULT 4;');
+        await pool.query(`CREATE TABLE IF NOT EXISTS bingo_game_settings (id INT PRIMARY KEY CHECK (id=1), winning_pattern VARCHAR(100) NOT NULL DEFAULT 'any_one_line', draw_interval_seconds INT NOT NULL DEFAULT 4, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);`);
+        await pool.query(`INSERT INTO bingo_game_settings(id,winning_pattern,draw_interval_seconds) VALUES(1,'any_one_line',4) ON CONFLICT (id) DO NOTHING;`);
         await pool.query('ALTER TABLE game_participants ADD COLUMN IF NOT EXISTS card_count INT DEFAULT 1;');
         await pool.query('ALTER TABLE game_participants ADD COLUMN IF NOT EXISTS amount_paid NUMERIC(10,2) DEFAULT 0;');
 
@@ -901,7 +908,9 @@ app.post('/api/notifications/mark-read', async (req, res) => {
 });
 
 // -------------------- HIGH-CONCURRENCY MULTI-ROOM GAME ENGINE --------------------
-const DRAW_INTERVAL_MS = Number(process.env.DRAW_INTERVAL_MS || 2500);
+const DEFAULT_GAME_PATTERN = 'any_one_line';
+const DEFAULT_DRAW_INTERVAL_SECONDS = Number(process.env.DEFAULT_DRAW_INTERVAL_SECONDS || 4);
+const DRAW_INTERVAL_MS = Number(process.env.DRAW_INTERVAL_MS || 2500); // legacy fallback
 const ROOM_BROADCAST_MS = 250;
 const MAX_CARDS_PER_PLAYER = Number(process.env.MAX_CARDS_PER_PLAYER || 500);
 
@@ -919,7 +928,11 @@ function createRoom(stake) {
         drawOrder: [],
         drawTimer: null,
         drawIndex: 0,
-        lastTickSecond: null
+        lastTickSecond: null,
+        winningPattern: DEFAULT_GAME_PATTERN,
+        drawIntervalSeconds: DEFAULT_DRAW_INTERVAL_SECONDS,
+        claimLockedCards: new Set(),
+        lastNumber: null
     };
 }
 
@@ -963,6 +976,9 @@ function roomSnapshot(room) {
         serverNow: Date.now(),
         players: room.players.size,
         readyPlayers: room.readyPlayers.size,
+        totalCards,
+        winningPattern: room.winningPattern,
+        drawIntervalSeconds: room.drawIntervalSeconds,
         prizePool: Number((totalCards * room.stake).toFixed(2)),
         gameId: room.gameId,
         takenCards
@@ -1078,6 +1094,10 @@ async function resetRoom(room, message = null) {
     room.drawOrder = [];
     room.drawIndex = 0;
     room.lastTickSecond = null;
+    room.winningPattern = DEFAULT_GAME_PATTERN;
+    room.drawIntervalSeconds = DEFAULT_DRAW_INTERVAL_SECONDS;
+    room.claimLockedCards.clear();
+    room.lastNumber = null;
 
     io.to(roomName(room.stake)).emit('room_reset', {
         stake: room.stake,
@@ -1095,18 +1115,45 @@ function shuffledBingoNumbers() {
     return a;
 }
 
-function isWinningGrid(grid, drawn) {
-    const hit = value => value === 'FREE' || drawn.has(Number(value));
-    for (let r = 0; r < 5; r++) {
-        if ([0, 1, 2, 3, 4].every(c => hit(grid[r][c]))) return true;
-    }
-    for (let c = 0; c < 5; c++) {
-        if ([0, 1, 2, 3, 4].every(r => hit(grid[r][c]))) return true;
-    }
-    if ([0, 1, 2, 3, 4].every(i => hit(grid[i][i]))) return true;
-    if ([0, 1, 2, 3, 4].every(i => hit(grid[i][4 - i]))) return true;
-    return false;
+
+const PATTERN_NAMES = {
+  any_one_line:'Any One Line', any_two_lines:'Any Two Lines', any_square:'Any Square (2×2)',
+  full:'Full House', x:'X', t:'T', reverse_t:'Reverse T', cross:'Cross', vertical_line:'One Vertical Line', horizontal_line:'One Horizontal Line',
+  big_l:'Big L', reverse_l:'Reverse L', 'N':'N', 'H':'H', 'Reverse H':'Reverse H', 'Z':'Z', 'K':'K', 'E':'E', 'M':'M', 'Five Dots':'Five Dots'
+};
+const P=(...cells)=>cells;
+const ROWS=Array.from({length:5},(_,r)=>P(...Array.from({length:5},(_,c)=>[r,c])));
+const COLS=Array.from({length:5},(_,c)=>P(...Array.from({length:5},(_,r)=>[r,c])));
+const DIAGS=[P([0,0],[1,1],[2,2],[3,3],[4,4]),P([0,4],[1,3],[2,2],[3,1],[4,0])];
+const FIXED_PATTERNS={
+ full:P(...Array.from({length:25},(_,i)=>[Math.floor(i/5),i%5]).filter(([r,c])=>!(r===2&&c===2))),
+ x:P([0,0],[1,1],[2,2],[3,3],[4,4],[0,4],[1,3],[3,1],[4,0]),
+ t:P([0,0],[0,1],[0,2],[0,3],[0,4],[1,2],[2,2],[3,2],[4,2]),
+ reverse_t:P([4,0],[4,1],[4,2],[4,3],[4,4],[0,2],[1,2],[2,2],[3,2]),
+ cross:P([2,0],[2,1],[2,2],[2,3],[2,4],[0,2],[1,2],[3,2],[4,2]),
+ vertical_line:COLS[2], horizontal_line:ROWS[2],
+ big_l:P([0,0],[1,0],[2,0],[3,0],[4,0],[4,1],[4,2],[4,3],[4,4]),
+ reverse_l:P([0,0],[0,1],[0,2],[0,3],[0,4],[1,4],[2,4],[3,4],[4,4]),
+ 'N':P([0,0],[1,0],[2,0],[3,0],[4,0],[1,1],[2,2],[3,3],[4,4],[0,4],[1,4],[2,4],[3,4]),
+ 'H':P([0,0],[1,0],[2,0],[3,0],[4,0],[2,1],[2,2],[2,3],[0,4],[1,4],[2,4],[3,4],[4,4]),
+ 'Reverse H':P([0,0],[0,1],[0,2],[0,3],[0,4],[1,2],[2,2],[3,2],[4,0],[4,1],[4,2],[4,3],[4,4]),
+ 'Z':P([0,0],[0,1],[0,2],[0,3],[0,4],[1,3],[2,2],[3,1],[4,0],[4,1],[4,2],[4,3],[4,4]),
+ 'K':P([0,0],[1,0],[2,0],[3,0],[4,0],[0,3],[1,2],[2,1],[3,2],[4,3]),
+ 'E':P([0,0],[1,0],[2,0],[3,0],[4,0],[0,1],[0,2],[0,3],[0,4],[2,1],[2,2],[2,3],[2,4],[4,1],[4,2],[4,3],[4,4]),
+ 'M':P([0,0],[1,0],[2,0],[3,0],[4,0],[1,1],[2,2],[1,3],[0,4],[1,4],[2,4],[3,4],[4,4]),
+ 'Five Dots':P([0,0],[0,4],[2,2],[4,0],[4,4])
+};
+function getPatternsForGame(pattern){
+ if(pattern==='any_one_line') return [...ROWS,...COLS,...DIAGS];
+ if(pattern==='any_two_lines') return [...ROWS,...COLS,...DIAGS];
+ if(pattern==='any_square'){const a=[];for(let r=0;r<4;r++)for(let c=0;c<4;c++)a.push(P([r,c],[r,c+1],[r+1,c],[r+1,c+1]));return a;}
+ return FIXED_PATTERNS[pattern]?[FIXED_PATTERNS[pattern]]:[];
 }
+function cellHit(grid,r,c,drawn){const v=grid[r][c]; return v==='FREE'||v===0||(r===2&&c===2)||drawn.has(Number(v));}
+function completedPatterns(grid,drawn,pattern){const ps=getPatternsForGame(pattern);const done=ps.filter(cells=>cells.every(([r,c])=>cellHit(grid,r,c,drawn))); if(pattern==='any_two_lines') return done.length>=2?done:[]; return done;}
+function latestNumberIsInWinningPattern(grid, winningCells, latest){ if(!latest) return false; return winningCells.some(([r,c])=>Number(grid[r][c])===Number(latest)); }
+function winningClaim(grid,drawn,pattern,latest){ const wins=completedPatterns(grid,drawn,pattern); if(!wins.length)return {ok:false}; if(pattern==='any_two_lines'){ const pair=wins.slice(0,2); const cells=[...new Map(pair.flat().map(x=>[x.join(','),x])).values()]; return {ok:latestNumberIsInWinningPattern(grid,cells,latest),cells}; } const cells=wins[0]; return {ok:latestNumberIsInWinningPattern(grid,cells,latest),cells}; }
+function isWinningGrid(grid,drawn,pattern=DEFAULT_GAME_PATTERN){ return completedPatterns(grid,drawn,pattern).length>0; }
 
 const cardGridCache = new Map();
 
@@ -1126,6 +1173,13 @@ async function startRoomGame(room) {
     room.status = 'PLAYING';
     room.deadline = null;
 
+    const settingsResult = await pool.query('SELECT winning_pattern, draw_interval_seconds FROM bingo_game_settings WHERE id=1');
+    const settings = settingsResult.rows[0] || {};
+    room.winningPattern = PATTERN_NAMES[settings.winning_pattern] ? settings.winning_pattern : DEFAULT_GAME_PATTERN;
+    room.drawIntervalSeconds = Math.max(1, Number(settings.draw_interval_seconds || DEFAULT_DRAW_INTERVAL_SECONDS));
+    room.claimLockedCards.clear();
+    room.lastNumber = null;
+
     const participants = Array.from(room.readyPlayers);
     let prize = 0;
     for (const username of participants) {
@@ -1137,8 +1191,8 @@ async function startRoomGame(room) {
         await client.query('BEGIN');
 
         const sessionResult = await client.query(
-            'INSERT INTO game_sessions(status,stake,prize_pool) VALUES($1,$2,$3) RETURNING id',
-            ['IN_PROGRESS', room.stake, prize]
+            'INSERT INTO game_sessions(status,stake,prize_pool,winning_pattern,draw_interval_seconds) VALUES($1,$2,$3,$4,$5) RETURNING id',
+            ['IN_PROGRESS', room.stake, prize, room.winningPattern, room.drawIntervalSeconds]
         );
 
         room.gameId = sessionResult.rows[0].id;
@@ -1171,6 +1225,10 @@ async function startRoomGame(room) {
         stake: room.stake,
         gameId: room.gameId,
         prizePool: prize,
+        totalCards: participants.reduce((n,u)=>n+userCards(room,u).size,0),
+        winningPattern: room.winningPattern,
+        patternName: PATTERN_NAMES[room.winningPattern] || room.winningPattern,
+        drawIntervalSeconds: room.drawIntervalSeconds,
         drawn: []
     });
     emitRoomsState();
@@ -1196,10 +1254,12 @@ async function startRoomGame(room) {
         if (room.drawIndex < room.drawOrder.length) {
             const number = room.drawOrder[room.drawIndex++];
             room.drawn.add(number);
+            room.lastNumber = number;
             io.to(roomName(room.stake)).emit('number_drawn', {
                 stake: room.stake,
                 number,
-                drawIndex: room.drawIndex
+                drawIndex: room.drawIndex,
+                totalDrawn: room.drawn.size
             });
             return;
         }
@@ -1220,7 +1280,7 @@ async function startRoomGame(room) {
             room,
             'All numbers 1-75 were called with no winner. Ready for the next round!'
         );
-    }, DRAW_INTERVAL_MS);
+    }, room.drawIntervalSeconds * 1000);
 }
 
 // One scheduler handles every room. The deadline is absolute server time.
@@ -1287,6 +1347,11 @@ setInterval(async () => {
         }
     }
 }, ROOM_BROADCAST_MS);
+
+
+app.get('/api/admin/game-settings', async (req,res)=>{ if(req.headers['x-admin-secret']!==process.env.ADMIN_SECRET) return res.status(403).json({success:false,message:'Unauthorized.'}); const r=await pool.query('SELECT winning_pattern,draw_interval_seconds FROM bingo_game_settings WHERE id=1'); const s=r.rows[0]||{winning_pattern:DEFAULT_GAME_PATTERN,draw_interval_seconds:DEFAULT_DRAW_INTERVAL_SECONDS}; res.json({success:true,winningPattern:s.winning_pattern,drawIntervalSeconds:s.draw_interval_seconds,patterns:PATTERN_NAMES}); });
+app.post('/api/admin/game-settings', async (req,res)=>{ const {adminSecret,winningPattern,drawIntervalSeconds}=req.body; if(adminSecret!==process.env.ADMIN_SECRET)return res.status(403).json({success:false,message:'Unauthorized.'}); if(!PATTERN_NAMES[winningPattern])return res.status(400).json({success:false,message:'Invalid pattern.'}); const seconds=Number(drawIntervalSeconds); if(!Number.isInteger(seconds)||seconds<1||seconds>60)return res.status(400).json({success:false,message:'Interval must be 1-60 seconds.'}); await pool.query(`INSERT INTO bingo_game_settings(id,winning_pattern,draw_interval_seconds,updated_at) VALUES(1,$1,$2,NOW()) ON CONFLICT(id) DO UPDATE SET winning_pattern=EXCLUDED.winning_pattern,draw_interval_seconds=EXCLUDED.draw_interval_seconds,updated_at=NOW()`,[winningPattern,seconds]); res.json({success:true,winningPattern,drawIntervalSeconds:seconds}); });
+app.get('/api/game-state', async (req,res)=>{ const stake=Number(req.query.stake), username=String(req.query.username||''); const room=gameRooms.get(stake); if(!room||!username||!room.readyPlayers.has(username))return res.status(403).json({success:false,message:'You are not in this active game.'}); const cards=[]; for(const cardNumber of Array.from(userCards(room,username))) { const grid=await getCardGrid(cardNumber); if(grid)cards.push({cardNumber,grid,locked:room.claimLockedCards.has(cardNumber)}); } res.json({success:true,room:{...roomSnapshot(room),drawn:Array.from(room.drawn),lastNumber:room.lastNumber,patternName:PATTERN_NAMES[room.winningPattern]||room.winningPattern},cards}); });
 
 io.on('connection', socket => {
     socket.emit('rooms_state', allRoomsSnapshot());
@@ -1569,87 +1634,26 @@ io.on('connection', socket => {
     });
 
     socket.on('claim_bingo', async ({ stake, username, cardNumber }, cb = () => {}) => {
-        stake = Number(stake);
-        cardNumber = Number(cardNumber);
-        const room = gameRooms.get(stake);
-
-        if (
-            !room ||
-            room.status !== 'PLAYING' ||
-            !room.readyPlayers.has(username) ||
-            !userCards(room, username).has(cardNumber)
-        ) {
-            return cb({ success: false, message: 'Invalid Bingo claim.' });
-        }
-
+        stake=Number(stake); cardNumber=Number(cardNumber); const room=gameRooms.get(stake);
+        if(!room||room.status!=='PLAYING'||!room.readyPlayers.has(username)||!userCards(room,username).has(cardNumber)) return cb({success:false,message:'Invalid Bingo claim.'});
+        if(room.claimLockedCards.has(cardNumber)) return cb({success:false,locked:true,message:'This card is locked for the rest of this game.'});
         try {
-            const grid = await getCardGrid(cardNumber);
-            if (!grid || !isWinningGrid(grid, room.drawn)) {
-                return cb({
-                    success: false,
-                    message: 'That card does not have Bingo yet.'
-                });
-            }
-
-            room.status = 'FINISHING';
-            clearDrawTimer(room);
-
-            let prize = 0;
-            for (const player of room.readyPlayers) {
-                prize += getPlayerPaid(room, player);
-            }
-
-            const client = await pool.connect();
-            try {
-                await client.query('BEGIN');
-                const user = await getUserIdAndBalance(username, client);
-                if (!user) throw new Error('Winner not found');
-
-                await client.query(
-                    'UPDATE game_sessions SET status=$1,winner_username=$2,ended_at=NOW() WHERE id=$3',
-                    ['COMPLETED', username, room.gameId]
-                );
-                await client.query(
-                    'UPDATE users SET wins=wins+1,balance=balance+$1 WHERE id=$2',
-                    [prize, user.id]
-                );
-                await client.query(
-                    'INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',
-                    [user.id, prize, 'GAME_WIN']
-                );
-                await client.query('COMMIT');
-            } catch (err) {
-                await client.query('ROLLBACK');
-                room.status = 'PLAYING';
-                throw err;
-            } finally {
-                client.release();
-            }
-
-            // Confirm directly to the claimer first — this must reach them even if their
-            // socket had drifted out of the room (e.g. after a reconnect), since acks are
-            // delivered point-to-point and don't depend on room membership.
-            cb({ success: true, winner: username, prize, cardNumber });
-
-            io.to(roomName(stake)).emit('game_ended', {
-                stake,
-                winner: username,
-                prize,
-                cardNumber
-            });
-
-            await resetRoom(room, `Game finished. ${username} won ${prize} Birr!`);
-        } catch (err) {
-            console.error('claim', err);
-            cb({
-                success: false,
-                message: err.message || 'Unable to complete claim.'
-            });
-        }
+            const grid=await getCardGrid(cardNumber);
+            const claim=grid?winningClaim(grid,room.drawn,room.winningPattern,room.lastNumber):{ok:false};
+            if(!claim.ok){ room.claimLockedCards.add(cardNumber); socket.emit('card_locked',{stake,cardNumber,message:'BINGO claim was not valid for the latest called number. This card is locked for this round.'}); return cb({success:false,locked:true,message:'Invalid or late BINGO claim. This card is now locked for this game.'}); }
+            room.status='FINISHING'; clearDrawTimer(room);
+            let prize=0; for(const player of room.readyPlayers) prize+=getPlayerPaid(room,player);
+            const client=await pool.connect(); try { await client.query('BEGIN'); const user=await getUserIdAndBalance(username,client); if(!user)throw new Error('Winner not found'); await client.query('UPDATE game_sessions SET status=$1,winner_username=$2,ended_at=NOW() WHERE id=$3',['COMPLETED',username,room.gameId]); await client.query('UPDATE users SET wins=wins+1,balance=balance+$1 WHERE id=$2',[prize,user.id]); await client.query('INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',[user.id,prize,'GAME_WIN']); await client.query('COMMIT'); } catch(err){await client.query('ROLLBACK');room.status='PLAYING';throw err;} finally{client.release();}
+            const winnerPayload={stake,winner:username,prize,cardNumber,grid,winningCells:claim.cells,lastNumber:room.lastNumber,patternName:PATTERN_NAMES[room.winningPattern]||room.winningPattern};
+            cb({success:true,...winnerPayload}); io.to(roomName(stake)).emit('game_won',winnerPayload);
+            setTimeout(async()=>{ io.to(roomName(stake)).emit('game_ended',{stake,winner:username,prize,cardNumber}); await resetRoom(room,`Game finished. ${username} won ${prize} Birr!`); },5000);
+        } catch(err){ console.error('claim',err); cb({success:false,message:err.message||'Unable to complete claim.'}); }
     });
 });
 
 server.listen(PORT,()=>console.log(`Bingo server listening on ${PORT}`));
+
+
 
 
 

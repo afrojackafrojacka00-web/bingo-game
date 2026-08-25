@@ -1,3 +1,5 @@
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -147,5 +149,20 @@
         }
     </script>
 
-</body>
+
+    <div class="card">
+        <h2>🎮 Bingo Game Settings</h2>
+        <label>Winning Pattern</label>
+        <select id="winningPattern">
+          <option value="any_one_line">Any One Line</option><option value="any_two_lines">Any Two Lines</option><option value="any_square">Any Square (2×2)</option><option value="full">Full House</option><option value="x">X</option><option value="t">T</option><option value="reverse_t">Reverse T</option><option value="cross">Cross</option><option value="vertical_line">One Vertical Line</option><option value="horizontal_line">One Horizontal Line</option><option value="big_l">Big L</option><option value="reverse_l">Reverse L</option><option value="N">N</option><option value="H">H</option><option value="Reverse H">Reverse H</option><option value="Z">Z</option><option value="K">K</option><option value="E">E</option><option value="M">M</option><option value="Five Dots">Five Dots</option>
+        </select>
+        <label>Seconds between called numbers</label><input id="drawIntervalSeconds" type="number" min="1" max="60" value="4">
+        <button onclick="saveGameSettings()">Save Game Settings</button>
+    </div>
+<script>
+async function loadGameSettings(){const secret=document.getElementById('secret')?.value;if(!secret)return;const r=await fetch('/api/admin/game-settings',{headers:{'x-admin-secret':secret}});const d=await r.json();if(d.success){document.getElementById('winningPattern').value=d.winningPattern;document.getElementById('drawIntervalSeconds').value=d.drawIntervalSeconds;}}
+async function saveGameSettings(){const adminSecret=document.getElementById('secret').value;const winningPattern=document.getElementById('winningPattern').value;const drawIntervalSeconds=Number(document.getElementById('drawIntervalSeconds').value);const r=await fetch('/api/admin/game-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({adminSecret,winningPattern,drawIntervalSeconds})});const d=await r.json();alert(d.message|| (d.success?'Game settings saved.':'Failed.'));}
+</script></body>
 </html>
+
+
