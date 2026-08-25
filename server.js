@@ -932,7 +932,8 @@ function createRoom(stake) {
         winningPattern: DEFAULT_GAME_PATTERN,
         drawIntervalSeconds: DEFAULT_DRAW_INTERVAL_SECONDS,
         claimLockedCards: new Set(),
-        lastNumber: null
+        lastNumber: null,
+        winnerPayload: null
     };
 }
 
@@ -981,7 +982,8 @@ function roomSnapshot(room) {
         drawIntervalSeconds: room.drawIntervalSeconds,
         prizePool: Number((totalCards * room.stake).toFixed(2)),
         gameId: room.gameId,
-        takenCards
+        takenCards,
+        lastNumber: room.lastNumber || null
     };
 }
 
@@ -1098,6 +1100,7 @@ async function resetRoom(room, message = null) {
     room.drawIntervalSeconds = DEFAULT_DRAW_INTERVAL_SECONDS;
     room.claimLockedCards.clear();
     room.lastNumber = null;
+    room.winnerPayload = null;
 
     io.to(roomName(room.stake)).emit('room_reset', {
         stake: room.stake,
@@ -1179,6 +1182,7 @@ async function startRoomGame(room) {
     room.drawIntervalSeconds = Math.max(1, Number(settings.draw_interval_seconds || DEFAULT_DRAW_INTERVAL_SECONDS));
     room.claimLockedCards.clear();
     room.lastNumber = null;
+    room.winnerPayload = null;
 
     const participants = Array.from(room.readyPlayers);
     let prize = 0;
@@ -1351,7 +1355,7 @@ setInterval(async () => {
 
 app.get('/api/admin/game-settings', async (req,res)=>{ if(req.headers['x-admin-secret']!==process.env.ADMIN_SECRET) return res.status(403).json({success:false,message:'Unauthorized.'}); const r=await pool.query('SELECT winning_pattern,draw_interval_seconds FROM bingo_game_settings WHERE id=1'); const s=r.rows[0]||{winning_pattern:DEFAULT_GAME_PATTERN,draw_interval_seconds:DEFAULT_DRAW_INTERVAL_SECONDS}; res.json({success:true,winningPattern:s.winning_pattern,drawIntervalSeconds:s.draw_interval_seconds,patterns:PATTERN_NAMES}); });
 app.post('/api/admin/game-settings', async (req,res)=>{ const {adminSecret,winningPattern,drawIntervalSeconds}=req.body; if(adminSecret!==process.env.ADMIN_SECRET)return res.status(403).json({success:false,message:'Unauthorized.'}); if(!PATTERN_NAMES[winningPattern])return res.status(400).json({success:false,message:'Invalid pattern.'}); const seconds=Number(drawIntervalSeconds); if(!Number.isInteger(seconds)||seconds<1||seconds>60)return res.status(400).json({success:false,message:'Interval must be 1-60 seconds.'}); await pool.query(`INSERT INTO bingo_game_settings(id,winning_pattern,draw_interval_seconds,updated_at) VALUES(1,$1,$2,NOW()) ON CONFLICT(id) DO UPDATE SET winning_pattern=EXCLUDED.winning_pattern,draw_interval_seconds=EXCLUDED.draw_interval_seconds,updated_at=NOW()`,[winningPattern,seconds]); res.json({success:true,winningPattern,drawIntervalSeconds:seconds}); });
-app.get('/api/game-state', async (req,res)=>{ const stake=Number(req.query.stake), username=String(req.query.username||''); const room=gameRooms.get(stake); if(!room||!username||!room.readyPlayers.has(username))return res.status(403).json({success:false,message:'You are not in this active game.'}); const cards=[]; for(const cardNumber of Array.from(userCards(room,username))) { const grid=await getCardGrid(cardNumber); if(grid)cards.push({cardNumber,grid,locked:room.claimLockedCards.has(cardNumber)}); } res.json({success:true,room:{...roomSnapshot(room),drawn:Array.from(room.drawn),lastNumber:room.lastNumber,patternName:PATTERN_NAMES[room.winningPattern]||room.winningPattern},cards}); });
+app.get('/api/game-state', async (req,res)=>{ const stake=Number(req.query.stake), username=String(req.query.username||''); const room=gameRooms.get(stake); if(!room||!username||!room.readyPlayers.has(username))return res.status(403).json({success:false,ended:true,message:'This game has ended.'}); const cards=[]; for(const cardNumber of Array.from(userCards(room,username))) { const grid=await getCardGrid(cardNumber); if(grid)cards.push({cardNumber,grid,locked:room.claimLockedCards.has(cardNumber)}); } res.json({success:true,room:{...roomSnapshot(room),drawn:Array.from(room.drawn),lastNumber:room.lastNumber,patternName:PATTERN_NAMES[room.winningPattern]||room.winningPattern},cards,winnerPayload:room.winnerPayload||null}); });
 
 io.on('connection', socket => {
     socket.emit('rooms_state', allRoomsSnapshot());
@@ -1645,6 +1649,7 @@ io.on('connection', socket => {
             let prize=0; for(const player of room.readyPlayers) prize+=getPlayerPaid(room,player);
             const client=await pool.connect(); try { await client.query('BEGIN'); const user=await getUserIdAndBalance(username,client); if(!user)throw new Error('Winner not found'); await client.query('UPDATE game_sessions SET status=$1,winner_username=$2,ended_at=NOW() WHERE id=$3',['COMPLETED',username,room.gameId]); await client.query('UPDATE users SET wins=wins+1,balance=balance+$1 WHERE id=$2',[prize,user.id]); await client.query('INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',[user.id,prize,'GAME_WIN']); await client.query('COMMIT'); } catch(err){await client.query('ROLLBACK');room.status='PLAYING';throw err;} finally{client.release();}
             const winnerPayload={stake,winner:username,prize,cardNumber,grid,winningCells:claim.cells,lastNumber:room.lastNumber,patternName:PATTERN_NAMES[room.winningPattern]||room.winningPattern};
+            room.winnerPayload=winnerPayload;
             cb({success:true,...winnerPayload}); io.to(roomName(stake)).emit('game_won',winnerPayload);
             setTimeout(async()=>{ io.to(roomName(stake)).emit('game_ended',{stake,winner:username,prize,cardNumber}); await resetRoom(room,`Game finished. ${username} won ${prize} Birr!`); },5000);
         } catch(err){ console.error('claim',err); cb({success:false,message:err.message||'Unable to complete claim.'}); }

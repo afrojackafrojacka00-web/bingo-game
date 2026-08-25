@@ -80,7 +80,7 @@ socket.on('game_ended', async ({ stake, winner, prize }) => {
         alert(`🏆 ${winner} won ${Number(prize).toFixed(2)} Birr!`);
     }
     await loadUserData(currentUsername);
-    returnToRooms();
+    location.href = `/index.html?returnStake=${encodeURIComponent(stake)}`;
 });
 
 socket.on('room_reset', async ({ stake, message }) => {
@@ -90,7 +90,7 @@ socket.on('room_reset', async ({ stake, message }) => {
     selectedCards.clear();
     await loadUserData(currentUsername);
     if (message) alert(message);
-    returnToRooms();
+    location.href = `/index.html?returnStake=${encodeURIComponent(stake)}`;
 });
 
 socket.on('error_message', ({ message }) => showNotification(message));
@@ -116,21 +116,9 @@ async function resyncCurrentRoom() {
         const state = response.state;
 
         if (!state.playerInRoom) {
-            // The round finished (won, exhausted, or cancelled) while we were
-            // disconnected/backgrounded. Land everyone back in the lobby.
-            stopLobbyTimer();
-            resetReadyButton();
-            currentStake = null;
-            currentRoom = null;
-            selectedCards.clear();
-            Object.keys(takenCardsMap).forEach(k => delete takenCardsMap[k]);
-            hide('selectionBox');
-            hide('gamePlayBox');
-            await loadUserData(currentUsername);
-            showNotification('Your previous game has ended. You are back in the lobby.');
-            hide('homeBox');
-            show('roomsBox');
-            renderRooms();
+            // The game ended while the phone/tab was asleep. Go directly into
+            // the same stake's fresh card-selection flow, not the money rooms.
+            location.href = `/index.html?returnStake=${encodeURIComponent(stake)}`;
             return;
         }
 
@@ -142,17 +130,11 @@ async function resyncCurrentRoom() {
             if (!selectedCards.has(Number(cardNum))) takenCardsMap[cardNum] = true;
         });
 
-        if (state.status === 'PLAYING') {
-            hide('homeBox');
-            hide('roomsBox');
-            hide('selectionBox');
-            show('gamePlayBox');
-            document.getElementById('activeStake').innerText = `${stake} Birr`;
-            document.getElementById('activePrize').innerText = `${Number(state.prizePool).toFixed(2)} Birr`;
-            currentRoom.drawn = state.drawn || [];
-            renderMyGameCards();
-            document.querySelectorAll('#myGameCards .game-card-choice').forEach(btn => btn.disabled = false);
-            updateCalledNumbers();
+        if (state.status === 'PLAYING' || state.status === 'FINISHING') {
+            // Never revive the old in-page game UI after sleep/wake.
+            localStorage.setItem('bingoActiveGame', JSON.stringify({ username: currentUsername, stake:Number(stake), gameId:state.gameId }));
+            location.href = `/game.html?stake=${encodeURIComponent(stake)}`;
+            return;
         } else if (state.status === 'JOINING') {
             hide('homeBox');
             hide('roomsBox');
@@ -264,7 +246,7 @@ function renderRooms() {
         return `<div class="room-row">
             <div>
                 <div class="room-stake">💰 ${Number(room.stake).toFixed(0)} Birr</div>
-                <div class="room-meta">👥 ${room.players} players</div>
+                <div class="room-meta">🃏 ${room.totalCards || 0} cards playing</div>
             </div>
             <div class="room-status ${statusClass}">
                 🏆 ${Number(room.prizePool).toFixed(2)} Birr<br>
