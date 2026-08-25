@@ -122,6 +122,7 @@ const initDB = async () => {
 
         // Migration columns for existing tables
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC(10,2) DEFAULT 0.00;');
+        await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS wins INT DEFAULT 0;');
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT;');
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE;');
         await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_language VARCHAR(5) DEFAULT 'en';");
