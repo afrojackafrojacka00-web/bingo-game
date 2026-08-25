@@ -425,8 +425,15 @@ function launchGame() {
 
 function claimBingo(cardNumber) {
     if (!currentStake || !cardNumber) return;
+
+    document.querySelectorAll('#myGameCards .game-card-choice').forEach(btn => btn.disabled = true);
+
     socket.emit('claim_bingo', { stake: currentStake, username: currentUsername, cardNumber }, response => {
-        if (!response?.success) showNotification(response?.message || 'Bingo is not valid yet.');
+        if (!response?.success) {
+            showNotification(response?.message || 'Bingo is not valid yet.');
+            document.querySelectorAll('#myGameCards .game-card-choice').forEach(btn => btn.disabled = false);
+        }
+        // On success, the server broadcasts game_ended / room_reset, which returns everyone to the lobby.
     });
 }
 
@@ -483,6 +490,7 @@ async function showHomeScreen(username) {
     localStorage.setItem('bingoUser', username);
     document.getElementById('playerDisplay').innerText = username;
     hide('authBox'); show('headerBar'); show('bottomNav');
+    applyLanguage(localStorage.getItem('bingoLang') || 'en', false);
     switchTab('tabGames', document.querySelector('.nav-item'));
     showHome();
 
@@ -527,8 +535,183 @@ async function loadUserData(username) {
     try {
         const res = await fetch(`/api/user-details?username=${encodeURIComponent(username)}`);
         const data = await res.json();
-        if (data.success && data.user) document.getElementById('balanceDisplay').innerText = Number(data.user.balance || 0).toFixed(2);
+        if (data.success && data.user) {
+            const balance = Number(data.user.balance || 0).toFixed(2);
+            document.getElementById('balanceDisplay').innerText = balance;
+
+            const walletBalance = document.getElementById('walletBalanceDisplay');
+            if (walletBalance) walletBalance.innerText = `${balance} Birr`;
+
+            const profileUsername = document.getElementById('profileUsername');
+            if (profileUsername) profileUsername.innerText = data.user.username;
+
+            const profilePhone = document.getElementById('profilePhone');
+            if (profilePhone) profilePhone.innerText = data.user.phone_number || 'Not set';
+
+            const lang = data.user.preferred_language || 'en';
+            const langSelect = document.getElementById('languageSelect');
+            if (langSelect) langSelect.value = lang;
+            applyLanguage(lang, false);
+        }
     } catch (err) { console.error(err); }
+}
+
+// ---------------- HISTORY ----------------
+async function fetchHistory(username) {
+    if (!username) return;
+    const container = document.getElementById('historyList');
+    if (!container) return;
+
+    container.innerHTML = '<p class="small">Loading your game history…</p>';
+
+    try {
+        const res = await fetch(`/api/history?username=${encodeURIComponent(username)}`, { cache: 'no-store' });
+        const data = await res.json();
+        if (!data.success) return container.innerHTML = '<p class="small">Could not load history.</p>';
+        renderHistory(data.history || []);
+    } catch (err) {
+        console.error('History fetch error:', err);
+        container.innerHTML = '<p class="small">Could not load history.</p>';
+    }
+}
+
+function renderHistory(games) {
+    const container = document.getElementById('historyList');
+    if (!container) return;
+
+    if (!games.length) {
+        container.innerHTML = '<p class="small">You haven\'t completed a game yet. Your finished games will show up here.</p>';
+        return;
+    }
+
+    container.innerHTML = games.map(game => {
+        const won = game.won;
+        const outcomeClass = won ? 'won' : 'lost';
+        const outcomeLabel = won ? '🏆 You Won' : (game.winner ? '❌ You Lost' : '➖ No Winner');
+        const dateStr = new Date(game.date).toLocaleString();
+        return `<div class="history-card ${outcomeClass}">
+            <div class="history-top">
+                <span class="history-outcome">${outcomeLabel}</span>
+                <span class="history-date">${dateStr}</span>
+            </div>
+            <div class="info-grid" style="margin:10px 0 0;">
+                <div class="info-box"><span>PLAYERS</span><strong>${game.players}</strong></div>
+                <div class="info-box"><span>WINNER</span><strong>${game.winner || 'None'}</strong></div>
+                <div class="info-box"><span>PRIZE</span><strong>${game.prizePool.toFixed(2)} Birr</strong></div>
+                <div class="info-box"><span>STAKE</span><strong>${game.stake.toFixed(0)} Birr</strong></div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// ---------------- WALLET ----------------
+async function fetchWallet(username) {
+    if (!username) return;
+    const list = document.getElementById('walletTransactions');
+
+    try {
+        const res = await fetch(`/api/wallet?username=${encodeURIComponent(username)}`, { cache: 'no-store' });
+        const data = await res.json();
+        if (!data.success) return;
+
+        const walletBalance = document.getElementById('walletBalanceDisplay');
+        if (walletBalance) walletBalance.innerText = `${Number(data.balance).toFixed(2)} Birr`;
+
+        if (list) renderWalletTransactions(data.transactions || []);
+    } catch (err) {
+        console.error('Wallet fetch error:', err);
+    }
+}
+
+function renderWalletTransactions(transactions) {
+    const list = document.getElementById('walletTransactions');
+    if (!list) return;
+
+    if (!transactions.length) {
+        list.innerHTML = '<p class="small">No transactions yet.</p>';
+        return;
+    }
+
+    list.innerHTML = transactions.map(tx => {
+        const positive = tx.amount >= 0;
+        const sign = positive ? '+' : '';
+        return `<div class="tx-row">
+            <div>
+                <div class="tx-type">${formatTxType(tx.type)}</div>
+                <div class="tx-date">${new Date(tx.date).toLocaleString()}</div>
+            </div>
+            <div class="tx-amount ${positive ? 'positive' : 'negative'}">${sign}${tx.amount.toFixed(2)} Birr</div>
+        </div>`;
+    }).join('');
+}
+
+function formatTxType(type) {
+    const labels = {
+        GAME_CARD_ENTRY: 'Card Entry',
+        GAME_WIN: 'Game Win',
+        WELCOME_BONUS: 'Welcome Bonus',
+        CARD_DESELECT_REFUND: 'Card Refund',
+        GAME_REFUND_UNREADY: 'Refund (Not Ready)',
+        GAME_REFUND_NOT_ENOUGH_PLAYERS: 'Refund (Not Enough Players)',
+        GAME_REFUND_LEFT_ROOM: 'Refund (Left Room)',
+        GAME_REFUND_START_ERROR: 'Refund (Start Error)'
+    };
+    return labels[type] || type;
+}
+
+// ---------------- PROFILE ----------------
+function toggleProfileModal() {
+    const modal = document.getElementById('profileModal');
+    if (!modal) return;
+    modal.classList.toggle('hidden');
+}
+
+async function changeLanguage(language) {
+    applyLanguage(language, true);
+    if (!currentUsername) return;
+    try {
+        await fetch('/api/user/language', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: currentUsername, language })
+        });
+    } catch (err) {
+        console.error('Save language error:', err);
+    }
+}
+
+// ---------------- LANGUAGE (EN / AM) ----------------
+const translations = {
+    en: {
+        navGames: 'Games', navHistory: 'History', navWallet: 'Wallet', navAccount: 'Account',
+        readyTitle: 'Ready to Play? 🎲', readyBody: 'Choose a stake, join a room, select your cards and play.', playBtn: 'Play Bingo 🚀',
+        walletTitle: '💰 My Wallet', walletSub: 'Your current balance', walletTxTitle: 'Recent Transactions',
+        historyTitle: '🏆 Game History',
+        accountTitle: 'Account Settings ⚙️', accountBody: 'Set a password for standard web login.', accountSaveBtn: 'Save Web Password 🔒',
+        profileTitle: '👤 Profile', profileUsernameLbl: 'USERNAME', profilePhoneLbl: 'PHONE', profileLangLbl: 'Language',
+        announcementsTitle: '📢 Announcements'
+    },
+    am: {
+        navGames: 'ጨዋታዎች', navHistory: 'ታሪክ', navWallet: 'ዋሌት', navAccount: 'መለያ',
+        readyTitle: 'ለመጫወት ተዘጋጅተዋል? 🎲', readyBody: 'ውርርድ ይምረጡ፣ ክፍል ይቀላቀሉ፣ ካርድዎን ይምረጡ እና ይጫወቱ።', playBtn: 'ቢንጎ ይጫወቱ 🚀',
+        walletTitle: '💰 የኔ ዋሌት', walletSub: 'የአሁኑ ቀሪ ሂሳብዎ', walletTxTitle: 'የቅርብ ጊዜ ግብይቶች',
+        historyTitle: '🏆 የጨዋታ ታሪክ',
+        accountTitle: 'የመለያ ቅንብሮች ⚙️', accountBody: 'መደበኛ የድር መግቢያ የይለፍ ቃል ያዘጋጁ።', accountSaveBtn: 'የድር የይለፍ ቃል ያስቀምጡ 🔒',
+        profileTitle: '👤 መገለጫ', profileUsernameLbl: 'የተጠቃሚ ስም', profilePhoneLbl: 'ስልክ', profileLangLbl: 'ቋንቋ',
+        announcementsTitle: '📢 ማስታወቂያዎች'
+    }
+};
+
+function applyLanguage(language, persistLocally = true) {
+    const lang = translations[language] ? language : 'en';
+    const t = translations[lang];
+
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.dataset.i18n;
+        if (t[key]) el.innerText = t[key];
+    });
+
+    if (persistLocally) localStorage.setItem('bingoLang', lang);
 }
 
 function switchTab(tabId, navElement) {
@@ -536,6 +719,9 @@ function switchTab(tabId, navElement) {
     document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
     show(tabId);
     navElement?.classList.add('active');
+
+    if (tabId === 'tabHistory') fetchHistory(currentUsername);
+    if (tabId === 'tabWallet') fetchWallet(currentUsername);
 }
 
 function logoutUser() {
@@ -668,5 +854,9 @@ async function toggleNotificationModal() {
         await markNotificationsAsRead();
     }
 }
+
+
+
+
 
 

@@ -115,6 +115,7 @@ const initDB = async () => {
             CREATE INDEX IF NOT EXISTS idx_notifications_user_reads ON notifications(id DESC, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_users_username_lower ON users(LOWER(username));
             CREATE INDEX IF NOT EXISTS idx_game_participants_game ON game_participants(game_id);
+            CREATE INDEX IF NOT EXISTS idx_game_participants_username ON game_participants(LOWER(username));
             CREATE INDEX IF NOT EXISTS idx_transactions_user_created ON transactions(user_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_game_sessions_status_created ON game_sessions(status, created_at DESC);
         `);
@@ -123,6 +124,7 @@ const initDB = async () => {
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS balance NUMERIC(10,2) DEFAULT 0.00;');
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT;');
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE;');
+        await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_language VARCHAR(5) DEFAULT 'en';");
 
 await pool.query('ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS stake NUMERIC(10,2) DEFAULT 0;');
 await pool.query('ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS prize_pool NUMERIC(10,2) DEFAULT 0;');
@@ -473,14 +475,14 @@ app.post('/api/user/phone', async (req, res) => {
     }
 });
 
-// 6. Get User Details (Balance, Phone, Username)
+// 6. Get User Details (Balance, Phone, Username, Language)
 app.get('/api/user-details', async (req, res) => {
     const username = req.query.username;
     if (!username) return res.status(400).json({ success: false, message: "Username required." });
 
     try {
         const result = await pool.query(
-            'SELECT username, phone_number, balance FROM users WHERE LOWER(username) = LOWER($1)',
+            'SELECT username, phone_number, balance, preferred_language FROM users WHERE LOWER(username) = LOWER($1)',
             [username]
         );
         if (result.rows.length === 0) {
@@ -489,6 +491,109 @@ app.get('/api/user-details', async (req, res) => {
         res.json({ success: true, user: result.rows[0] });
     } catch (err) {
         res.status(500).json({ success: false, message: "Server error." });
+    }
+});
+
+// 6b. Update Preferred Language (English / Amharic)
+app.post('/api/user/language', async (req, res) => {
+    const { username, language } = req.body;
+    if (!username || !['en', 'am'].includes(language)) {
+        return res.status(400).json({ success: false, message: "Invalid language." });
+    }
+
+    try {
+        const result = await pool.query(
+            'UPDATE users SET preferred_language = $1 WHERE LOWER(username) = LOWER($2) RETURNING username',
+            [language, username]
+        );
+        if (!result.rowCount) {
+            return res.status(404).json({ success: false, message: "User not found." });
+        }
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Set language error:', err);
+        res.status(500).json({ success: false, message: "Failed to save language." });
+    }
+});
+
+// 6c. Game History — completed games this user actually joined (not every game)
+app.get('/api/history', async (req, res) => {
+    const username = req.query.username;
+    if (!username) return res.status(400).json({ success: false, message: "Username required." });
+
+    try {
+        const result = await pool.query(
+            `SELECT
+                gs.id,
+                gs.stake,
+                gs.prize_pool,
+                gs.winner_username,
+                gs.status,
+                gs.created_at,
+                gs.ended_at,
+                gp.card_count,
+                gp.amount_paid,
+                (SELECT COUNT(*) FROM game_participants gp2 WHERE gp2.game_id = gs.id) AS player_count
+             FROM game_participants gp
+             JOIN game_sessions gs ON gs.id = gp.game_id
+             WHERE LOWER(gp.username) = LOWER($1)
+               AND gs.status IN ('COMPLETED', 'EXHAUSTED')
+             ORDER BY gs.created_at DESC
+             LIMIT 100`,
+            [username]
+        );
+
+        const history = result.rows.map(row => ({
+            gameId: row.id,
+            stake: Number(row.stake),
+            prizePool: Number(row.prize_pool),
+            winner: row.winner_username || null,
+            won: !!row.winner_username && row.winner_username.toLowerCase() === username.toLowerCase(),
+            players: Number(row.player_count),
+            cardCount: Number(row.card_count),
+            amountPaid: Number(row.amount_paid),
+            date: row.ended_at || row.created_at
+        }));
+
+        res.json({ success: true, history });
+    } catch (err) {
+        console.error('History fetch error:', err);
+        res.status(500).json({ success: false, message: "Server error fetching history." });
+    }
+});
+
+// 6d. Wallet — current balance plus recent transaction log
+app.get('/api/wallet', async (req, res) => {
+    const username = req.query.username;
+    if (!username) return res.status(400).json({ success: false, message: "Username required." });
+
+    try {
+        const userResult = await pool.query(
+            'SELECT id, balance FROM users WHERE LOWER(username) = LOWER($1)',
+            [username]
+        );
+        if (!userResult.rowCount) {
+            return res.status(404).json({ success: false, message: "User not found." });
+        }
+
+        const user = userResult.rows[0];
+        const txResult = await pool.query(
+            'SELECT amount, type, created_at FROM transactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50',
+            [user.id]
+        );
+
+        res.json({
+            success: true,
+            balance: Number(user.balance),
+            transactions: txResult.rows.map(t => ({
+                amount: Number(t.amount),
+                type: t.type,
+                date: t.created_at
+            }))
+        });
+    } catch (err) {
+        console.error('Wallet fetch error:', err);
+        res.status(500).json({ success: false, message: "Server error fetching wallet." });
     }
 });
 
@@ -1539,3 +1644,6 @@ io.on('connection', socket => {
 });
 
 server.listen(PORT,()=>console.log(`Bingo server listening on ${PORT}`));
+
+
+

@@ -27,8 +27,24 @@ button:disabled { opacity:.55; cursor:not-allowed; }
 .status-dot.offline { background:var(--red); box-shadow:0 0 6px var(--red); }
 .btn-logout { background:var(--red); width:auto; padding:7px 10px; margin:0; }
 .bottom-nav { position:fixed; z-index:100; bottom:0; left:0; right:0; background:var(--card); display:flex; justify-content:space-around; padding:12px 0; border-top:1px solid var(--line); }
-.nav-item { color:var(--muted); text-align:center; font-size:14px; cursor:pointer; width:50%; }
+.nav-item { color:var(--muted); text-align:center; font-size:12px; cursor:pointer; width:25%; line-height:1.6; }
 .nav-item.active { color:var(--blue); font-weight:bold; }
+.wallet-balance { font-size:34px; font-weight:800; color:var(--green); margin:12px 0 4px; }
+.history-list { display:flex; flex-direction:column; gap:12px; }
+.history-card { background:var(--card); border:1px solid #2b2b2b; border-radius:14px; padding:16px; text-align:left; border-left:4px solid var(--muted); }
+.history-card.won { border-left-color:var(--green); }
+.history-card.lost { border-left-color:var(--red); }
+.history-top { display:flex; justify-content:space-between; align-items:center; }
+.history-outcome { font-weight:800; font-size:15px; }
+.history-date { font-size:11px; color:var(--muted); }
+.tx-row { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #2b2b2b; }
+.tx-row:last-child { border-bottom:none; }
+.tx-type { font-weight:bold; font-size:14px; }
+.tx-date { font-size:11px; color:var(--muted); margin-top:2px; }
+.tx-amount { font-weight:800; font-size:14px; }
+.tx-amount.positive { color:var(--green); }
+.tx-amount.negative { color:var(--red); }
+#languageSelect { margin-top:6px; }
 .grid-container { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; margin-top:15px; }
 .card-item { background:#2a2a2a; padding:13px 0; text-align:center; font-weight:bold; border-radius:7px; cursor:pointer; border:1px solid #444; }
 .card-item.selected { background:var(--blue); border-color:#00aaff; }
@@ -67,6 +83,7 @@ button:disabled { opacity:.55; cursor:not-allowed; }
     <span>| 💰 <strong id="balanceDisplay">10.00</strong> Birr</span>
   </div>
   <div style="display:flex;gap:12px;align-items:center;">
+    <button id="profileBtn" onclick="toggleProfileModal()" style="position:relative;background:none;border:none;font-size:20px;padding:0;width:auto;margin:0;">👤</button>
     <button id="notifBell" onclick="toggleNotificationModal()" style="position:relative;background:none;border:none;font-size:20px;padding:0;width:auto;margin:0;">🔔<span id="notifBadge" class="hidden" style="position:absolute;top:-5px;right:-5px;background:#ff4d4d;color:#fff;font-size:10px;padding:2px 6px;border-radius:50%;">0</span></button>
     <button id="logoutBtn" class="btn-logout" onclick="logoutUser()">Logout</button>
   </div>
@@ -74,8 +91,23 @@ button:disabled { opacity:.55; cursor:not-allowed; }
 
 <div id="notifModal" class="modal hidden">
  <div class="card" style="max-height:85vh;display:flex;flex-direction:column;">
-  <div class="page-title"><h3 style="margin:0;color:var(--blue)">📢 Announcements</h3><button class="back-btn" onclick="toggleNotificationModal()">✕</button></div>
+  <div class="page-title"><h3 style="margin:0;color:var(--blue)" data-i18n="announcementsTitle">📢 Announcements</h3><button class="back-btn" onclick="toggleNotificationModal()">✕</button></div>
   <div id="notifListContainer" style="overflow-y:auto;text-align:left;"></div>
+ </div>
+</div>
+
+<div id="profileModal" class="modal hidden">
+ <div class="card">
+  <div class="page-title"><h3 style="margin:0;color:var(--blue)" data-i18n="profileTitle">👤 Profile</h3><button class="back-btn" onclick="toggleProfileModal()">✕</button></div>
+  <div class="info-grid">
+   <div class="info-box"><span data-i18n="profileUsernameLbl">USERNAME</span><strong id="profileUsername">-</strong></div>
+   <div class="info-box"><span data-i18n="profilePhoneLbl">PHONE</span><strong id="profilePhone">-</strong></div>
+  </div>
+  <label class="small" style="display:block;text-align:left;margin-top:14px;" data-i18n="profileLangLbl">Language</label>
+  <select id="languageSelect" onchange="changeLanguage(this.value)">
+   <option value="en">English</option>
+   <option value="am">አማርኛ (Amharic)</option>
+  </select>
  </div>
 </div>
 
@@ -87,7 +119,7 @@ button:disabled { opacity:.55; cursor:not-allowed; }
 </div>
 
 <div id="tabGames" class="tab-content hidden">
- <div id="homeBox" class="card"><h2>Ready to Play? 🎲</h2><p class="small">Choose a stake, join a room, select your cards and play.</p><button class="btn-play" onclick="goToGameScreen()">Play Bingo 🚀</button></div>
+ <div id="homeBox" class="card"><h2 data-i18n="readyTitle">Ready to Play? 🎲</h2><p class="small" data-i18n="readyBody">Choose a stake, join a room, select your cards and play.</p><button class="btn-play" onclick="goToGameScreen()" data-i18n="playBtn">Play Bingo 🚀</button></div>
 
  <div id="roomsBox" class="hidden">
    <div class="page-title"><h2 style="margin:0">🎮 Bingo Rooms</h2><button class="back-btn" onclick="showHome()">← Back</button></div>
@@ -131,9 +163,35 @@ button:disabled { opacity:.55; cursor:not-allowed; }
  </div>
 </div>
 
-<div id="tabAccount" class="tab-content hidden"><div class="card"><h2>Account Settings ⚙️</h2><p class="small">Set a password for standard web login.</p><input type="password" id="webPasswordInput" placeholder="Enter new web password"><button class="btn-play" onclick="setWebPassword()">Save Web Password 🔒</button></div></div>
+<div id="tabHistory" class="tab-content hidden">
+ <div class="page-title"><h2 style="margin:0" data-i18n="historyTitle">🏆 Game History</h2></div>
+ <div id="historyList" class="history-list"></div>
+</div>
 
-<div id="bottomNav" class="bottom-nav hidden"><div class="nav-item active" onclick="switchTab('tabGames',this)">🎮 Games</div><div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️ Account</div></div>
+<div id="tabWallet" class="tab-content hidden">
+ <div class="card">
+  <h2 data-i18n="walletTitle">💰 My Wallet</h2>
+  <div id="walletBalanceDisplay" class="wallet-balance">0.00 Birr</div>
+  <p class="small" data-i18n="walletSub">Your current balance</p>
+ </div>
+ <div class="card" style="text-align:left;">
+  <h3 style="margin-top:0;" data-i18n="walletTxTitle">Recent Transactions</h3>
+  <div id="walletTransactions"></div>
+ </div>
+</div>
+
+<div id="tabAccount" class="tab-content hidden"><div class="card"><h2 data-i18n="accountTitle">Account Settings ⚙️</h2><p class="small" data-i18n="accountBody">Set a password for standard web login.</p><input type="password" id="webPasswordInput" placeholder="Enter new web password"><button class="btn-play" onclick="setWebPassword()" data-i18n="accountSaveBtn">Save Web Password 🔒</button></div></div>
+
+<div id="bottomNav" class="bottom-nav hidden">
+  <div class="nav-item active" onclick="switchTab('tabGames',this)">🎮<br><span data-i18n="navGames">Games</span></div>
+  <div class="nav-item" onclick="switchTab('tabHistory',this)">🏆<br><span data-i18n="navHistory">History</span></div>
+  <div class="nav-item" onclick="switchTab('tabWallet',this)">💰<br><span data-i18n="navWallet">Wallet</span></div>
+  <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
+</div>
 <script src="app.js"></script>
 </body>
 </html>
+
+
+
+
