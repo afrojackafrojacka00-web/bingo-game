@@ -1,5 +1,3 @@
-
-
 let currentUsername = "";
 let currentStake = null;
 let pendingStake = null;
@@ -12,6 +10,25 @@ let notificationRefreshTimer = null;
 const selectedCards = new Set();
 const takenCardsMap = {};
 const socket = io();
+
+// Telegram's in-app browser blocks/misbehaves with native confirm()/alert()
+// popups in a lot of client versions — Telegram's own Mini Apps guidance is
+// to use its own dialogs instead. These helpers use the Telegram dialog when
+// running inside Telegram, and fall back to the normal browser dialog on the
+// plain website.
+function confirmAction(message) {
+    return new Promise(resolve => {
+        const tg = window.Telegram?.WebApp;
+        if (tg?.showConfirm) tg.showConfirm(message, ok => resolve(!!ok));
+        else resolve(window.confirm(message));
+    });
+}
+
+function alertUser(message) {
+    const tg = window.Telegram?.WebApp;
+    if (tg?.showAlert) tg.showAlert(message);
+    else window.alert(message);
+}
 
 socket.on('connect', () => {
     setConnection(true);
@@ -374,10 +391,11 @@ function returnToRooms() {
 
 async function leaveCurrentRoom() {
     if (!currentStake) return returnToRooms();
-    if (!confirm(`Leave the ${currentStake} Birr room? Your stake will be refunded if the game has not started.`)) return;
+    const ok = await confirmAction(`Leave the ${currentStake} Birr room? Your stake will be refunded if the game has not started.`);
+    if (!ok) return;
 
     socket.emit('leave_room', { stake: currentStake, username: currentUsername }, async response => {
-        if (!response?.success) return alert(response?.message || 'Unable to leave room.');
+        if (!response?.success) return alertUser(response?.message || 'Unable to leave room.');
         await loadUserData(currentUsername);
         returnToRooms();
     });
@@ -560,8 +578,15 @@ async function showHomeScreen(username) {
     await loadUserData(username);
     await fetchNotifications(username);
 
-    const returnStake = Number(new URLSearchParams(location.search).get('returnStake') || 0);
-    if (returnStake) setTimeout(()=>{ pendingStake=returnStake; confirmJoin(); }, 500);
+    const searchParams = new URLSearchParams(location.search);
+    const returnStake = Number(searchParams.get('returnStake') || 0);
+    if (returnStake) {
+        setTimeout(()=>{ pendingStake=returnStake; confirmJoin(); }, 500);
+    } else if (searchParams.get('view') === 'rooms') {
+        // Landed here after leaving a live game — go straight to the stake
+        // list (the "money choosing" page), not the home splash.
+        goToGameScreen();
+    }
 
     if (notificationRefreshTimer) clearInterval(notificationRefreshTimer);
     notificationRefreshTimer = setInterval(() => {
@@ -655,6 +680,9 @@ function renderHistory(games) {
         const outcomeClass = won ? 'won' : 'lost';
         const outcomeLabel = won ? '🏆 You Won' : (game.winner ? '❌ You Lost' : '➖ No Winner');
         const dateStr = new Date(game.date).toLocaleString();
+        const cardCell = game.winningCardNumber
+            ? `<strong class="card-link" onclick="viewWinningCard(${game.gameId})">#${game.winningCardNumber}</strong>`
+            : `<strong>—</strong>`;
         return `<div class="history-card ${outcomeClass}">
             <div class="history-top">
                 <span class="history-outcome">${outcomeLabel}</span>
@@ -665,9 +693,49 @@ function renderHistory(games) {
                 <div class="info-box"><span>WINNER</span><strong>${game.winner || 'None'}</strong></div>
                 <div class="info-box"><span>PRIZE</span><strong>${game.prizePool.toFixed(2)} Birr</strong></div>
                 <div class="info-box"><span>STAKE</span><strong>${game.stake.toFixed(0)} Birr</strong></div>
+                <div class="info-box"><span>WINNING CARD</span>${cardCell}</div>
             </div>
         </div>`;
     }).join('');
+}
+
+// ---------------- HISTORY: WINNING CARD DETAIL ----------------
+async function viewWinningCard(gameId) {
+    const modal = document.getElementById('historyCardModal');
+    const body = document.getElementById('historyCardBody');
+    if (!modal || !body) return;
+
+    body.innerHTML = '<p class="small">Loading card…</p>';
+    show('historyCardModal');
+
+    try {
+        const res = await fetch(`/api/history/${encodeURIComponent(gameId)}`, { cache: 'no-store' });
+        const data = await res.json();
+        if (!data.success) {
+            body.innerHTML = `<p class="small">${data.message || 'Could not load this card.'}</p>`;
+            return;
+        }
+
+        const g = data.game;
+        const winSet = new Set((g.winningCells || []).map(c => c.join(',')));
+        const gridHtml = g.grid.map((row, r) => row.map((v, c) => {
+            const isFree = v === 'FREE' || (r === 2 && c === 2);
+            const isWin = winSet.has(`${r},${c}`);
+            return `<span class="${isWin ? 'win' : ''}">${isFree ? 'FREE' : v}</span>`;
+        }).join('')).join('');
+
+        body.innerHTML = `
+            <h3 style="margin:0 0 4px">Card #${g.cardNumber}</h3>
+            <p class="small" style="margin:0 0 12px">${g.patternName} · Won by ${g.winner} · ${Number(g.prizePool).toFixed(2)} Birr</p>
+            <div class="winner-grid">${gridHtml}</div>`;
+    } catch (err) {
+        console.error('History card fetch error:', err);
+        body.innerHTML = '<p class="small">Could not load this card.</p>';
+    }
+}
+
+function closeHistoryCardModal() {
+    hide('historyCardModal');
 }
 
 // ---------------- WALLET ----------------
@@ -920,6 +988,9 @@ async function toggleNotificationModal() {
         await markNotificationsAsRead();
     }
 }
+
+
+
 
 
 

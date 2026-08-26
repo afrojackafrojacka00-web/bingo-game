@@ -1,5 +1,24 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Live Bingo</title><link rel="stylesheet" href="game.css"><script src="/socket.io/socket.io.js"></script></head><body>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Live Bingo</title><link rel="stylesheet" href="game.css"><script src="https://telegram.org/js/telegram-web-app.js"></script><script src="/socket.io/socket.io.js"></script></head><body>
 <header><div class="head-left"><span class="live"><i></i> LIVE</span><b id="patternName">Any One Line</b><small id="playersPlaying">0 players playing</small></div><div><span id="userName"></span> · <b><span id="balance">0.00</span> Birr</b></div></header>
-<main><section class="status"><div><small>LAST NUMBER</small><strong id="lastNumber">--</strong></div><div><b id="calledCount">0 / 75</b><small>numbers called</small></div><div class="toggles"><label>Auto mark <input id="autoMarkEl" type="checkbox" checked></label><label>Blink one-away <input id="blinkToggle" type="checkbox" checked></label></div></section>
-<section class="game-layout"><aside class="number-board"><h3>B I N G O</h3><div id="numberBoard" class="numbers"></div></aside><section class="card-side"><h3>Your Cards</h3><div id="cardsEl" class="cards"><p>Loading cards…</p></div></section></section></main>
+<main>
+<section class="status">
+  <div class="stat-block"><strong id="lastNumber">--</strong></div>
+  <div class="last-called"><small class="lc-label">Last Called</small><div id="lastCalledBalls" class="lc-balls"><span class="empty">--</span></div></div>
+  <div class="stat-block"><strong id="calledCount">0 / 75</strong></div>
+</section>
+<section class="game-layout">
+  <aside class="number-board"><h3>B I N G O</h3><div id="numberBoard" class="numbers"></div></aside>
+  <section class="card-side">
+    <div class="card-side-head">
+      <h3>Your Cards</h3>
+      <div class="controls">
+        <button id="autoMarkToggle" class="switch-pill" type="button" role="switch" aria-checked="true"><span class="dot"></span><span class="switch-label">AUTO</span></button>
+        <button id="blinkToggle" class="switch-pill" type="button" role="switch" aria-checked="true"><span class="dot"></span><span class="switch-label">Blink</span></button>
+        <button id="leaveGameBtn" class="switch-pill leave" type="button" onclick="leaveGame()"><span class="switch-label">Leave</span></button>
+      </div>
+    </div>
+    <div id="cardsEl" class="cards"><p>Loading cards…</p></div>
+  </section>
+</section>
+</main>
 <div id="winnerOverlay" class="overlay"><div class="winner"><h2 id="winnerTitle">BINGO!</h2><p id="winnerText"></p><div id="winnerCard"></div><p class="returning">Returning to card selection…</p></div></div><div id="toast" class="toast"></div><script src="game.js"></script></body></html>

@@ -1,6 +1,8 @@
 
 
 
+
+
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -35,7 +37,15 @@ app.get('/', (req, res) => {
 // PostgreSQL Connection Pool
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+    ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
+    // Tuned for a single server instance handling many concurrent rooms.
+    // The old default (max: 10) becomes a bottleneck once a few hundred
+    // players are toggling cards at once — each toggle used to cost several
+    // round trips per click, so raise the ceiling and fail fast instead of
+    // queueing forever if the DB is genuinely overloaded.
+    max: Number(process.env.PG_POOL_MAX || 30),
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000
 });
 
 // -------------------- GAME CONFIG --------------------
@@ -138,6 +148,12 @@ await pool.query('ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS prize_pool 
         await pool.query(`INSERT INTO bingo_game_settings(id,winning_pattern,draw_interval_seconds) VALUES(1,'any_one_line',4) ON CONFLICT (id) DO NOTHING;`);
         await pool.query('ALTER TABLE game_participants ADD COLUMN IF NOT EXISTS card_count INT DEFAULT 1;');
         await pool.query('ALTER TABLE game_participants ADD COLUMN IF NOT EXISTS amount_paid NUMERIC(10,2) DEFAULT 0;');
+
+        // Winning-card detail, so History can show which card won and let the
+        // user open it up and see the actual winning grid + pattern.
+        await pool.query('ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS winning_card_number INT;');
+        await pool.query('ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS winning_cells JSONB;');
+        await pool.query('ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS drawn_numbers INT[];');
 
 
         // Seed 500 Bingo Cards if not already present
@@ -536,6 +552,7 @@ app.get('/api/history', async (req, res) => {
                 gs.stake,
                 gs.prize_pool,
                 gs.winner_username,
+                gs.winning_card_number,
                 gs.status,
                 gs.created_at,
                 gs.ended_at,
@@ -557,6 +574,7 @@ app.get('/api/history', async (req, res) => {
             prizePool: Number(row.prize_pool),
             winner: row.winner_username || null,
             won: !!row.winner_username && row.winner_username.toLowerCase() === username.toLowerCase(),
+            winningCardNumber: row.winning_card_number || null,
             players: Number(row.player_count),
             cardCount: Number(row.card_count),
             amountPaid: Number(row.amount_paid),
@@ -567,6 +585,52 @@ app.get('/api/history', async (req, res) => {
     } catch (err) {
         console.error('History fetch error:', err);
         res.status(500).json({ success: false, message: "Server error fetching history." });
+    }
+});
+
+// Detail for a single past game: the winning card's grid, the winning
+// pattern's cells, and the numbers that had been drawn — everything needed
+// to redraw exactly what the winner saw when they won.
+app.get('/api/history/:gameId', async (req, res) => {
+    const gameId = Number(req.params.gameId);
+    if (!Number.isInteger(gameId)) {
+        return res.status(400).json({ success: false, message: 'Invalid game id.' });
+    }
+
+    try {
+        const result = await pool.query(
+            `SELECT gs.id, gs.stake, gs.prize_pool, gs.winner_username, gs.winning_pattern,
+                    gs.winning_card_number, gs.winning_cells, gs.drawn_numbers, gs.ended_at,
+                    bc.grid
+             FROM game_sessions gs
+             LEFT JOIN bingo_cards bc ON bc.card_number = gs.winning_card_number
+             WHERE gs.id = $1`,
+            [gameId]
+        );
+
+        if (!result.rowCount || !result.rows[0].winning_card_number) {
+            return res.status(404).json({ success: false, message: 'No winning card recorded for this game.' });
+        }
+
+        const row = result.rows[0];
+        res.json({
+            success: true,
+            game: {
+                gameId: row.id,
+                stake: Number(row.stake),
+                prizePool: Number(row.prize_pool),
+                winner: row.winner_username,
+                patternName: PATTERN_NAMES[row.winning_pattern] || row.winning_pattern,
+                cardNumber: row.winning_card_number,
+                grid: row.grid,
+                winningCells: row.winning_cells || [],
+                drawnNumbers: row.drawn_numbers || [],
+                date: row.ended_at
+            }
+        });
+    } catch (err) {
+        console.error('History detail fetch error:', err);
+        res.status(500).json({ success: false, message: 'Server error fetching game detail.' });
     }
 });
 
@@ -922,6 +986,7 @@ function createRoom(stake) {
         gameId: null,
         players: new Set(),
         selectedCards: new Map(),
+        cardOwners: new Map(), // cardNumber -> username, O(1) "is this card taken" lookups
         readyPlayers: new Set(),
         playerPaid: new Map(),
         drawn: new Set(),
@@ -933,7 +998,12 @@ function createRoom(stake) {
         drawIntervalSeconds: DEFAULT_DRAW_INTERVAL_SECONDS,
         claimLockedCards: new Set(),
         lastNumber: null,
-        winnerPayload: null
+        winnerPayload: null,
+        dirty: false, // set true by high-frequency actions; flushed by the shared broadcaster
+        // Frozen once the game starts, so a player leaving mid-game never
+        // changes what everyone else sees or what the winner gets paid.
+        frozenTotalCards: null,
+        frozenPrizePool: null
     };
 }
 
@@ -964,10 +1034,23 @@ function roomSnapshot(room) {
         takenCards.push(...Array.from(cards));
     }
 
-    let totalCards = 0;
-    for (const username of room.readyPlayers) {
-        totalCards += userCards(room, username).size;
+    // Once a game is underway, the card/prize totals are frozen (see
+    // startRoomGame). A player leaving mid-game must never change these
+    // numbers for everyone else, and must never shrink the winner's payout.
+    const isLiveGame = room.status === 'PLAYING' || room.status === 'FINISHING';
+    let totalCards;
+    if (isLiveGame && room.frozenTotalCards != null) {
+        totalCards = room.frozenTotalCards;
+    } else {
+        totalCards = 0;
+        for (const username of room.readyPlayers) {
+            totalCards += userCards(room, username).size;
+        }
     }
+
+    const prizePool = (isLiveGame && room.frozenPrizePool != null)
+        ? room.frozenPrizePool
+        : Number((totalCards * room.stake).toFixed(2));
 
     return {
         stake: room.stake,
@@ -980,7 +1063,7 @@ function roomSnapshot(room) {
         totalCards,
         winningPattern: room.winningPattern,
         drawIntervalSeconds: room.drawIntervalSeconds,
-        prizePool: Number((totalCards * room.stake).toFixed(2)),
+        prizePool,
         gameId: room.gameId,
         takenCards,
         lastNumber: room.lastNumber || null
@@ -1008,29 +1091,41 @@ async function getUserIdAndBalance(username, client = pool, lock = true) {
     return result.rows[0] || null;
 }
 
+// Card selection can fire hundreds of times a second across all rooms, so
+// this path is written to cost as few DB round trips as possible: the
+// balance check and the deduction happen in one atomic UPDATE (no separate
+// SELECT ... FOR UPDATE lock step), and the caller gets the fresh balance
+// back from the same statement instead of needing another query.
 async function chargePlayer(username, amount, type) {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        const user = await getUserIdAndBalance(username, client);
-        if (!user) throw new Error('User not found.');
-        if (Number(user.balance) < Number(amount)) {
-            throw new Error('Insufficient balance.');
+        const result = await client.query(
+            `UPDATE users SET balance = balance - $1
+             WHERE LOWER(username) = LOWER($2) AND balance >= $1
+             RETURNING id, balance`,
+            [amount, username]
+        );
+
+        if (!result.rowCount) {
+            const exists = await client.query(
+                'SELECT 1 FROM users WHERE LOWER(username)=LOWER($1)',
+                [username]
+            );
+            await client.query('ROLLBACK');
+            throw new Error(exists.rowCount ? 'Insufficient balance.' : 'User not found.');
         }
 
-        await client.query(
-            'UPDATE users SET balance=balance-$1 WHERE id=$2',
-            [amount, user.id]
-        );
+        const { id, balance } = result.rows[0];
         await client.query(
             'INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',
-            [user.id, -Number(amount), type]
+            [id, -Number(amount), type]
         );
         await client.query('COMMIT');
 
-        return { balance: Number(user.balance) - Number(amount) };
+        return { balance: Number(balance) };
     } catch (err) {
-        await client.query('ROLLBACK');
+        try { await client.query('ROLLBACK'); } catch (_) { /* connection already rolled back */ }
         throw err;
     } finally {
         client.release();
@@ -1039,25 +1134,32 @@ async function chargePlayer(username, amount, type) {
 
 async function refundAmount(username, amount, reason) {
     amount = Number(amount);
-    if (!Number.isFinite(amount) || amount <= 0) return;
+    if (!Number.isFinite(amount) || amount <= 0) return null;
 
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        const user = await getUserIdAndBalance(username, client);
-        if (!user) throw new Error('User not found');
-
-        await client.query(
-            'UPDATE users SET balance=balance+$1 WHERE id=$2',
-            [amount, user.id]
+        const result = await client.query(
+            `UPDATE users SET balance = balance + $1
+             WHERE LOWER(username) = LOWER($2)
+             RETURNING id, balance`,
+            [amount, username]
         );
+
+        if (!result.rowCount) {
+            await client.query('ROLLBACK');
+            throw new Error('User not found');
+        }
+
+        const { id, balance } = result.rows[0];
         await client.query(
             'INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',
-            [user.id, amount, reason]
+            [id, amount, reason]
         );
         await client.query('COMMIT');
+        return Number(balance);
     } catch (err) {
-        await client.query('ROLLBACK');
+        try { await client.query('ROLLBACK'); } catch (_) { /* connection already rolled back */ }
         throw err;
     } finally {
         client.release();
@@ -1074,6 +1176,14 @@ async function refundPlayerRoomPayment(room, username, reason) {
 function removePlayer(room, username) {
     room.players.delete(username);
     room.readyPlayers.delete(username);
+    const cards = room.selectedCards.get(username);
+    if (cards) {
+        for (const cardNumber of cards) {
+            if (room.cardOwners.get(cardNumber) === username) {
+                room.cardOwners.delete(cardNumber);
+            }
+        }
+    }
     room.selectedCards.delete(username);
     room.playerPaid.delete(username);
 }
@@ -1090,6 +1200,7 @@ async function resetRoom(room, message = null) {
     room.gameId = null;
     room.players.clear();
     room.selectedCards.clear();
+    room.cardOwners.clear();
     room.readyPlayers.clear();
     room.playerPaid.clear();
     room.drawn.clear();
@@ -1101,6 +1212,9 @@ async function resetRoom(room, message = null) {
     room.claimLockedCards.clear();
     room.lastNumber = null;
     room.winnerPayload = null;
+    room.dirty = false;
+    room.frozenTotalCards = null;
+    room.frozenPrizePool = null;
 
     io.to(roomName(room.stake)).emit('room_reset', {
         stake: room.stake,
@@ -1190,9 +1304,17 @@ async function startRoomGame(room) {
 
     const participants = Array.from(room.readyPlayers);
     let prize = 0;
+    let totalCards = 0;
     for (const username of participants) {
         prize += getPlayerPaid(room, username);
+        totalCards += userCards(room, username).size;
     }
+
+    // Freeze these now. Anyone who leaves after this point still forfeits
+    // their stake into the pot, but the pot itself (and what's displayed)
+    // never shrinks because of it.
+    room.frozenPrizePool = Number(prize.toFixed(2));
+    room.frozenTotalCards = totalCards;
 
     const client = await pool.connect();
     try {
@@ -1232,8 +1354,8 @@ async function startRoomGame(room) {
     io.to(roomName(room.stake)).emit('game_started', {
         stake: room.stake,
         gameId: room.gameId,
-        prizePool: prize,
-        totalCards: participants.reduce((n,u)=>n+userCards(room,u).size,0),
+        prizePool: room.frozenPrizePool,
+        totalCards: room.frozenTotalCards,
         winningPattern: room.winningPattern,
         patternName: PATTERN_NAMES[room.winningPattern] || room.winningPattern,
         drawIntervalSeconds: room.drawIntervalSeconds,
@@ -1294,6 +1416,15 @@ async function startRoomGame(room) {
 // One scheduler handles every room. The deadline is absolute server time.
 setInterval(async () => {
     for (const room of gameRooms.values()) {
+        // Flush any high-frequency updates (card taps) at a bounded rate
+        // instead of broadcasting to the whole room on every single tap —
+        // this is what keeps a "click storm" from many simultaneous players
+        // from turning into a socket broadcast storm.
+        if (room.dirty) {
+            room.dirty = false;
+            io.to(roomName(room.stake)).emit('room_state', roomSnapshot(room));
+        }
+
         if (room.status !== 'JOINING') continue;
 
         const seconds = remainingSeconds(room);
@@ -1537,8 +1668,11 @@ io.on('connection', socket => {
         try {
             if (cards.has(cardNumber)) {
                 cards.delete(cardNumber);
+                if (room.cardOwners.get(cardNumber) === username) {
+                    room.cardOwners.delete(cardNumber);
+                }
 
-                await refundAmount(username, stake, 'CARD_DESELECT_REFUND');
+                const newBalance = await refundAmount(username, stake, 'CARD_DESELECT_REFUND');
                 setPlayerPaid(
                     room,
                     username,
@@ -1552,27 +1686,25 @@ io.on('connection', socket => {
                     cards: Array.from(cards)
                 });
 
-                io.to(roomName(stake)).emit('room_state', roomSnapshot(room));
-
-                const balanceResult = await pool.query(
-                    'SELECT balance FROM users WHERE LOWER(username)=LOWER($1)',
-                    [username]
-                );
+                // High-frequency action: mark the room dirty and let the
+                // shared broadcaster (see ROOM_BROADCAST_MS loop) flush it,
+                // instead of emitting to the whole room on every single tap.
+                room.dirty = true;
 
                 return cb({
                     success: true,
                     count: cards.size,
-                    balance: Number(balanceResult.rows[0].balance)
+                    balance: newBalance
                 });
             }
 
-            for (const [owner, ownerCards] of room.selectedCards.entries()) {
-                if (owner !== username && ownerCards.has(cardNumber)) {
-                    return cb({
-                        success: false,
-                        message: `Card ${cardNumber} is already taken by another player!`
-                    });
-                }
+            // O(1) instead of scanning every player's card set on every tap.
+            const owner = room.cardOwners.get(cardNumber);
+            if (owner && owner !== username) {
+                return cb({
+                    success: false,
+                    message: `Card ${cardNumber} is already taken by another player!`
+                });
             }
 
             if (MAX_CARDS_PER_PLAYER > 0 && cards.size >= MAX_CARDS_PER_PLAYER) {
@@ -1585,6 +1717,7 @@ io.on('connection', socket => {
             const charge = await chargePlayer(username, stake, 'GAME_CARD_ENTRY');
 
             cards.add(cardNumber);
+            room.cardOwners.set(cardNumber, username);
             room.selectedCards.set(username, cards);
             setPlayerPaid(room, username, getPlayerPaid(room, username) + stake);
 
@@ -1593,7 +1726,7 @@ io.on('connection', socket => {
                 cards: Array.from(cards)
             });
 
-            io.to(roomName(stake)).emit('room_state', roomSnapshot(room));
+            room.dirty = true;
 
             cb({
                 success: true,
@@ -1650,8 +1783,12 @@ io.on('connection', socket => {
             const claim=grid?winningClaim(grid,room.drawn,room.winningPattern,room.lastNumber):{ok:false};
             if(!claim.ok){ room.claimLockedCards.add(cardNumber); socket.emit('card_locked',{stake,cardNumber,message:'BINGO claim was not valid for the latest called number. This card is locked for this round.'}); return cb({success:false,locked:true,message:'Invalid or late BINGO claim. This card is now locked for this game.'}); }
             room.status='FINISHING'; clearDrawTimer(room);
-            let prize=0; for(const player of room.readyPlayers) prize+=getPlayerPaid(room,player);
-            const client=await pool.connect(); try { await client.query('BEGIN'); const user=await getUserIdAndBalance(username,client); if(!user)throw new Error('Winner not found'); await client.query('UPDATE game_sessions SET status=$1,winner_username=$2,ended_at=NOW() WHERE id=$3',['COMPLETED',username,room.gameId]); await client.query('UPDATE users SET wins=wins+1,balance=balance+$1 WHERE id=$2',[prize,user.id]); await client.query('INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',[user.id,prize,'GAME_WIN']); await client.query('COMMIT'); } catch(err){await client.query('ROLLBACK');room.status='PLAYING';throw err;} finally{client.release();}
+            // Pay the full pool that was locked in when the game started —
+            // never recomputed from whoever is still in readyPlayers, so a
+            // player leaving mid-game can never shrink the winner's payout.
+            const prize = room.frozenPrizePool != null ? room.frozenPrizePool : (()=>{let p=0;for(const player of room.readyPlayers)p+=getPlayerPaid(room,player);return p;})();
+            const drawnNumbers = Array.from(room.drawn);
+            const client=await pool.connect(); try { await client.query('BEGIN'); const user=await getUserIdAndBalance(username,client); if(!user)throw new Error('Winner not found'); await client.query('UPDATE game_sessions SET status=$1,winner_username=$2,ended_at=NOW(),winning_card_number=$3,winning_cells=$4,drawn_numbers=$5 WHERE id=$6',['COMPLETED',username,cardNumber,JSON.stringify(claim.cells),drawnNumbers,room.gameId]); await client.query('UPDATE users SET wins=wins+1,balance=balance+$1 WHERE id=$2',[prize,user.id]); await client.query('INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',[user.id,prize,'GAME_WIN']); await client.query('COMMIT'); } catch(err){await client.query('ROLLBACK');room.status='PLAYING';throw err;} finally{client.release();}
             const winnerPayload={stake,winner:username,prize,cardNumber,grid,winningCells:claim.cells,lastNumber:room.lastNumber,patternName:PATTERN_NAMES[room.winningPattern]||room.winningPattern};
             room.winnerPayload=winnerPayload;
             cb({success:true,...winnerPayload}); io.to(roomName(stake)).emit('game_won',winnerPayload);
@@ -1661,6 +1798,9 @@ io.on('connection', socket => {
 });
 
 server.listen(PORT,()=>console.log(`Bingo server listening on ${PORT}`));
+
+
+
 
 
 

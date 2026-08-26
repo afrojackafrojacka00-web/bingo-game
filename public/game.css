@@ -1,1 +1,83 @@
-:root{--bg:#121212;--card:#1e1e1e;--line:#333;--muted:#aaa;--green:#00d26a;--gold:#e6a100;--blue:#0088cc}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#fff;font-family:Arial,sans-serif;overflow:hidden}header{height:62px;display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:#1e1e1e;border-bottom:1px solid var(--line)}.head-left{display:flex;align-items:center;gap:12px}.head-left small{color:var(--muted)}.live{color:var(--green);font-weight:800}.live i{display:inline-block;width:9px;height:9px;background:var(--green);border-radius:50%;margin-right:5px}.status{display:flex;align-items:center;gap:20px;padding:12px;background:#1e1e1e;border-bottom:1px solid var(--line)}.status strong{display:block;font-size:48px;line-height:1;color:var(--gold);min-width:130px;text-align:center}.status small{color:var(--muted);display:block;text-align:center}.toggles{margin-left:auto;display:flex;gap:16px;flex-wrap:wrap}.toggles label{display:flex;gap:6px;align-items:center;font-size:13px}main{height:calc(100vh - 62px);display:flex;flex-direction:column}.game-layout{display:grid;grid-template-columns:310px minmax(0,1fr);gap:12px;min-height:0;flex:1;padding:12px}.number-board,.card-side{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;min-height:0}.number-board{overflow:hidden}.numbers{display:grid;grid-template-columns:repeat(5,1fr);gap:5px}.board-head{text-align:center;color:var(--gold);font-weight:900;padding:4px 0}.ball{height:calc((100vh - 175px)/16);min-height:27px;border:1px solid #444;border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:800;background:#252525}.ball.called{background:var(--green);color:#071a0e;border-color:#7effaf}.card-side{display:flex;flex-direction:column;overflow:hidden}.card-side h3{margin:0 0 8px}.cards{overflow-y:auto;overscroll-behavior:contain;padding-right:4px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;align-content:start}.bingo{background:#181818;border:1px solid #3a3a3a;border-radius:12px;padding:9px}.ct{display:flex;justify-content:space-between;margin-bottom:6px}.ct small{color:var(--muted)}.bingo table{width:100%;border-collapse:separate;border-spacing:3px}.bingo th{color:var(--gold);font-size:16px}.bingo td{height:42px;text-align:center;background:#2a2a2a;border:1px solid transparent;border-radius:6px;font-weight:800;cursor:pointer}.bingo td.marked{background:var(--green);color:#071a0e}.bingo td.free{font-size:10px}.bingo td.blink{animation:blink 1s steps(2,start) infinite;box-shadow:0 0 0 2px var(--gold)}@keyframes blink{50%{opacity:.25;transform:scale(.94);background:#6d5110}}.bingo button{width:100%;border:0;border-radius:8px;background:var(--gold);color:#111;font-weight:900;padding:12px;margin-top:7px;cursor:pointer}.bingo button:disabled{background:#444;color:#aaa}.overlay{display:none;position:fixed;inset:0;background:#000b;z-index:20;align-items:center;justify-content:center;padding:20px}.overlay.show{display:flex}.winner{max-width:440px;width:100%;background:#1d1d1d;border-radius:18px;padding:20px;text-align:center}.winner-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin:15px 0}.winner-grid span{padding:12px 2px;background:#2a2a2a;border-radius:6px}.winner-grid .win{background:var(--green);color:#071a0e;font-weight:bold;outline:2px solid #b8ffca}.returning{color:var(--muted);font-size:13px}.toast{position:fixed;left:50%;bottom:20px;transform:translate(-50%,120px);background:#333;padding:12px 16px;border-radius:9px;transition:.2s;z-index:30}.toast.show{transform:translate(-50%,0)}@media(max-width:760px){header{height:auto;min-height:56px;font-size:12px}.status{gap:8px;padding:8px}.status strong{font-size:36px;min-width:100px}.toggles{margin-left:0}.game-layout{grid-template-columns:42% 58%;gap:7px;padding:7px}.number-board,.card-side{padding:6px;border-radius:8px}.ball{height:calc((100vh - 155px)/16);min-height:24px;font-size:11px}.cards{grid-template-columns:1fr;gap:8px}.bingo td{height:39px}.card-side h3{font-size:14px}}
+:root{--bg:#121212;--card:#1e1e1e;--line:#333;--muted:#aaa;--green:#00d26a;--gold:#e6a100;--blue:#0088cc}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;height:100vh;height:100svh;background:var(--bg);color:#fff;font-family:Arial,sans-serif;overflow:hidden;display:flex;flex-direction:column}
+
+header{flex:0 0 auto;height:62px;display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:#1e1e1e;border-bottom:1px solid var(--line)}
+.head-left{display:flex;align-items:center;gap:12px}
+.head-left small{color:var(--muted)}
+.live{color:var(--green);font-weight:800}
+.live i{display:inline-block;width:9px;height:9px;background:var(--green);border-radius:50%;margin-right:5px}
+
+main{flex:1;min-height:0;display:flex;flex-direction:column}
+
+/* ---- status bar: big last-called number, "last 5" strip, total count ---- */
+.status{flex:0 0 auto;display:flex;align-items:center;gap:14px;padding:10px 14px;background:#1e1e1e;border-bottom:1px solid var(--line)}
+.stat-block{flex:0 0 auto}
+.stat-block strong{display:block;font-size:40px;line-height:1;color:var(--gold);min-width:96px;text-align:center}
+.last-called{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:5px}
+.lc-label{color:var(--muted);font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+.lc-balls{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+.lc-balls span{width:30px;height:30px;border-radius:50%;background:#2a2a2a;border:1px solid #444;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:11px}
+.lc-balls span:last-child:not(.empty){background:var(--green);color:#071a0e;border-color:#7effaf;transform:scale(1.12)}
+.lc-balls span.empty{color:var(--muted);background:transparent;border-style:dashed}
+
+/* ---- main two-column layout: number board + cards, always fills available space ---- */
+.game-layout{flex:1;min-height:0;display:grid;grid-template-columns:310px minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:12px;padding:12px}
+.number-board,.card-side{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.number-board h3{margin:0 0 8px;flex:0 0 auto;text-align:center}
+
+/* The number grid always exactly fills its box — sized by grid `fr` tracks,
+   never by a guessed pixel/vh height — so it can never get clipped. */
+.numbers{flex:1;min-height:0;display:grid;grid-template-columns:repeat(5,1fr);grid-template-rows:auto repeat(15,minmax(0,1fr));gap:4px}
+.board-head{text-align:center;color:var(--gold);font-weight:900;padding:2px 0}
+.ball{min-height:0;width:100%;height:100%;border:1px solid #444;border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:800;background:#252525;font-size:clamp(9px,1.7vw,15px)}
+.ball.called{background:var(--green);color:#071a0e;border-color:#7effaf}
+
+.card-side-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap}
+.card-side-head h3{margin:0}
+.controls{display:flex;gap:8px;flex-wrap:wrap}
+
+/* Modern pill switches, pinned top-right of the cards panel */
+.switch-pill{display:inline-flex;align-items:center;gap:7px;background:#242424;border:1px solid var(--line);border-radius:999px;padding:6px 12px 6px 6px;cursor:pointer;color:#fff;font:inherit;font-size:11px;font-weight:800;letter-spacing:.04em}
+.switch-pill .dot{width:16px;height:16px;border-radius:50%;background:#555;transition:background .15s,box-shadow .15s;flex:0 0 auto}
+.switch-pill[aria-checked="true"] .dot{background:var(--green);box-shadow:0 0 6px rgba(0,210,106,.6)}
+.switch-pill.leave{background:#3a1414;border-color:#6b2323;color:#ffb3b3;padding:6px 12px}
+.switch-pill.leave:active{background:#4a1a1a}
+
+.cards{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-right:4px;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;align-content:start}
+.bingo{background:#181818;border:1px solid #3a3a3a;border-radius:12px;padding:9px}
+.ct{display:flex;justify-content:space-between;margin-bottom:6px}
+.ct small{color:var(--muted)}
+.bingo table{width:100%;border-collapse:separate;border-spacing:3px}
+.bingo th{color:var(--gold);font-size:16px}
+.bingo td{height:42px;text-align:center;background:#2a2a2a;border:1px solid transparent;border-radius:6px;font-weight:800;cursor:pointer}
+.bingo td.marked{background:var(--green);color:#071a0e}
+.bingo td.free{font-size:10px}
+.bingo td.blink{animation:blink 1s steps(2,start) infinite;box-shadow:0 0 0 2px var(--gold)}
+@keyframes blink{50%{opacity:.25;transform:scale(.94);background:#6d5110}}
+.bingo button{width:100%;border:0;border-radius:8px;background:var(--gold);color:#111;font-weight:900;padding:12px;margin-top:7px;cursor:pointer}
+.bingo button:disabled{background:#444;color:#aaa}
+
+.overlay{display:none;position:fixed;inset:0;background:#000b;z-index:20;align-items:center;justify-content:center;padding:20px}
+.overlay.show{display:flex}
+.winner{max-width:440px;width:100%;background:#1d1d1d;border-radius:18px;padding:20px;text-align:center}
+.winner-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin:15px 0}
+.winner-grid span{padding:12px 2px;background:#2a2a2a;border-radius:6px}
+.winner-grid .win{background:var(--green);color:#071a0e;font-weight:bold;outline:2px solid #b8ffca}
+.returning{color:var(--muted);font-size:13px}
+.toast{position:fixed;left:50%;bottom:20px;transform:translate(-50%,120px);background:#333;padding:12px 16px;border-radius:9px;transition:.2s;z-index:30}
+.toast.show{transform:translate(-50%,0)}
+
+@media(max-width:760px){
+  header{height:auto;min-height:56px;font-size:12px}
+  .status{gap:8px;padding:8px}
+  .stat-block strong{font-size:30px;min-width:70px}
+  .lc-balls span{width:24px;height:24px;font-size:9px}
+  .game-layout{grid-template-columns:38% 62%;gap:7px;padding:7px}
+  .number-board,.card-side{padding:6px;border-radius:8px}
+  .cards{grid-template-columns:1fr;gap:8px}
+  .bingo td{height:39px}
+  .card-side h3{font-size:14px}
+  .switch-pill{font-size:10px;padding:5px 9px 5px 5px}
+}
