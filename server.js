@@ -1,8 +1,3 @@
-
-
-
-
-
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -545,6 +540,10 @@ app.get('/api/history', async (req, res) => {
     const username = req.query.username;
     if (!username) return res.status(400).json({ success: false, message: "Username required." });
 
+    // Paged like a feed instead of dumping everything at once.
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 15, 1), 50);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+
     try {
         const result = await pool.query(
             `SELECT
@@ -564,11 +563,13 @@ app.get('/api/history', async (req, res) => {
              WHERE LOWER(gp.username) = LOWER($1)
                AND gs.status IN ('COMPLETED', 'EXHAUSTED')
              ORDER BY gs.created_at DESC
-             LIMIT 100`,
-            [username]
+             LIMIT $2 OFFSET $3`,
+            [username, limit + 1, offset]
         );
+        const hasMore = result.rows.length > limit;
+        const page = result.rows.slice(0, limit);
 
-        const history = result.rows.map(row => ({
+        const history = page.map(row => ({
             gameId: row.id,
             stake: Number(row.stake),
             prizePool: Number(row.prize_pool),
@@ -581,7 +582,7 @@ app.get('/api/history', async (req, res) => {
             date: row.ended_at || row.created_at
         }));
 
-        res.json({ success: true, history });
+        res.json({ success: true, history, hasMore });
     } catch (err) {
         console.error('History fetch error:', err);
         res.status(500).json({ success: false, message: "Server error fetching history." });
@@ -639,6 +640,11 @@ app.get('/api/wallet', async (req, res) => {
     const username = req.query.username;
     if (!username) return res.status(400).json({ success: false, message: "Username required." });
 
+    // Paged like a feed instead of dumping everything at once — cheaper on
+    // the DB and on rendering when someone has a long transaction history.
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+
     try {
         const userResult = await pool.query(
             'SELECT id, balance FROM users WHERE LOWER(username) = LOWER($1)',
@@ -649,15 +655,20 @@ app.get('/api/wallet', async (req, res) => {
         }
 
         const user = userResult.rows[0];
+        // Fetch one extra row purely to know whether another page exists,
+        // without a separate COUNT(*) query.
         const txResult = await pool.query(
-            'SELECT amount, type, created_at FROM transactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50',
-            [user.id]
+            'SELECT amount, type, created_at FROM transactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3',
+            [user.id, limit + 1, offset]
         );
+        const hasMore = txResult.rows.length > limit;
+        const page = txResult.rows.slice(0, limit);
 
         res.json({
             success: true,
             balance: Number(user.balance),
-            transactions: txResult.rows.map(t => ({
+            hasMore,
+            transactions: page.map(t => ({
                 amount: Number(t.amount),
                 type: t.type,
                 date: t.created_at
@@ -989,6 +1000,7 @@ function createRoom(stake) {
         cardOwners: new Map(), // cardNumber -> username, O(1) "is this card taken" lookups
         readyPlayers: new Set(),
         playerPaid: new Map(),
+        playerBalanceCache: new Map(), // soft pre-check only; the real charge at READY is authoritative
         drawn: new Set(),
         drawOrder: [],
         drawTimer: null,
@@ -1186,6 +1198,7 @@ function removePlayer(room, username) {
     }
     room.selectedCards.delete(username);
     room.playerPaid.delete(username);
+    room.playerBalanceCache.delete(username);
 }
 
 function clearDrawTimer(room) {
@@ -1203,6 +1216,7 @@ async function resetRoom(room, message = null) {
     room.cardOwners.clear();
     room.readyPlayers.clear();
     room.playerPaid.clear();
+    room.playerBalanceCache.clear();
     room.drawn.clear();
     room.drawOrder = [];
     room.drawIndex = 0;
@@ -1566,6 +1580,7 @@ io.on('connection', socket => {
             room.players.add(username);
             room.selectedCards.set(username, new Set());
             room.playerPaid.set(username, 0);
+            room.playerBalanceCache.set(username, balance);
 
             if (room.status === 'WAITING') {
                 room.status = 'JOINING';
@@ -1637,7 +1652,7 @@ io.on('connection', socket => {
         }
     });
 
-    socket.on('toggle_card', async ({ stake, cardNumber, username }, cb = () => {}) => {
+    socket.on('toggle_card', ({ stake, cardNumber, username }, cb = () => {}) => {
         stake = Number(stake);
         cardNumber = Number(cardNumber);
         const room = gameRooms.get(stake);
@@ -1664,62 +1679,20 @@ io.on('connection', socket => {
         }
 
         const cards = userCards(room, username);
+        // Selecting/deselecting a card is just reserving it — no money moves
+        // and nothing is written to the database here. The player is only
+        // ever actually charged once, in one transaction, when they press
+        // READY (see the player_ready handler), and refunded in one
+        // transaction if they later leave. That keeps the transactions
+        // table free of a row for every single tap during browsing.
+        const cachedBalance = room.playerBalanceCache.get(username) || 0;
 
-        try {
-            if (cards.has(cardNumber)) {
-                cards.delete(cardNumber);
-                if (room.cardOwners.get(cardNumber) === username) {
-                    room.cardOwners.delete(cardNumber);
-                }
-
-                const newBalance = await refundAmount(username, stake, 'CARD_DESELECT_REFUND');
-                setPlayerPaid(
-                    room,
-                    username,
-                    Math.max(0, getPlayerPaid(room, username) - stake)
-                );
-
-                room.selectedCards.set(username, cards);
-
-                socket.emit('my_cards', {
-                    stake,
-                    cards: Array.from(cards)
-                });
-
-                // High-frequency action: mark the room dirty and let the
-                // shared broadcaster (see ROOM_BROADCAST_MS loop) flush it,
-                // instead of emitting to the whole room on every single tap.
-                room.dirty = true;
-
-                return cb({
-                    success: true,
-                    count: cards.size,
-                    balance: newBalance
-                });
+        if (cards.has(cardNumber)) {
+            cards.delete(cardNumber);
+            if (room.cardOwners.get(cardNumber) === username) {
+                room.cardOwners.delete(cardNumber);
             }
-
-            // O(1) instead of scanning every player's card set on every tap.
-            const owner = room.cardOwners.get(cardNumber);
-            if (owner && owner !== username) {
-                return cb({
-                    success: false,
-                    message: `Card ${cardNumber} is already taken by another player!`
-                });
-            }
-
-            if (MAX_CARDS_PER_PLAYER > 0 && cards.size >= MAX_CARDS_PER_PLAYER) {
-                return cb({
-                    success: false,
-                    message: `Maximum ${MAX_CARDS_PER_PLAYER} cards.`
-                });
-            }
-
-            const charge = await chargePlayer(username, stake, 'GAME_CARD_ENTRY');
-
-            cards.add(cardNumber);
-            room.cardOwners.set(cardNumber, username);
             room.selectedCards.set(username, cards);
-            setPlayerPaid(room, username, getPlayerPaid(room, username) + stake);
 
             socket.emit('my_cards', {
                 stake,
@@ -1728,20 +1701,58 @@ io.on('connection', socket => {
 
             room.dirty = true;
 
-            cb({
+            return cb({
                 success: true,
                 count: cards.size,
-                balance: charge.balance
-            });
-        } catch (err) {
-            cb({
-                success: false,
-                message: err.message || 'Could not update card.'
+                balance: cachedBalance
             });
         }
+
+        // O(1) instead of scanning every player's card set on every tap.
+        const owner = room.cardOwners.get(cardNumber);
+        if (owner && owner !== username) {
+            return cb({
+                success: false,
+                message: `Card ${cardNumber} is already taken by another player!`
+            });
+        }
+
+        if (MAX_CARDS_PER_PLAYER > 0 && cards.size >= MAX_CARDS_PER_PLAYER) {
+            return cb({
+                success: false,
+                message: `Maximum ${MAX_CARDS_PER_PLAYER} cards.`
+            });
+        }
+
+        // Soft check against the balance seen at join time so a player can't
+        // reserve far more cards than they could ever pay for — the real,
+        // authoritative check happens atomically when READY charges them.
+        if ((cards.size + 1) * stake > cachedBalance) {
+            return cb({
+                success: false,
+                message: 'Insufficient balance to select another card.'
+            });
+        }
+
+        cards.add(cardNumber);
+        room.cardOwners.set(cardNumber, username);
+        room.selectedCards.set(username, cards);
+
+        socket.emit('my_cards', {
+            stake,
+            cards: Array.from(cards)
+        });
+
+        room.dirty = true;
+
+        cb({
+            success: true,
+            count: cards.size,
+            balance: cachedBalance
+        });
     });
 
-    socket.on('player_ready', ({ stake, username }, cb = () => {}) => {
+    socket.on('player_ready', async ({ stake, username }, cb = () => {}) => {
         stake = Number(stake);
         const room = gameRooms.get(stake);
 
@@ -1752,6 +1763,10 @@ io.on('connection', socket => {
             });
         }
 
+        if (room.readyPlayers.has(username)) {
+            return cb({ success: false, message: 'You are already ready.' });
+        }
+
         const cards = userCards(room, username);
         if (!cards.size) {
             return cb({
@@ -1760,18 +1775,20 @@ io.on('connection', socket => {
             });
         }
 
-        const expectedPayment = cards.size * stake;
-        if (getPlayerPaid(room, username) < expectedPayment) {
-            return cb({
-                success: false,
-                message: 'Your card payment is incomplete.'
-            });
+        // The one and only charge for this round: the whole selection is
+        // paid for in a single transaction right here, instead of one
+        // transaction per card tap during selection.
+        const amount = cards.size * stake;
+        try {
+            const charge = await chargePlayer(username, amount, 'GAME_CARD_ENTRY');
+            setPlayerPaid(room, username, amount);
+            room.readyPlayers.add(username);
+            io.to(roomName(stake)).emit('room_state', roomSnapshot(room));
+            emitRoomsState();
+            cb({ success: true, balance: charge.balance });
+        } catch (err) {
+            cb({ success: false, message: err.message || 'Could not charge entry fee.' });
         }
-
-        room.readyPlayers.add(username);
-        io.to(roomName(stake)).emit('room_state', roomSnapshot(room));
-        emitRoomsState();
-        cb({ success: true });
     });
 
     socket.on('claim_bingo', async ({ stake, username, cardNumber }, cb = () => {}) => {

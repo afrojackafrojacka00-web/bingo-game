@@ -15,19 +15,22 @@ function toast(t){const e=document.getElementById('toast');e.textContent=t;e.cla
 
 // Telegram's in-app browser blocks/misbehaves with native confirm() popups in
 // many client versions, so a Leave button gated behind window.confirm() can
-// silently do nothing when tapped from inside Telegram. Use Telegram's own
-// dialog when available, and fall back to the browser's on the plain website.
+// silently do nothing when tapped from inside Telegram. But the
+// telegram-web-app.js script defines Telegram.WebApp.showConfirm on ANY page
+// that includes it — including this plain website — even with no real
+// Telegram app on the other end to answer it, which made Leave hang forever
+// on the website instead. `initData` is only ever non-empty when genuinely
+// running inside Telegram, so gate on that rather than on the method existing.
 function confirmAction(message){
     return new Promise(resolve=>{
         const tg=window.Telegram?.WebApp;
-        if(tg?.showConfirm) tg.showConfirm(message, ok=>resolve(!!ok));
+        if(tg?.initData) tg.showConfirm(message, ok=>resolve(!!ok));
         else resolve(window.confirm(message));
     });
 }
 
-async function user(){try{const r=await fetch('/api/user-details?username='+encodeURIComponent(username)),d=await r.json();if(d.success){userName.textContent=d.user.username;balance.textContent=Number(d.user.balance||0).toFixed(2)}}catch{}}
 async function state(){try{const r=await fetch(`/api/game-state?stake=${encodeURIComponent(stake)}&username=${encodeURIComponent(username)}`,{cache:'no-store'}),d=await r.json();if(!d.success){goBack();return}room=d.room||{};cards=d.cards||[];drawn=new Set(room.drawn||[]);locked=new Set(cards.filter(c=>c.locked).map(c=>Number(c.cardNumber)));header();render();if(d.winnerPayload){ended=true;showWinner(d.winnerPayload)}}catch{}}
-function header(){patternName.textContent=room.patternName||'Any One Line';playersPlaying.textContent=`Players | ${room.totalCards||0}`;calledCount.textContent=`${drawn.size} / 75`;lastNumber.textContent=room.lastNumber?`${letter(room.lastNumber)} ${room.lastNumber}`:'--';renderLastCalled()}
+function header(){patternName.textContent=room.patternName||'Any One Line';playersPlaying.textContent=`Players | ${room.totalCards||0}`;calledCount.textContent=`${drawn.size} / 75`;lastNumber.textContent=room.lastNumber?`${letter(room.lastNumber)} ${room.lastNumber}`:'--';prizePool.textContent=Number(room.prizePool||0).toFixed(2);renderLastCalled()}
 function renderLastCalled(){
     const el=document.getElementById('lastCalledBalls');
     if(!el)return;
@@ -75,4 +78,4 @@ function subscribe(){if(stake&&username)socket.emit('subscribe_room',{stake,user
 socket.on('connect',subscribe);socket.on('number_drawn',d=>{if(Number(d.stake)!==stake||ended)return;drawn.add(Number(d.number));room.lastNumber=Number(d.number);header();render()});socket.on('room_state',d=>{if(Number(d.stake)===stake){room={...room,...d};header();}});socket.on('card_locked',d=>{if(Number(d.stake)===stake){locked.add(Number(d.cardNumber));render();toast(d.message)}});socket.on('game_won',d=>{if(Number(d.stake)===stake){ended=true;showWinner(d)}});socket.on('game_ended',d=>{if(Number(d.stake)===stake){ended=true;setTimeout(goBack,300)}});
 function showWinner(d){if(winnerTimer)return;winnerTitle.textContent=d.winner===username?'YOU WON!':'BINGO!';winnerText.textContent=`${d.winner} won ${Number(d.prize).toFixed(2)} Birr · ${d.patternName}`;const set=new Set((d.winningCells||[]).map(x=>x.join(',')));winnerCard.innerHTML=`<div class="winner-grid">${d.grid.flatMap((row,r)=>row.map((v,c)=>`<span class="${set.has([r,c].join(','))?'win':''}">${v==='FREE'?'FREE':v}</span>`)).join('')}</div>`;winnerOverlay.classList.add('show');winnerTimer=setTimeout(goBack,5000)}
 function goBack(){localStorage.removeItem('bingoActiveGame');location.href=`/index.html?returnStake=${encodeURIComponent(stake)}`}
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)state()});window.addEventListener('focus',state);user();state();
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)state()});window.addEventListener('focus',state);state();

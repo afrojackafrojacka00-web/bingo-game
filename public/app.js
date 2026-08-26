@@ -12,21 +12,29 @@ const takenCardsMap = {};
 const socket = io();
 
 // Telegram's in-app browser blocks/misbehaves with native confirm()/alert()
-// popups in a lot of client versions — Telegram's own Mini Apps guidance is
-// to use its own dialogs instead. These helpers use the Telegram dialog when
-// running inside Telegram, and fall back to the normal browser dialog on the
-// plain website.
+// popups in a lot of client versions, so we route those through Telegram's
+// own dialog instead. But the telegram-web-app.js script defines
+// `Telegram.WebApp` and its methods on ANY page that includes it — including
+// this plain website — even when there's no real Telegram app on the other
+// end to answer them. Calling showConfirm()/showAlert() in that situation
+// just hangs forever waiting for a reply that never comes, which is why
+// Leave appeared to do nothing at all on the website. `initData` is only
+// ever non-empty when the page is genuinely opened inside Telegram (this
+// codebase already uses the same signal to choose the Telegram vs. web login
+// flow), so gate on that instead of just on the method existing.
+function isTelegramClient() {
+    return !!window.Telegram?.WebApp?.initData;
+}
+
 function confirmAction(message) {
     return new Promise(resolve => {
-        const tg = window.Telegram?.WebApp;
-        if (tg?.showConfirm) tg.showConfirm(message, ok => resolve(!!ok));
+        if (isTelegramClient()) window.Telegram.WebApp.showConfirm(message, ok => resolve(!!ok));
         else resolve(window.confirm(message));
     });
 }
 
 function alertUser(message) {
-    const tg = window.Telegram?.WebApp;
-    if (tg?.showAlert) tg.showAlert(message);
+    if (isTelegramClient()) window.Telegram.WebApp.showAlert(message);
     else window.alert(message);
 }
 
@@ -269,7 +277,7 @@ function renderRooms() {
                 🏆 ${Number(room.prizePool).toFixed(2)} Birr<br>
                 ${formatStatus(room)}
             </div>
-            <button class="room-join" ${disabled ? 'disabled' : ''} onclick="openJoinModal(${Number(room.stake)})">${disabled ? 'PLAYING' : 'JOIN'}</button>
+            <button class="room-join" ${disabled ? 'disabled' : ''} onclick="joinRoom(${Number(room.stake)})">${disabled ? 'PLAYING' : 'JOIN'}</button>
         </div>`;
     }).join('');
 
@@ -302,18 +310,14 @@ function updateRoomInList(state) {
     renderRooms();
 }
 
-function openJoinModal(stake) {
+function joinRoom(stake) {
     if (currentStake && currentStake !== Number(stake)) {
         return alert(`You are already in the ${currentStake} Birr room.`);
     }
     const room = (window.latestRooms || []).find(r => Number(r.stake) === Number(stake));
     if (!room || room.status === 'PLAYING') return;
     pendingStake = Number(stake);
-    document.getElementById('confirmStake').innerText = `${pendingStake} Birr`;
-    document.getElementById('confirmPlayers').innerText = room.players;
-    document.getElementById('confirmPool').innerText = `${Number((room.players + 1) * pendingStake).toFixed(2)} Birr`;
-    document.getElementById('confirmStatus').innerText = formatStatus(room);
-    show('joinModal');
+    confirmJoin();
 }
 
 function closeJoinModal() {
@@ -510,6 +514,11 @@ function launchGame() {
                 return showNotification(response?.message || 'Could not mark ready.');
             }
 
+            if (response.balance !== undefined) {
+                const balance = document.getElementById('balanceDisplay');
+                if (balance) balance.innerText = Number(response.balance).toFixed(2);
+            }
+
             const btn = document.getElementById('playGameBtn');
             if (!btn) return;
 
@@ -580,9 +589,21 @@ async function showHomeScreen(username) {
 
     const searchParams = new URLSearchParams(location.search);
     const returnStake = Number(searchParams.get('returnStake') || 0);
+    const view = searchParams.get('view');
+
+    // These redirect params are meant to be used exactly once — right after
+    // a game ends or a player leaves a live game. If we leave them sitting
+    // in the address bar, a later page refresh, or a logout+login on the
+    // same tab, sees the same old param and silently re-joins/re-opens that
+    // room every time, even long after the player explicitly left. Strip it
+    // from the URL the moment it's read so it can't fire again.
+    if (returnStake || view) {
+        history.replaceState(null, '', location.pathname);
+    }
+
     if (returnStake) {
         setTimeout(()=>{ pendingStake=returnStake; confirmJoin(); }, 500);
-    } else if (searchParams.get('view') === 'rooms') {
+    } else if (view === 'rooms') {
         // Landed here after leaving a live game — go straight to the stake
         // list (the "money choosing" page), not the home splash.
         goToGameScreen();
@@ -647,35 +668,84 @@ async function loadUserData(username) {
     } catch (err) { console.error(err); }
 }
 
+// ---------------- INFINITE SCROLL (shared helper) ----------------
+// Feed-style paging: render a small page, then load more only once the
+// bottom of the list actually scrolls into view — instead of fetching and
+// rendering the person's entire history/transaction log in one shot every
+// time they open the tab.
+const _scrollObservers = {};
+function attachInfiniteScroll(container, sentinelId, loadMore) {
+    let sentinel = document.getElementById(sentinelId);
+    if (!sentinel) {
+        sentinel = document.createElement('div');
+        sentinel.id = sentinelId;
+        sentinel.style.cssText = 'height:1px';
+    }
+    container.appendChild(sentinel); // moves it to the bottom if already present
+    if (!_scrollObservers[sentinelId]) {
+        _scrollObservers[sentinelId] = new IntersectionObserver(entries => {
+            if (entries[0].isIntersecting) loadMore();
+        }, { rootMargin: '250px' });
+        _scrollObservers[sentinelId].observe(sentinel);
+    }
+}
+function removeInfiniteScroll(sentinelId) {
+    if (_scrollObservers[sentinelId]) {
+        _scrollObservers[sentinelId].disconnect();
+        delete _scrollObservers[sentinelId];
+    }
+    document.getElementById(sentinelId)?.remove();
+}
+
 // ---------------- HISTORY ----------------
-async function fetchHistory(username) {
+const HISTORY_PAGE_SIZE = 15;
+let historyOffset = 0, historyHasMore = true, historyLoading = false;
+
+async function fetchHistory(username, reset = true) {
     if (!username) return;
     const container = document.getElementById('historyList');
     if (!container) return;
 
-    container.innerHTML = '<p class="small">Loading your game history…</p>';
+    if (reset) {
+        historyOffset = 0;
+        historyHasMore = true;
+        removeInfiniteScroll('historySentinel');
+        container.innerHTML = '<p class="small">Loading your game history…</p>';
+    }
+    if (!historyHasMore || historyLoading) return;
+    historyLoading = true;
 
     try {
-        const res = await fetch(`/api/history?username=${encodeURIComponent(username)}`, { cache: 'no-store' });
+        const res = await fetch(`/api/history?username=${encodeURIComponent(username)}&limit=${HISTORY_PAGE_SIZE}&offset=${historyOffset}`, { cache: 'no-store' });
         const data = await res.json();
-        if (!data.success) return container.innerHTML = '<p class="small">Could not load history.</p>';
-        renderHistory(data.history || []);
+        if (!data.success) {
+            if (reset) container.innerHTML = '<p class="small">Could not load history.</p>';
+            return;
+        }
+
+        renderHistory(data.history || [], reset);
+        historyOffset += (data.history || []).length;
+        historyHasMore = !!data.hasMore;
+        if (historyHasMore) attachInfiniteScroll(container, 'historySentinel', () => fetchHistory(username, false));
     } catch (err) {
         console.error('History fetch error:', err);
-        container.innerHTML = '<p class="small">Could not load history.</p>';
+        if (reset) container.innerHTML = '<p class="small">Could not load history.</p>';
+    } finally {
+        historyLoading = false;
     }
 }
 
-function renderHistory(games) {
+function renderHistory(games, reset = true) {
     const container = document.getElementById('historyList');
     if (!container) return;
 
+    if (reset) container.innerHTML = '';
     if (!games.length) {
-        container.innerHTML = '<p class="small">You haven\'t completed a game yet. Your finished games will show up here.</p>';
+        if (reset) container.innerHTML = '<p class="small">You haven\'t completed a game yet. Your finished games will show up here.</p>';
         return;
     }
 
-    container.innerHTML = games.map(game => {
+    const html = games.map(game => {
         const won = game.won;
         const outcomeClass = won ? 'won' : 'lost';
         const outcomeLabel = won ? '🏆 You Won' : (game.winner ? '❌ You Lost' : '➖ No Winner');
@@ -697,6 +767,8 @@ function renderHistory(games) {
             </div>
         </div>`;
     }).join('');
+
+    container.insertAdjacentHTML('beforeend', html);
 }
 
 // ---------------- HISTORY: WINNING CARD DETAIL ----------------
@@ -739,34 +811,53 @@ function closeHistoryCardModal() {
 }
 
 // ---------------- WALLET ----------------
-async function fetchWallet(username) {
+const WALLET_PAGE_SIZE = 20;
+let walletOffset = 0, walletHasMore = true, walletLoading = false;
+
+async function fetchWallet(username, reset = true) {
     if (!username) return;
     const list = document.getElementById('walletTransactions');
+    if (!list) return;
+
+    if (reset) {
+        walletOffset = 0;
+        walletHasMore = true;
+        removeInfiniteScroll('walletSentinel');
+        list.innerHTML = '<p class="small">Loading transactions…</p>';
+    }
+    if (!walletHasMore || walletLoading) return;
+    walletLoading = true;
 
     try {
-        const res = await fetch(`/api/wallet?username=${encodeURIComponent(username)}`, { cache: 'no-store' });
+        const res = await fetch(`/api/wallet?username=${encodeURIComponent(username)}&limit=${WALLET_PAGE_SIZE}&offset=${walletOffset}`, { cache: 'no-store' });
         const data = await res.json();
         if (!data.success) return;
 
         const walletBalance = document.getElementById('walletBalanceDisplay');
         if (walletBalance) walletBalance.innerText = `${Number(data.balance).toFixed(2)} Birr`;
 
-        if (list) renderWalletTransactions(data.transactions || []);
+        renderWalletTransactions(data.transactions || [], reset);
+        walletOffset += (data.transactions || []).length;
+        walletHasMore = !!data.hasMore;
+        if (walletHasMore) attachInfiniteScroll(list, 'walletSentinel', () => fetchWallet(username, false));
     } catch (err) {
         console.error('Wallet fetch error:', err);
+    } finally {
+        walletLoading = false;
     }
 }
 
-function renderWalletTransactions(transactions) {
+function renderWalletTransactions(transactions, reset = true) {
     const list = document.getElementById('walletTransactions');
     if (!list) return;
 
+    if (reset) list.innerHTML = '';
     if (!transactions.length) {
-        list.innerHTML = '<p class="small">No transactions yet.</p>';
+        if (reset) list.innerHTML = '<p class="small">No transactions yet.</p>';
         return;
     }
 
-    list.innerHTML = transactions.map(tx => {
+    const html = transactions.map(tx => {
         const positive = tx.amount >= 0;
         const sign = positive ? '+' : '';
         return `<div class="tx-row">
@@ -777,6 +868,8 @@ function renderWalletTransactions(transactions) {
             <div class="tx-amount ${positive ? 'positive' : 'negative'}">${sign}${tx.amount.toFixed(2)} Birr</div>
         </div>`;
     }).join('');
+
+    list.insertAdjacentHTML('beforeend', html);
 }
 
 function formatTxType(type) {

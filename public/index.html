@@ -138,21 +138,6 @@ button:disabled { opacity:.55; cursor:not-allowed; }
    <div id="roomsList" class="room-list"></div>
  </div>
 
- <div id="joinModal" class="modal hidden">
-  <div class="card">
-   <h2>Join Bingo Room</h2>
-   <div class="info-grid">
-    <div class="info-box"><span>STAKE</span><strong id="confirmStake">0 Birr</strong></div>
-    <div class="info-box"><span>PLAYERS</span><strong id="confirmPlayers">0</strong></div>
-    <div class="info-box"><span>PRIZE POOL</span><strong id="confirmPool">0 Birr</strong></div>
-    <div class="info-box"><span>STATUS</span><strong id="confirmStatus">Waiting</strong></div>
-   </div>
-   <p class="small">Your stake will be deducted when you confirm. If the room cannot start because there are not enough ready players, your stake is refunded.</p>
-   <button class="btn-play" onclick="confirmJoin()">Confirm & Join 🎟️</button>
-   <button class="btn-secondary" onclick="closeJoinModal()">Cancel</button>
-  </div>
- </div>
-
  <div id="selectionBox" class="card hidden">
    <div class="page-title"><h2 id="selectionTitle" style="margin:0">Select Your Cards 🎟️</h2><button class="back-btn" onclick="leaveCurrentRoom()">Leave</button></div>
    <p><span id="lobbyStatus" class="status-pill">Joining</span></p>
