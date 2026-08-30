@@ -18,7 +18,7 @@
     "multer": "^1.4.5-lts.1",
     "pg": "^8.13.1",
     "socket.io": "^4.8.1",
-    "cloudinary": "^2.6.1",
+    "cloudinary": "^1.41.3",
     "multer-storage-cloudinary": "^4.0.0"
   },
   "description": "Scalable multiplayer stake-room Bingo for Render + PostgreSQL + Telegram + Cloudinary"
