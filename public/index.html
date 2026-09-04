@@ -653,6 +653,16 @@ button:disabled { opacity:.55; cursor:not-allowed; }
   .room-status { grid-column:1; } 
   .room-join { grid-column:2; grid-row:1 / span 2; } 
 }
+
+.instant-bingo-table{width:100%;border-collapse:separate;border-spacing:3px;table-layout:fixed}
+.instant-bingo-table th{color:var(--gold);font-size:12px;padding:2px}
+.instant-bingo-table td{aspect-ratio:1;text-align:center;background:var(--info-box-bg,#1a2430);border-radius:6px;font-weight:700;font-size:13px;position:relative}
+.instant-bingo-table td.marked{background:var(--green);color:#052e16}
+.instant-bingo-table td.win-line{background:#f59e0b;color:#111;box-shadow:0 0 0 2px #fde68a}
+.instant-bingo-table td.strike::after{content:"";position:absolute;left:10%;right:10%;top:50%;height:3px;background:#ef4444;border-radius:2px;transform:rotate(-8deg);animation:instantStrike .45s ease-out}
+@keyframes instantStrike{from{transform:scaleX(0) rotate(-8deg);opacity:0}to{transform:scaleX(1) rotate(-8deg);opacity:1}}
+.instant-card-wrap{background:var(--card);border:1px solid var(--card-border,#243041);border-radius:12px;padding:10px}
+
 </style>
 </head>
 <body>
@@ -763,25 +773,48 @@ button:disabled { opacity:.55; cursor:not-allowed; }
  <div id="instantBox" class="hidden">
    <div class="page-title">
      <h2 style="margin:0">⚡ Instant Bingo</h2>
-     <button class="back-btn" onclick="showHome()">← Back</button>
+     <button class="back-btn" onclick="leaveInstantSelection()">← Back</button>
    </div>
    <div class="card" style="text-align:left;">
-     <p class="small">One shared draw of <strong>20 numbers</strong> for everyone in the round. Pick up to <strong>4 cards</strong>. Line (row/col/diag) pays <strong>×2</strong>, four corners <strong>×2.5</strong> on that card’s stake. Same account &amp; wallet as Classic Bingo.</p>
+     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+       <span class="status-pill" id="instantPlayingPill">Playing | —</span>
+       <span class="status-pill" id="instantSelectTimer">40s</span>
+     </div>
+     <p class="small" style="margin-top:10px;">Pick up to <strong>4 cards</strong> (same numbers OK for other players). Line ×2 · Corners ×2.5. Cost = stake × cards. Shared wallet with Classic Bingo.</p>
      <label class="small">Stake</label>
      <select id="instantStake" style="width:100%;margin-top:6px;"></select>
-     <div id="instantRoundMeta" class="small" style="margin:10px 0;"></div>
      <div class="info-grid" style="margin:10px 0;">
        <div class="info-box"><span>COST</span><strong id="instantCost">0 Birr</strong></div>
        <div class="info-box"><span>SELECTED</span><strong id="instantSelectedCount">0 / 4</strong></div>
      </div>
      <div id="instantCardGrid" class="grid-container" style="max-height:280px;overflow:auto;"></div>
-     <button class="btn-play" id="instantJoinBtn" onclick="joinInstantRound()" style="margin-top:12px;">Join round</button>
+     <button class="btn-play" id="instantJoinBtn" onclick="startInstantPlay()" style="margin-top:12px;">Play — draw 20 numbers</button>
      <p id="instantMsg" class="small" style="margin-top:8px;"></p>
    </div>
    <div class="card" style="text-align:left;margin-top:12px;">
-     <h3 style="margin:0 0 8px;font-size:15px;">Last results / history</h3>
-     <div id="instantHistory" class="small">Play a round to see results here.</div>
+     <h3 style="margin:0 0 8px;font-size:15px;">Recent Instant plays</h3>
+     <div id="instantHistory" class="small">Play to see history here.</div>
    </div>
+ </div>
+
+ <div id="instantPlayBox" class="hidden">
+   <div class="page-title">
+     <h2 style="margin:0">⚡ Live draw</h2>
+     <button class="back-btn" id="instantPlayBackBtn" onclick="leaveInstantPlay()" disabled>← Back</button>
+   </div>
+   <div class="card" style="text-align:center;">
+     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+       <span class="status-pill" id="instantPlayPlaying">Playing | —</span>
+       <span class="small" id="instantDrawProgress">0 / 20</span>
+     </div>
+     <div class="stat-block" style="margin:8px 0;">
+       <strong id="instantLastNumber" style="font-size:42px;color:var(--gold);">—</strong>
+     </div>
+     <div id="instantCalledBalls" class="called-numbers" style="min-height:40px;"></div>
+     <p id="instantPlayStatus" class="small">Drawing numbers…</p>
+   </div>
+   <div id="instantLiveCards" style="display:flex;flex-direction:column;gap:12px;margin-top:12px;"></div>
+   <div id="instantResultBanner" class="card hidden" style="margin-top:12px;text-align:center;"></div>
  </div>
 
  <div id="selectionBox" class="card hidden" style="padding-bottom:90px;">

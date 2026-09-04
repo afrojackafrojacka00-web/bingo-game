@@ -1,10 +1,5 @@
 'use strict';
 
-/**
- * Instant Bingo HTTP API — registered only when the module is loaded.
- * Unregister / delete this file + game/instant to remove the product.
- */
-
 const { moneyLimiter } = require('../middleware/rateLimiters');
 const { requireAdmin } = require('../middleware/adminAuth');
 const instant = require('../game/instant/engine');
@@ -26,13 +21,30 @@ function registerInstantRoutes(app) {
       if (!instant.enabled()) {
         return res.status(503).json({ success: false, message: 'Instant Bingo is disabled.' });
       }
-      const cards = await instant.listCatalog(
-        config.instantBingo?.catalogSize || 200
-      );
+      const cards = await instant.listCatalog(config.instantBingo?.catalogSize || 200);
       res.json({ success: true, cards });
     } catch (err) {
       console.error('instant cards', err);
       res.status(500).json({ success: false, message: 'Server error.' });
+    }
+  });
+
+  app.post('/api/instant/play', moneyLimiter, async (req, res) => {
+    try {
+      const { username, stake, cardNumbers } = req.body || {};
+      if (!username) {
+        return res.status(400).json({ success: false, message: 'Username required.' });
+      }
+      const result = await instant.startPlay({
+        username: String(username),
+        stake: Number(stake),
+        cardNumbers: cardNumbers || [],
+      });
+      res.json(result);
+    } catch (err) {
+      const status = err.code === 'DISABLED' ? 503 : 400;
+      console.error('instant play', err.message);
+      res.status(status).json({ success: false, message: err.message || 'Could not start play.' });
     }
   });
 
@@ -42,7 +54,7 @@ function registerInstantRoutes(app) {
       if (!username) {
         return res.status(400).json({ success: false, message: 'Username required.' });
       }
-      const result = await instant.joinRound({
+      const result = await instant.startPlay({
         username: String(username),
         stake: Number(stake),
         cardNumbers: cardNumbers || [],
@@ -65,18 +77,6 @@ function registerInstantRoutes(app) {
     } catch (err) {
       console.error('instant history', err);
       res.status(500).json({ success: false, message: 'Server error.' });
-    }
-  });
-
-  /** Admin: force-settle a stake’s open round (same 20 numbers for everyone in it). */
-  app.post('/api/admin/instant/settle', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    try {
-      const stake = Number(req.body?.stake);
-      const payload = await instant.settleRound(stake);
-      res.json({ success: true, result: payload });
-    } catch (err) {
-      res.status(400).json({ success: false, message: err.message || 'Settle failed.' });
     }
   });
 
