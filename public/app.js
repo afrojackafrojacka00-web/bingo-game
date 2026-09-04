@@ -9,7 +9,13 @@ let lobbyServerOffset = 0;
 let notificationRefreshTimer = null;
 const selectedCards = new Set();
 const takenCardsMap = {};
-const socket = io();
+const socket = (typeof io === 'function')
+  ? io({ transports: ['websocket', 'polling'] })
+  : { on() {}, emit() {}, connect() {}, disconnect() {} };
+if (typeof io !== 'function') {
+  console.error('socket.io failed to load');
+}
+
 
 // Telegram's in-app browser blocks/misbehaves with native confirm()/alert()
 // popups in a lot of client versions, so we route those through Telegram's
