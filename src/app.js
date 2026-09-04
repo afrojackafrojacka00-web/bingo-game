@@ -39,14 +39,27 @@ app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(config.publicDir, {
     maxAge: config.isProd ? '1h' : 0,
-    etag: true
+    etag: true,
+    setHeaders: (res, filePath) => {
+        if (/\.(html|js)$/i.test(String(filePath))) {
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+        }
+    }
 }));
 
 app.use('/api/', generalLimiter);
 
-app.get('/', (req, res) => {
+function sendIndexNoCache(req, res) {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     res.sendFile(path.join(config.publicDir, 'index.html'));
-});
+}
+app.get('/', sendIndexNoCache);
+// Alternate URLs so Telegram can be pointed at a path that was never cached as blank
+app.get(['/app', '/play', '/tg', '/mini'], sendIndexNoCache);
 
 const STAKES = config.stakes;
 const ROUND_SECONDS = config.roundSeconds;
