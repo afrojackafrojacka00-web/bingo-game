@@ -1794,6 +1794,19 @@ app.post('/api/admin/adjust-bonus', async (req, res) => {
     }
 });
 
+
+// Display names for classic bingo patterns (used by history API only).
+// Kept here so history works even though live game logic lives in src/game/engine.js.
+const PATTERN_NAMES = {
+  'N': 'N', 'H': 'H', 'Reverse H': 'Reverse H', 'Z': 'Z', 'K': 'K', 'E': 'E',
+  'Three Horizontal Lines': 'Three Horizontal Lines', 'Three Vertical Lines': 'Three Vertical Lines',
+  '5': '5', 'M': 'M', 'cross': 'Cross', 'vertical_line': 'One Vertical Line', 'Five Dots': 'Five Dots',
+  'horizontal_line': 'One Horizontal Line', 'full': 'Full House', 'x': 'X', 't': 'T', 'reverse_t': 'Reverse T',
+  'big_l': 'Big L', 'reverse_l': 'Reverse L', 'Top Triangle': 'Top Triangle', 'Bottom Triangle': 'Bottom Triangle',
+  'half_above': 'Half Above', 'half_below': 'Half Below', 'any_square': 'Any Square (2×2)',
+  'any_one_line': 'Any One Line', 'any_two_lines': 'Any Two Lines'
+};
+
 // 6c. Game History — completed games this user actually joined (not every game)
 app.get('/api/history', async (req, res) => {
     const username = req.query.username;
