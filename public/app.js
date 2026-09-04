@@ -666,16 +666,30 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 
     const tg = window.Telegram?.WebApp;
-    const initData = tg?.initData;
+    // Inside Telegram Mini App we must NOT fall back to web username/password login.
+    const insideTelegram = !!(tg && (tg.initData || tg.initDataUnsafe?.user || tg.platform));
+
+    if (tg) {
+        try { tg.ready(); } catch (_) {}
+        try { tg.expand(); } catch (_) {}
+    }
+
+    // initData can be briefly empty on some clients — wait a moment
+    let initData = tg?.initData || '';
+    if (insideTelegram && !initData) {
+        for (let i = 0; i < 10 && !initData; i++) {
+            await new Promise(r => setTimeout(r, 100));
+            initData = window.Telegram?.WebApp?.initData || '';
+        }
+    }
 
     if (initData) {
-        tg.expand();
         document.getElementById('logoutBtn')?.classList.add('hidden');
         try {
             const res = await fetch('/api/telegram-auth', {
-                method:'POST',
-                headers:{'Content-Type':'application/json'},
-                body:JSON.stringify({ initData })
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ initData })
             });
             const data = await res.json();
             if (data.success && data.status === 'LOGGED_IN') {
@@ -683,8 +697,17 @@ window.addEventListener('DOMContentLoaded', async () => {
                 localStorage.setItem('bingoUser', currentUsername);
                 if (!data.phoneVerified) show('phoneModal');
                 else await showHomeScreen(currentUsername);
-            } else showAuthBox();
-        } catch { showAuthBox(); }
+            } else if (insideTelegram) {
+                showTelegramAuthError(data.message || 'Telegram login failed.');
+            } else {
+                showAuthBox();
+            }
+        } catch (e) {
+            if (insideTelegram) showTelegramAuthError('Network error during Telegram login.');
+            else showAuthBox();
+        }
+    } else if (insideTelegram) {
+        showTelegramAuthError('Open this app from your bot menu button (not the browser).');
     } else {
         const saved = getSavedWebUserIfActive();
         if (saved) await showHomeScreen(saved);
@@ -692,6 +715,25 @@ window.addEventListener('DOMContentLoaded', async () => {
         startWebSessionWatch();
     }
 });
+
+function showTelegramAuthError(message) {
+    const box = document.getElementById('authBox');
+    if (box) {
+        box.innerHTML = `
+          <h2>Telegram login</h2>
+          <p class="small" style="color:var(--notice-text,#fca5a5);">${String(message || 'Login failed')}</p>
+          <p class="small">You are inside Telegram — username/password is only for the website.</p>
+          <p class="small">1. Render env must have <strong>TELEGRAM_BOT_TOKEN</strong> = this bot’s token<br>
+             2. Menu button URL must be your Render https URL<br>
+             3. Close the Mini App and open it again from the bot menu</p>
+          <button class="btn-play" onclick="location.reload()">Try again</button>
+        `;
+        show('authBox');
+        hide('headerBar'); hide('bottomNav');
+    } else {
+        alertUser(message || 'Telegram login failed');
+    }
+}
 
 function showAuthBox() {
     show('authBox');

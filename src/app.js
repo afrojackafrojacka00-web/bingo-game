@@ -74,29 +74,31 @@ async function createPersonalNotification(client, userId, message, imageUrl = nu
 }
 
 // Helper: Verify Telegram Auth Data
+function getTelegramBotToken() {
+    return process.env.TELEGRAM_BOT_TOKEN || process.env.BOT_TOKEN || config.botToken || '';
+}
+
 function verifyTelegramAuth(initData, botToken) {
-    if (!initData || !botToken) return { isValid: false, user: null, startParam: null };
+    const token = botToken || getTelegramBotToken();
+    if (!initData || !token) return { isValid: false, user: null, startParam: null };
     try {
         const params = new URLSearchParams(initData);
         const hash = params.get('hash');
         params.delete('hash');
 
+        // Keys must be sorted alphabetically by full key name (Telegram WebApp spec)
         const dataCheckString = Array.from(params.entries())
-            .sort(([a], [b]) => a[0].localeCompare(b[0]))
-            .map(([k, v]) => `${k}=${v}`)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([k, v]) => k + '=' + v)
             .join('\n');
 
-        const secretKey = crypto.createHmac('sha256', 'WebAppData').update(botToken).digest();
+        const secretKey = crypto.createHmac('sha256', 'WebAppData').update(token).digest();
         const calculatedHash = crypto.createHmac('sha256', secretKey).update(dataCheckString).digest('hex');
 
         if (calculatedHash !== hash) return { isValid: false, user: null, startParam: null };
         return {
             isValid: true,
             user: JSON.parse(params.get('user') || '{}'),
-            // Present when the Mini App was opened via a direct link like
-            // t.me/<bot>/<app>?startapp=ref_<username> — this is how a
-            // referral code reaches us on Telegram without needing a
-            // separate bot webhook/command handler.
             startParam: params.get('start_param') || null
         };
     } catch (err) {
@@ -138,7 +140,7 @@ async function getWelcomeBonusSettings(client) {
 }
 
 async function requireTelegramWebAppUser(initData) {
-    const { isValid, user } = verifyTelegramAuth(initData, process.env.TELEGRAM_BOT_TOKEN);
+    const { isValid, user } = verifyTelegramAuth(initData, getTelegramBotToken());
     if (!isValid || !user?.id) {
         return { ok: false, status: 401, message: 'Open this screen inside the Telegram Mini App and try again.' };
     }
@@ -338,10 +340,18 @@ app.post('/api/login', authLimiter, async (req, res) => {
 // 3. Telegram Auto-Authentication Endpoint
 app.post('/api/telegram-auth', async (req, res) => {
     const { initData } = req.body;
-    const { isValid, user, startParam } = verifyTelegramAuth(initData, process.env.TELEGRAM_BOT_TOKEN);
+    if (!getTelegramBotToken()) {
+        console.error('telegram-auth: TELEGRAM_BOT_TOKEN / BOT_TOKEN not set');
+        return res.status(503).json({ success: false, message: 'Server bot token not configured.' });
+    }
+    if (!initData) {
+        return res.status(401).json({ success: false, message: 'Missing Telegram initData. Open from the bot menu button.' });
+    }
+    const { isValid, user, startParam } = verifyTelegramAuth(initData, getTelegramBotToken());
     
     if (!isValid || !user?.id) {
-        return res.status(401).json({ success: false, message: "Invalid Telegram auth." });
+        console.error('telegram-auth: hash validation failed (token mismatch with the bot that opened the Mini App?)');
+        return res.status(401).json({ success: false, message: 'Invalid Telegram auth. Check bot token matches this bot.' });
     }
 
     const client = await pool.connect();
@@ -430,7 +440,7 @@ app.post('/api/telegram-auth', async (req, res) => {
 app.post('/api/save-telegram-phone', async (req, res) => {
     const { initData, phoneNumber } = req.body;
 
-    const { isValid, user } = verifyTelegramAuth(initData, process.env.TELEGRAM_BOT_TOKEN);
+    const { isValid, user } = verifyTelegramAuth(initData, getTelegramBotToken());
     if (!isValid || !user?.id) {
         return res.status(401).json({ success: false, message: "Unauthorized request." });
     }
