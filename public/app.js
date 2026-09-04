@@ -1,3 +1,48 @@
+// ---------------- BOOT SAFETY NET ----------------
+// Some Telegram in-app browsers (mainly certain Android builds, and some
+// privacy-restricted WebView configs) throw when touching localStorage, or
+// hit some other early error we've never seen in a normal desktop/mobile
+// browser. Previously that meant an uncaught exception during page boot —
+// nothing had shown yet (the login card only appears once JS runs), so the
+// result was a silent blank/black screen with no visible clue why. These two
+// listeners turn any such early failure into an on-screen message instead of
+// nothing, and are deliberately the very first thing this file does so they
+// catch errors as early as possible. Once real UI has shown (see
+// `markAppBooted()`), we stop intercepting — later runtime errors are
+// handled locally by whichever feature hit them, same as before.
+let appBooted = false;
+function markAppBooted() { appBooted = true; }
+function showBootError(message) {
+    if (appBooted) return;
+    let box = document.getElementById('bootErrorBox');
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'bootErrorBox';
+        box.style.cssText = 'position:fixed;inset:0;background:#0b0f14;color:#e8eef6;padding:24px 20px;font:14px/1.6 system-ui,-apple-system,sans-serif;z-index:99999;overflow:auto;';
+        document.body.appendChild(box);
+    }
+    box.innerHTML =
+        '<h3 style="color:#fca5a5;margin:0 0 10px;">Could not load the app</h3>' +
+        '<p style="opacity:.85;word-break:break-word;">' + String(message || 'Unknown error').replace(/</g, '&lt;') + '</p>' +
+        '<button onclick="location.reload()" style="width:auto;padding:10px 18px;margin-top:10px;border-radius:10px;border:none;background:#3b82f6;color:#fff;font-weight:600;">Reload</button>';
+}
+window.addEventListener('error', (e) => showBootError(e?.message || 'Script error'));
+window.addEventListener('unhandledrejection', (e) => {
+    const reason = e?.reason;
+    showBootError((reason && (reason.message || String(reason))) || 'Unhandled error');
+});
+
+// ---------------- Storage that never throws ----------------
+// localStorage can throw (privacy modes, some in-app browsers, storage
+// quota/policy restrictions) — every read/write in this file goes through
+// this wrapper so a blocked storage API degrades to "not remembered" instead
+// of crashing the whole app.
+const safeStorage = {
+    get(key) { try { return localStorage.getItem(key); } catch (_) { return null; } },
+    set(key, value) { try { localStorage.setItem(key, value); return true; } catch (_) { return false; } },
+    remove(key) { try { localStorage.removeItem(key); } catch (_) {} },
+};
+
 let currentUsername = "";
 let currentStake = null;
 let pendingStake = null;
@@ -39,24 +84,24 @@ const WEB_SESSION_IDLE_MS = 30 * 60 * 1000; // 30 minutes
 const WEB_SESSION_ACTIVITY_KEY = 'bingoLastActive';
 
 function touchWebSession() {
-    try { localStorage.setItem(WEB_SESSION_ACTIVITY_KEY, String(Date.now())); } catch (_) {}
+    try { safeStorage.set(WEB_SESSION_ACTIVITY_KEY, String(Date.now())); } catch (_) {}
 }
 
 function clearWebSession() {
     try {
-        localStorage.removeItem('bingoUser');
-        localStorage.removeItem(WEB_SESSION_ACTIVITY_KEY);
+        safeStorage.remove('bingoUser');
+        safeStorage.remove(WEB_SESSION_ACTIVITY_KEY);
     } catch (_) {}
 }
 
 function getSavedWebUserIfActive() {
     // Telegram Mini App is bound to the Telegram account — do not idle-logout there.
     if (isTelegramClient()) {
-        return localStorage.getItem('bingoUser');
+        return safeStorage.get('bingoUser');
     }
-    const saved = localStorage.getItem('bingoUser');
+    const saved = safeStorage.get('bingoUser');
     if (!saved) return null;
-    const last = Number(localStorage.getItem(WEB_SESSION_ACTIVITY_KEY) || 0);
+    const last = Number(safeStorage.get(WEB_SESSION_ACTIVITY_KEY) || 0);
     if (!last || (Date.now() - last) > WEB_SESSION_IDLE_MS) {
         clearWebSession();
         return null;
@@ -75,7 +120,7 @@ function startWebSessionWatch() {
     // Periodic check
     setInterval(() => {
         if (!currentUsername || isTelegramClient()) return;
-        const last = Number(localStorage.getItem(WEB_SESSION_ACTIVITY_KEY) || 0);
+        const last = Number(safeStorage.get(WEB_SESSION_ACTIVITY_KEY) || 0);
         if (!last || (Date.now() - last) > WEB_SESSION_IDLE_MS) {
             logoutUser();
             alertUser('You were logged out due to inactivity. Please log in again.');
@@ -151,7 +196,7 @@ socket.on('number_drawn', ({ stake, number }) => {
 
 socket.on('game_started', ({ stake, gameId }) => {
     if (Number(stake) !== currentStake) return;
-    localStorage.setItem('bingoActiveGame', JSON.stringify({username: currentUsername, stake:Number(stake), gameId}));
+    safeStorage.set('bingoActiveGame', JSON.stringify({username: currentUsername, stake:Number(stake), gameId}));
     window.location.href = `/game.html?stake=${encodeURIComponent(stake)}`;
 });
 
@@ -216,7 +261,7 @@ async function resyncCurrentRoom() {
 
         if (state.status === 'PLAYING' || state.status === 'FINISHING') {
             // Never revive the old in-page game UI after sleep/wake.
-            localStorage.setItem('bingoActiveGame', JSON.stringify({ username: currentUsername, stake:Number(stake), gameId:state.gameId }));
+            safeStorage.set('bingoActiveGame', JSON.stringify({ username: currentUsername, stake:Number(stake), gameId:state.gameId }));
             location.href = `/game.html?stake=${encodeURIComponent(stake)}`;
             return;
         } else if (state.status === 'JOINING') {
@@ -469,6 +514,7 @@ function confirmJoin() {
 
 async function goToGameScreen() {
     hide('homeBox');
+    if (typeof disconnectInstantSocket === 'function') disconnectInstantSocket();
     show('roomsBox');
     socket.emit('rooms_state_request'); // harmless for older/newer server versions
     renderRooms();
@@ -484,6 +530,7 @@ function showHome() {
     if (typeof setInstantImmersive === 'function') setInstantImmersive(false);
     if (typeof stopInstantSelectTimer === 'function') stopInstantSelectTimer();
     if (typeof stopInstantDraw === 'function') stopInstantDraw();
+    if (typeof disconnectInstantSocket === 'function') disconnectInstantSocket();
     try {
         instantPendingPlay = null;
         instantLocked = false;
@@ -675,7 +722,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     // refresh/login the way returnStake used to.
     const refParam = new URLSearchParams(location.search).get('ref');
     if (refParam) {
-        if (!localStorage.getItem('bingoUser')) localStorage.setItem('bingoReferralCode', refParam);
+        if (!safeStorage.get('bingoUser')) safeStorage.set('bingoReferralCode', refParam);
         history.replaceState(null, '', location.pathname);
     }
 
@@ -715,7 +762,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             const data = await res.json();
             if (data.success && data.status === 'LOGGED_IN') {
                 currentUsername = data.username;
-                localStorage.setItem('bingoUser', currentUsername);
+                safeStorage.set('bingoUser', currentUsername);
                 if (!data.phoneVerified) show('phoneModal');
                 else await showHomeScreen(currentUsername);
             } else if (insideTelegram) {
@@ -751,6 +798,7 @@ function showTelegramAuthError(message) {
         `;
         show('authBox');
         hide('headerBar'); hide('bottomNav');
+        markAppBooted();
     } else {
         alertUser(message || 'Telegram login failed');
     }
@@ -760,15 +808,17 @@ function showAuthBox() {
     show('authBox');
     hide('headerBar'); hide('bottomNav');
     document.querySelectorAll('.tab-content').forEach(t => hide(t.id));
+    markAppBooted();
 }
 
 async function showHomeScreen(username) {
     currentUsername = username;
-    localStorage.setItem('bingoUser', username);
+    safeStorage.set('bingoUser', username);
     touchWebSession();
     document.getElementById('playerDisplay').innerText = username;
     hide('authBox'); show('headerBar'); show('bottomNav');
-    applyLanguage(localStorage.getItem('bingoLang') || 'en', false);
+    markAppBooted();
+    applyLanguage(safeStorage.get('bingoLang') || 'en', false);
     switchTab('tabGames', document.querySelector('.nav-item'));
     showHome();
 
@@ -855,11 +905,11 @@ async function registerUser() {
     const phoneNumber = document.getElementById('regPhone').value.trim();
     if (!username || !password) return alert('Please fill in username and password.');
     try {
-        const referredBy = localStorage.getItem('bingoReferralCode') || null;
+        const referredBy = safeStorage.get('bingoReferralCode') || null;
         const res = await fetch('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password,phoneNumber,referredBy})});
         const data = await res.json();
         if (data.success) {
-            localStorage.removeItem('bingoReferralCode');
+            safeStorage.remove('bingoReferralCode');
             await showHomeScreen(data.username);
         } else alert(data.message || 'Registration failed.');
     } catch { alert('Registration failed.'); }
@@ -1418,7 +1468,7 @@ const translations = {
 function applyTheme(theme) {
     const t = theme === 'light' ? 'light' : 'dark';
     document.documentElement.setAttribute('data-theme', t);
-    localStorage.setItem('bingoTheme', t);
+    safeStorage.set('bingoTheme', t);
 }
 async function changeTheme(theme) {
     applyTheme(theme);
@@ -1447,7 +1497,7 @@ function applyLanguage(language, persistLocally = true) {
         if (t[key]) el.innerText = t[key];
     });
 
-    if (persistLocally) localStorage.setItem('bingoLang', lang);
+    if (persistLocally) safeStorage.set('bingoLang', lang);
 }
 
 function switchTab(tabId, navElement) {
@@ -1456,6 +1506,13 @@ function switchTab(tabId, navElement) {
     show(tabId);
     navElement?.classList.add('active');
 
+    // Instant Bingo's shared round only belongs on its own screen — leaving
+    // the Games tab for History/Wallet/Account must not leave it listening
+    // in the background (see disconnectInstantSocket).
+    if (tabId !== 'tabGames' && typeof disconnectInstantSocket === 'function') {
+        disconnectInstantSocket();
+    }
+
     if (tabId === 'tabHistory') fetchHistory(currentUsername);
     if (tabId === 'tabWallet') { fetchWallet(currentUsername); fetchPendingRequests(currentUsername); }
     if (tabId === 'tabAccount') applyAccountTabForClient();
@@ -1463,6 +1520,7 @@ function switchTab(tabId, navElement) {
 
 function logoutUser() {
     stopLobbyTimer();
+    if (typeof disconnectInstantSocket === 'function') disconnectInstantSocket();
     if (notificationRefreshTimer) {
         clearInterval(notificationRefreshTimer);
         notificationRefreshTimer = null;
@@ -1516,7 +1574,7 @@ async function setWebPassword() {
             const ud = await ur.json();
             if (!ud.success) return alertUser(ud.message || 'Could not update username.');
             currentUsername = ud.username;
-            localStorage.setItem('bingoUser', currentUsername);
+            safeStorage.set('bingoUser', currentUsername);
             touchWebSession();
             const pd = document.getElementById('playerDisplay');
             if (pd) pd.innerText = currentUsername;
@@ -1537,7 +1595,7 @@ async function setWebPassword() {
         if (data.success) {
             if (data.username) {
                 currentUsername = data.username;
-                localStorage.setItem('bingoUser', currentUsername);
+                safeStorage.set('bingoUser', currentUsername);
                 touchWebSession();
             }
             const a = document.getElementById('webPasswordInput');
@@ -1768,6 +1826,7 @@ function leaveInstantSelection() {
     hide('instantBox');
     hide('instantPlayBox');
     setInstantImmersive(false);
+    disconnectInstantSocket();
     show('homeBox');
 }
 window.leaveInstantSelection = leaveInstantSelection;
@@ -1798,10 +1857,32 @@ async function openInstantBingo() {
     instantJoined = false;
     instantLocked = false;
     hide('instantWaitOverlay');
-    await loadInstantUI();
+    const status = await loadInstantUI();
     connectInstantSocket();
     loadInstantHistory();
     loadInstantLeaderboard('day');
+
+    // We now disconnect the instant socket whenever you leave this screen
+    // (see disconnectInstantSocket), so a round you already paid into could
+    // still be drawing on the server when you come back. Rejoin the live
+    // view instead of dropping you back at card selection — your entry and
+    // payout are already safely tracked server-side either way.
+    if (status && status.phase === 'DRAWING') {
+        const me = (status.players || []).find(function (p) {
+            return String(p.realUsername || '').toLowerCase() === String(currentUsername || '').toLowerCase();
+        });
+        if (me) {
+            instantJoined = true;
+            instantLocked = true;
+            instantMyCards = me.cards || [];
+            instantServerPlayers = status.players || [];
+            instantFakeOpponents = status.fakeOpponents || [];
+            const totalNumbers = Number(status.numbersDrawn || 20);
+            const known = status.drawnNumbers || [];
+            const padded = known.concat(new Array(Math.max(0, totalNumbers - known.length)).fill(0));
+            openSharedDrawScreen({ drawnNumbers: padded, resume: true, drawIndex: status.drawIndex || known.length });
+        }
+    }
 }
 window.openInstantBingo = openInstantBingo;
 
@@ -1859,8 +1940,10 @@ async function loadInstantUI() {
         updateInstantCost();
         renderInstantOpponents();
         if (msg) msg.textContent = '';
+        return data;
     } catch (e) {
         if (msg) msg.textContent = 'Could not load Instant.';
+        return null;
     }
 }
 
@@ -2008,6 +2091,15 @@ function startInstantWatch() { /* removed — auto-sync via shared round */ }
 window.startInstantWatch = startInstantWatch;
 
 function openSharedDrawScreen(payload) {
+    // Defense in depth: the socket that drives this is only ever supposed to
+    // be connected while the Instant Bingo screen is the active screen (see
+    // disconnectInstantSocket / where it's called from below). But belt and
+    // braces — never let the shared draw render on top of whatever else is
+    // on screen; always claim the whole "games" area for itself first.
+    hide('homeBox');
+    hide('roomsBox');
+    hide('selectionBox');
+    hide('gamePlayBox');
     hide('instantBox');
     hide('instantWaitOverlay');
     show('instantPlayBox');
@@ -2127,6 +2219,20 @@ function applyCalledNumber(num, index, total, calledArr) {
         });
     });
 }
+
+// The server runs Instant Bingo as one continuous shared round (a new draw
+// starts automatically every ~45-70s, whether anyone is watching or not).
+// The socket below must only be connected while the Instant Bingo screen is
+// the thing actually on screen — otherwise a round starting in the
+// background pops the live-draw screen over whatever you're doing (home,
+// classic bingo, wallet, etc). Every place that navigates away from Instant
+// Bingo calls this first.
+function disconnectInstantSocket() {
+    if (instantSocket && instantSocket.connected) {
+        try { instantSocket.disconnect(); } catch (_) {}
+    }
+}
+window.disconnectInstantSocket = disconnectInstantSocket;
 
 function connectInstantSocket() {
     if (typeof io === 'undefined') return;

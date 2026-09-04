@@ -33,7 +33,20 @@ const io = new Server(server, {
 const PORT = config.port;
 
 app.set('trust proxy', 1);
-app.use(helmet({ contentSecurityPolicy: false }));
+// frameguard defaults to "X-Frame-Options: SAMEORIGIN", which blocks Telegram
+// Web (web.telegram.org) from showing this app in its Mini App iframe (it's a
+// different origin) — that's the white/blank screen when opening the bot from
+// web.telegram.org. We turn frameguard off and instead send a scoped
+// Content-Security-Policy that only allows Telegram's own origins to frame us
+// (everyone else is still blocked, so this isn't a general clickjacking hole).
+app.use(helmet({ contentSecurityPolicy: false, frameguard: false }));
+app.use((req, res, next) => {
+    res.setHeader(
+        'Content-Security-Policy',
+        "frame-ancestors 'self' https://web.telegram.org https://*.web.telegram.org https://telegram.org https://*.telegram.org"
+    );
+    next();
+});
 app.use(compression());
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
