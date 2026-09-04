@@ -9,7 +9,20 @@ function registerInstantRoutes(app) {
   app.get('/api/instant/status', async (req, res) => {
     try {
       const status = await instant.getStatus();
-      res.json({ success: true, ...status });
+      const live = instant.getLiveSession && instant.getLiveSession();
+      res.json({
+        success: true,
+        ...status,
+        live: live
+          ? {
+              sessionId: live.sessionId,
+              username: live.username,
+              stake: live.stake,
+              cardCount: (live.cards || []).length,
+              startedAt: live.startedAt,
+            }
+          : null,
+      });
     } catch (err) {
       console.error('instant status', err);
       res.status(500).json({ success: false, message: 'Server error.' });
@@ -25,6 +38,18 @@ function registerInstantRoutes(app) {
       res.json({ success: true, cards });
     } catch (err) {
       console.error('instant cards', err);
+      res.status(500).json({ success: false, message: 'Server error.' });
+    }
+  });
+
+  app.get('/api/instant/card/:num', async (req, res) => {
+    try {
+      const num = Number(req.params.num);
+      const pool = require('../db/pool');
+      const r = await pool.query('SELECT card_number, grid FROM bingo_cards WHERE card_number = $1', [num]);
+      if (!r.rowCount) return res.status(404).json({ success: false, message: 'Card not found.' });
+      res.json({ success: true, cardNumber: r.rows[0].card_number, grid: r.rows[0].grid });
+    } catch (err) {
       res.status(500).json({ success: false, message: 'Server error.' });
     }
   });
@@ -73,9 +98,42 @@ function registerInstantRoutes(app) {
         return res.status(400).json({ success: false, message: 'Username required.' });
       }
       const history = await instant.historyForUser(username, 30);
+      // attach grids for display
+      const pool = require('../db/pool');
+      for (const h of history) {
+        try {
+          const g = await pool.query('SELECT grid FROM bingo_cards WHERE card_number = $1', [h.cardNumber]);
+          h.grid = g.rows[0]?.grid || null;
+        } catch (_) {
+          h.grid = null;
+        }
+      }
       res.json({ success: true, history });
     } catch (err) {
       console.error('instant history', err);
+      res.status(500).json({ success: false, message: 'Server error.' });
+    }
+  });
+
+  app.get('/api/instant/leaderboard', async (req, res) => {
+    try {
+      const period = String(req.query.period || 'day');
+      if (!['day', 'week', 'all'].includes(period)) {
+        return res.status(400).json({ success: false, message: 'period must be day|week|all' });
+      }
+      const rows = await instant.getLeaderboard(period, 20);
+      res.json({ success: true, period, leaders: rows });
+    } catch (err) {
+      console.error('instant leaderboard', err);
+      res.status(500).json({ success: false, message: 'Server error.' });
+    }
+  });
+
+  app.get('/api/instant/live', async (req, res) => {
+    try {
+      const live = instant.getLiveSession && instant.getLiveSession();
+      res.json({ success: true, live: live || null });
+    } catch (err) {
       res.status(500).json({ success: false, message: 'Server error.' });
     }
   });

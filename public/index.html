@@ -663,6 +663,42 @@ button:disabled { opacity:.55; cursor:not-allowed; }
 @keyframes instantStrike{from{transform:scaleX(0) rotate(-8deg);opacity:0}to{transform:scaleX(1) rotate(-8deg);opacity:1}}
 .instant-card-wrap{background:var(--card);border:1px solid var(--card-border,#243041);border-radius:12px;padding:10px}
 
+
+.instant-timer-big{
+  font-size:28px;font-weight:900;min-width:52px;text-align:center;
+  padding:4px 10px;border-radius:12px;
+  background:linear-gradient(135deg,#f59e0b,#ef4444);
+  color:#111;box-shadow:0 0 20px rgba(245,158,11,.45);
+  animation:instantPulse 1s ease-in-out infinite;
+}
+@keyframes instantPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+.instant-pick-grid .card-item{padding:6px 4px;font-size:11px;min-height:32px;}
+.instant-cards-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;}
+@media(max-width:360px){.instant-cards-row{grid-template-columns:1fr;}}
+.instant-bingo-table{width:100%;border-collapse:separate;border-spacing:2px;table-layout:fixed}
+.instant-bingo-table th{color:var(--gold);font-size:9px;padding:1px}
+.instant-bingo-table td{aspect-ratio:1;text-align:center;background:var(--info-box-bg,#1a2430);border-radius:4px;font-weight:700;font-size:10px;position:relative;padding:2px}
+.instant-bingo-table td.marked{background:var(--green);color:#052e16}
+.instant-bingo-table td.win-line{background:#f59e0b;color:#111}
+.instant-bingo-table td.strike::after{content:"";position:absolute;left:8%;right:8%;top:50%;height:2px;background:#ef4444;border-radius:2px;transform:rotate(-12deg);animation:instantStrike .4s ease-out}
+@keyframes instantStrike{from{transform:scaleX(0) rotate(-12deg)}to{transform:scaleX(1) rotate(-12deg)}}
+.instant-balls-compact .ball{font-size:10px;padding:3px 6px;margin:2px;}
+.instant-fly-num{
+  position:absolute;left:50%;top:20%;transform:translate(-50%,-50%);
+  font-size:48px;font-weight:900;color:var(--gold);z-index:5;pointer-events:none;
+  text-shadow:0 0 24px rgba(250,204,21,.7);
+  transition:transform .55s cubic-bezier(.2,.8,.2,1), opacity .55s ease, top .55s ease, font-size .55s ease;
+}
+.instant-fly-num.drop{top:72%;font-size:14px;opacity:0;}
+.instant-card-wrap{background:var(--card);border:1px solid var(--card-border,#243041);border-radius:10px;padding:6px;}
+.instant-lb-row{display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--card-border,#333);}
+.instant-lb-row:last-child{border-bottom:none;}
+.instant-lb-meta{flex:1;min-width:0;font-size:11px;}
+.instant-lb-card{width:42%;max-width:140px;}
+body.instant-immersive #headerBar,
+body.instant-immersive #bottomNav{display:none !important;}
+body.instant-immersive #tabGames{padding-bottom:12px;}
+
 </style>
 </head>
 <body>
@@ -771,55 +807,65 @@ button:disabled { opacity:.55; cursor:not-allowed; }
  </div>
 
  <div id="instantBox" class="hidden">
-   <div class="page-title">
-     <h2 style="margin:0">⚡ Instant Bingo</h2>
+   <div class="page-title" style="margin-bottom:8px;">
+     <h2 style="margin:0;font-size:18px;">⚡ Instant</h2>
      <button class="back-btn" onclick="leaveInstantSelection()">← Back</button>
    </div>
-   <div class="card" style="text-align:left;">
+   <div class="card" style="text-align:left;padding:12px;">
      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
-       <span class="status-pill" id="instantPlayingPill">Playing | —</span>
-       <span class="status-pill" id="instantSelectTimer">25s</span>
+       <span class="status-pill" id="instantPlayingPill" style="font-size:12px;font-weight:700;">🟢 LIVE · Playing | —</span>
+       <span id="instantSelectTimer" class="instant-timer-big">25</span>
      </div>
-     <p class="small" style="margin-top:10px;">Pick up to <strong>4 cards</strong> (same numbers OK for other players). Line ×2 · Corners ×2.5. Cost = stake × cards. Shared wallet with Classic Bingo.</p>
-     <label class="small">Stake</label>
-     <select id="instantStake" style="width:100%;margin-top:6px;"></select>
-     <div class="info-grid" style="margin:10px 0;">
-       <div class="info-box"><span>COST</span><strong id="instantCost">0 Birr</strong></div>
-       <div class="info-box"><span>SELECTED</span><strong id="instantSelectedCount">0 / 4</strong></div>
+     <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+       <button type="button" class="btn-secondary" style="width:auto;padding:8px 12px;font-size:12px;" onclick="startInstantWatch()">👁 Watch live</button>
+       <select id="instantStake" style="flex:1;min-width:120px;font-size:13px;"></select>
      </div>
-     <div id="instantCardGrid" class="grid-container" style="max-height:280px;overflow:auto;"></div>
-     <button class="btn-play" id="instantJoinBtn" onclick="startInstantPlay()" style="margin-top:12px;">Play — draw 20 numbers</button>
-     <p id="instantMsg" class="small" style="margin-top:8px;"></p>
-     <div id="instantWaitOverlay" class="hidden" style="margin-top:12px;padding:12px;border-radius:10px;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.35);text-align:center;">
-       <strong id="instantWaitTitle">Locked in</strong>
-       <p class="small" id="instantWaitText" style="margin:6px 0 0;">Draw starts when the timer hits 0…</p>
+     <div class="info-grid" style="margin:8px 0;gap:6px;">
+       <div class="info-box" style="padding:8px;"><span style="font-size:10px;">COST</span><strong id="instantCost" style="font-size:14px;">0</strong></div>
+       <div class="info-box" style="padding:8px;"><span style="font-size:10px;">CARDS</span><strong id="instantSelectedCount" style="font-size:14px;">0/4</strong></div>
+     </div>
+     <div id="instantCardPreview" class="hidden" style="margin:8px 0;"></div>
+     <div id="instantCardGrid" class="grid-container instant-pick-grid" style="max-height:220px;overflow:auto;"></div>
+     <button class="btn-play" id="instantJoinBtn" onclick="startInstantPlay()" style="margin-top:10px;padding:12px;font-size:15px;">Play</button>
+     <p id="instantMsg" class="small" style="margin-top:6px;font-size:11px;"></p>
+     <div id="instantWaitOverlay" class="hidden" style="margin-top:10px;padding:12px;border-radius:12px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.4);text-align:center;">
+       <strong id="instantWaitTitle" style="font-size:14px;">Locked in</strong>
+       <p class="small" id="instantWaitText" style="margin:6px 0 0;font-size:12px;">Draw starts when timer hits 0…</p>
      </div>
    </div>
-   <div class="card" style="text-align:left;margin-top:12px;">
-     <h3 style="margin:0 0 8px;font-size:15px;">Recent Instant plays</h3>
-     <div id="instantHistory" class="small">Play to see history here.</div>
+
+   <div class="card" style="text-align:left;margin-top:10px;padding:12px;">
+     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+       <strong style="font-size:13px;">🏆 Leaders</strong>
+       <div style="display:flex;gap:4px;">
+         <button type="button" class="btn-secondary instant-lb-tab active" data-period="day" onclick="loadInstantLeaderboard('day')" style="width:auto;padding:4px 8px;font-size:11px;">Day</button>
+         <button type="button" class="btn-secondary instant-lb-tab" data-period="week" onclick="loadInstantLeaderboard('week')" style="width:auto;padding:4px 8px;font-size:11px;">Week</button>
+         <button type="button" class="btn-secondary instant-lb-tab" data-period="all" onclick="loadInstantLeaderboard('all')" style="width:auto;padding:4px 8px;font-size:11px;">All</button>
+       </div>
+     </div>
+     <div id="instantLeaderboard" class="small">Loading…</div>
+   </div>
+
+   <div class="card" style="text-align:left;margin-top:10px;padding:12px;">
+     <strong style="font-size:13px;">Your plays</strong>
+     <div id="instantHistory" class="small" style="margin-top:8px;">—</div>
    </div>
  </div>
 
  <div id="instantPlayBox" class="hidden">
-   <div class="page-title">
-     <h2 style="margin:0">⚡ Instant Draw</h2>
-     <button class="back-btn" id="instantPlayBackBtn" onclick="leaveInstantPlay()" disabled>← Back</button>
+   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">
+     <span class="status-pill" id="instantPlayPlaying" style="font-size:11px;font-weight:700;">🟢 LIVE · Playing | —</span>
+     <span id="instantDrawProgress" style="font-size:11px;opacity:.8;">0/20</span>
+     <button class="back-btn" id="instantPlayBackBtn" onclick="leaveInstantPlay()" disabled style="margin:0;">←</button>
    </div>
-   <div class="card" style="text-align:center;padding:14px;">
-     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-       <span class="status-pill" id="instantPlayPlaying" style="font-weight:700;">🟢 LIVE · Playing | —</span>
-       <span class="status-pill" id="instantDrawProgress">0 / 20</span>
-     </div>
-     <div style="margin:12px 0 6px;">
-       <div class="small" style="letter-spacing:.12em;opacity:.7;">LAST NUMBER</div>
-       <strong id="instantLastNumber" style="font-size:52px;line-height:1.1;color:var(--gold);display:inline-block;min-width:1.4em;">—</strong>
-     </div>
-     <div id="instantCalledBalls" class="called-numbers" style="min-height:44px;justify-content:center;"></div>
-     <p id="instantPlayStatus" class="small" style="margin-top:10px;">Waiting…</p>
+   <div class="card" style="text-align:center;padding:10px;position:relative;overflow:hidden;">
+     <div id="instantFlyingNumber" class="instant-fly-num hidden">—</div>
+     <strong id="instantLastNumber" style="font-size:36px;line-height:1.1;color:var(--gold);display:block;min-height:42px;">—</strong>
+     <div id="instantCalledBalls" class="called-numbers instant-balls-compact" style="min-height:52px;max-height:56px;overflow:hidden;justify-content:flex-start;flex-wrap:wrap;"></div>
+     <p id="instantPlayStatus" class="small" style="margin-top:6px;font-size:11px;">…</p>
    </div>
-   <div id="instantLiveCards" style="display:flex;flex-direction:column;gap:12px;margin-top:12px;"></div>
-   <div id="instantResultBanner" class="card hidden" style="margin-top:12px;text-align:center;"></div>
+   <div id="instantLiveCards" class="instant-cards-row"></div>
+   <div id="instantResultBanner" class="card hidden" style="margin-top:10px;text-align:center;padding:12px;"></div>
  </div>
 
  <div id="selectionBox" class="card hidden" style="padding-bottom:90px;">
@@ -958,6 +1004,6 @@ button:disabled { opacity:.55; cursor:not-allowed; }
   <div class="nav-item" onclick="switchTab('tabWallet',this)">💰<br><span data-i18n="navWallet">Wallet</span></div>
   <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
 </div>
-<script src="app.js?v=20260904-instant-v3"></script>
+<script src="app.js?v=20260904-instant-v4"></script>
 </body>
 </html>

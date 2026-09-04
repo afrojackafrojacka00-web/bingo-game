@@ -229,7 +229,7 @@ async function startPlay({ username, stake, cardNumbers }) {
 
     const bal = await pool.query('SELECT balance FROM users WHERE id = $1', [userId]);
 
-    return {
+    const payload = {
       success: true,
       sessionId: roundId,
       stake: s,
@@ -241,7 +241,38 @@ async function startPlay({ username, stake, cardNumbers }) {
       drawIntervalMs: 1000,
       numbersDrawn: numbersCount,
       playing: fakePlayers,
+      username,
     };
+    // Public live feed for spectators (no private balance)
+    liveSession = {
+      sessionId: roundId,
+      username,
+      stake: s,
+      drawnNumbers: drawn,
+      cards: cardResults.map((c) => ({
+        cardNumber: c.cardNumber,
+        grid: c.grid,
+        pattern: c.pattern,
+        multiplier: c.multiplier,
+        prize: c.prize,
+        hit: c.hit,
+        winningCells: c.winningCells,
+      })),
+      startedAt: Date.now(),
+      drawIntervalMs: 1000,
+    };
+    broadcastLive('instant_live_start', {
+      sessionId: roundId,
+      username,
+      stake: s,
+      cardCount: cardResults.length,
+      numbersDrawn: numbersCount,
+      drawIntervalMs: 1000,
+      drawnNumbers: drawn,
+      cards: liveSession.cards,
+      playing: fakePlayers,
+    });
+    return payload;
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -292,12 +323,95 @@ async function historyForUser(username, limit = 20) {
   }));
 }
 
+
+/** Top winners: day | week | all */
+async function getLeaderboard(period = 'day', limit = 20) {
+  let sinceSql = '';
+  if (period === 'day') sinceSql = "AND e.created_at >= date_trunc('day', NOW())";
+  else if (period === 'week') sinceSql = "AND e.created_at >= date_trunc('week', NOW())";
+  // all: no filter
+
+  const r = await pool.query(
+    `SELECT e.username,
+            e.card_number,
+            e.stake,
+            e.paid,
+            e.prize,
+            e.multiplier,
+            e.pattern,
+            e.winning_cells,
+            e.created_at,
+            r.drawn_numbers,
+            bc.grid
+     FROM instant_entries e
+     LEFT JOIN instant_rounds r ON r.id = e.round_id
+     LEFT JOIN bingo_cards bc ON bc.card_number = e.card_number
+     WHERE e.prize > 0 ${sinceSql}
+     ORDER BY e.prize DESC, e.created_at DESC
+     LIMIT $1`,
+    [limit]
+  );
+  return r.rows.map((row) => ({
+    username: row.username,
+    cardNumber: row.card_number,
+    stake: Number(row.stake),
+    paid: Number(row.paid),
+    prize: Number(row.prize),
+    multiplier: Number(row.multiplier || 0),
+    pattern: row.pattern,
+    winningCells: row.winning_cells || [],
+    drawnNumbers: row.drawn_numbers || [],
+    grid: row.grid || null,
+    date: row.created_at,
+  }));
+}
+
+let liveSession = null; // { sessionId, drawnNumbers, cards public, i, startedAt }
+
+function getLiveSession() {
+  return liveSession;
+}
+
+function broadcastLive(event, payload) {
+  if (ioNamespace) ioNamespace.emit(event, payload);
+}
+
+
 function attachInstantGame(io) {
   if (!io) return;
   ensureSchema().catch((e) => console.error('instant schema', e));
   ioNamespace = io.of('/instant');
   ioNamespace.on('connection', (socket) => {
     socket.emit('instant_players', { playing: fakePlayers });
+    if (liveSession) {
+      socket.emit('instant_live_start', {
+        sessionId: liveSession.sessionId,
+        username: liveSession.username,
+        stake: liveSession.stake,
+        cardCount: (liveSession.cards || []).length,
+        numbersDrawn: (liveSession.drawnNumbers || []).length,
+        drawIntervalMs: liveSession.drawIntervalMs || 1000,
+        drawnNumbers: liveSession.drawnNumbers,
+        cards: liveSession.cards,
+        playing: fakePlayers,
+        resume: true,
+      });
+    }
+    socket.on('instant_watch', () => {
+      socket.join('instant_watchers');
+      if (liveSession) {
+        socket.emit('instant_live_start', {
+          sessionId: liveSession.sessionId,
+          username: liveSession.username,
+          stake: liveSession.stake,
+          drawnNumbers: liveSession.drawnNumbers,
+          cards: liveSession.cards,
+          drawIntervalMs: liveSession.drawIntervalMs || 1000,
+          playing: fakePlayers,
+          resume: true,
+        });
+      }
+    });
   });
   console.log('Instant Bingo namespace /instant ready (solo play + shared wallet)');
 }
@@ -324,6 +438,8 @@ module.exports = {
   joinRound,
   settleRound,
   historyForUser,
+  getLeaderboard,
+  getLiveSession,
   stopScheduler,
   evaluateCard,
   drawNumbers,
