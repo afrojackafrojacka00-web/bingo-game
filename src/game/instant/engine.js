@@ -30,8 +30,9 @@ function stakes() {
 }
 
 async function ensureSchema() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS instant_rounds (
+  // Run statements one-by-one so a concurrent boot race does not abort the whole block.
+  const steps = [
+    `CREATE TABLE IF NOT EXISTS instant_rounds (
       id SERIAL PRIMARY KEY,
       stake NUMERIC(10,2) NOT NULL,
       status VARCHAR(20) NOT NULL DEFAULT 'OPEN',
@@ -40,8 +41,8 @@ async function ensureSchema() {
       created_at TIMESTAMPTZ DEFAULT NOW(),
       drawn_at TIMESTAMPTZ,
       completed_at TIMESTAMPTZ
-    );
-    CREATE TABLE IF NOT EXISTS instant_entries (
+    )`,
+    `CREATE TABLE IF NOT EXISTS instant_entries (
       id SERIAL PRIMARY KEY,
       round_id INT NOT NULL REFERENCES instant_rounds(id) ON DELETE CASCADE,
       user_id INT NOT NULL REFERENCES users(id),
@@ -54,11 +55,22 @@ async function ensureSchema() {
       prize NUMERIC(10,2) DEFAULT 0,
       winning_cells JSONB,
       created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-    CREATE INDEX IF NOT EXISTS idx_instant_entries_round ON instant_entries(round_id);
-    CREATE INDEX IF NOT EXISTS idx_instant_entries_user ON instant_entries(user_id, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_instant_rounds_status ON instant_rounds(status, stake);
-  `);
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_instant_entries_round ON instant_entries(round_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_instant_entries_user ON instant_entries(user_id, created_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_instant_rounds_status ON instant_rounds(status, stake)`,
+  ];
+  for (const sql of steps) {
+    try {
+      await pool.query(sql);
+    } catch (err) {
+      // Concurrent deploy can race on type/table create — safe to ignore "already exists"
+      if (err && (err.code === '23505' || err.code === '42P07' || /already exists/i.test(err.message))) {
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 async function getCardGrid(cardNumber) {

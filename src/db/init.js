@@ -123,11 +123,7 @@ await pool.query('ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS prize_pool 
         await pool.query('CREATE INDEX IF NOT EXISTS idx_game_sessions_created ON game_sessions(created_at DESC);');
         await pool.query('CREATE INDEX IF NOT EXISTS idx_game_sessions_stake_created ON game_sessions(stake, created_at DESC);');
         await pool.query('CREATE INDEX IF NOT EXISTS idx_game_sessions_status ON game_sessions(status);');
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_deposit_requests_status_created ON deposit_requests(status, created_at DESC);');
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_deposit_requests_created ON deposit_requests(created_at DESC);');
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_withdraw_requests_status_created ON withdraw_requests(status, created_at DESC);');
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_withdraw_requests_created ON withdraw_requests(created_at DESC);');
-        await pool.query('CREATE INDEX IF NOT EXISTS idx_transfer_requests_status_created ON transfer_requests(status, created_at DESC);');
+        // deposit/withdraw/transfer indexes are created AFTER those tables exist (below)
         await pool.query('CREATE INDEX IF NOT EXISTS idx_transactions_created ON transactions(created_at DESC);');
 
 
@@ -243,8 +239,13 @@ await pool.query('ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS prize_pool 
                 reviewed_at TIMESTAMP
             );
             CREATE INDEX IF NOT EXISTS idx_deposit_requests_status ON deposit_requests(status, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_deposit_requests_status_created ON deposit_requests(status, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_deposit_requests_created ON deposit_requests(created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_withdraw_requests_status ON withdraw_requests(status, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_withdraw_requests_status_created ON withdraw_requests(status, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_withdraw_requests_created ON withdraw_requests(created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_transfer_requests_status ON transfer_requests(status, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_transfer_requests_status_created ON transfer_requests(status, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_deposit_requests_user ON deposit_requests(user_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_withdraw_requests_user ON withdraw_requests(user_id, created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_transfer_requests_user ON transfer_requests(sender_id, created_at DESC);
