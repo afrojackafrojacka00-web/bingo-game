@@ -1,164 +1,2071 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Notification Panel</title>
+    <title>Bingo Admin Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: Arial, sans-serif; background: #121212; color: #fff; padding: 20px; margin: 0; }
-        .card { max-width: 600px; margin: 20px auto; background: #1e1e1e; padding: 20px; border-radius: 12px; }
-        h2, h3 { color: #0088cc; margin-top: 0; }
-        label { font-size: 13px; color: #aaa; margin-top: 10px; display: block; }
-        input, textarea, select, button { width: 100%; padding: 12px; margin-top: 6px; border-radius: 8px; border: 1px solid #333; background: #2a2a2a; color: white; box-sizing: border-box; }
-        select { cursor: pointer; }
-        button { background: #0088cc; font-weight: bold; cursor: pointer; border: none; margin-top: 12px; }
-        .post-card { background: #252525; border: 1px solid #333; border-radius: 8px; padding: 12px; margin-top: 12px; }
-        .post-card img { max-width: 100%; max-height: 140px; border-radius: 6px; margin-top: 8px; object-fit: cover; }
-        .btn-group { display: flex; gap: 8px; margin-top: 8px; }
-        .btn-edit { background: #e6a100; }
-        .btn-delete { background: #ff4d4d; }
+:root, [data-theme="dark"] {
+  --bg: #0b0f14;
+  --bg-elevated: #111821;
+  --sidebar: #0e141c;
+  --card: #151d27;
+  --card-hover: #1a2430;
+  --border: #243041;
+  --border-light: #2c3b4f;
+  --text: #e8eef6;
+  --text-secondary: #9aa8bc;
+  --muted: #6b7a90;
+  --input-bg: #0f1620;
+  --input-border: #2a3a4d;
+  --blue: #3b82f6;
+  --blue-hover: #2563eb;
+  --blue-soft: rgba(59, 130, 246, 0.12);
+  --green: #22c55e;
+  --green-soft: rgba(34, 197, 94, 0.12);
+  --red: #ef4444;
+  --red-soft: rgba(239, 68, 68, 0.12);
+  --gold: #f59e0b;
+  --gold-soft: rgba(245, 158, 11, 0.12);
+  --purple: #a78bfa;
+  --purple-soft: rgba(167, 139, 250, 0.12);
+  --cyan: #22d3ee;
+  --shadow: 0 8px 24px rgba(0,0,0,0.35);
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+[data-theme="light"] {
+  --bg: #f3f5f8;
+  --bg-elevated: #ffffff;
+  --sidebar: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f8fafc;
+  --border: #e2e8f0;
+  --border-light: #cbd5e1;
+  --text: #0f172a;
+  --text-secondary: #475569;
+  --muted: #64748b;
+  --input-bg: #f8fafc;
+  --input-border: #cbd5e1;
+  --blue: #2563eb;
+  --blue-hover: #1d4ed8;
+  --blue-soft: rgba(37, 99, 235, 0.1);
+  --green: #16a34a;
+  --green-soft: rgba(22, 163, 74, 0.1);
+  --red: #dc2626;
+  --red-soft: rgba(220, 38, 38, 0.1);
+  --gold: #d97706;
+  --gold-soft: rgba(217, 119, 6, 0.1);
+  --purple: #7c3aed;
+  --purple-soft: rgba(124, 58, 237, 0.1);
+  --cyan: #0891b2;
+  --shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  font-size: 14px;
+  display: flex;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+button:focus:not(:focus-visible),
+a:focus:not(:focus-visible) { outline: none; }
+.sidebar {
+  width: 240px;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: 0; left: 0; bottom: 0;
+  z-index: 50;
+  transition: transform 0.2s ease;
+}
+.sidebar-brand {
+  padding: 20px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.sidebar-brand .logo {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--blue), var(--purple));
+  display: grid; place-items: center;
+  font-weight: 700; font-size: 16px; color: #fff;
+}
+.sidebar-brand h1 { font-size: 15px; font-weight: 700; letter-spacing: -0.02em; }
+.sidebar-brand span { font-size: 11px; color: var(--muted); display: block; }
+.nav { padding: 12px 10px; flex: 1; overflow-y: auto; }
+.nav-section {
+  font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted);
+  padding: 12px 10px 6px;
+}
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  color: var(--text-secondary); cursor: pointer;
+  transition: all 0.15s ease; border: none; background: none;
+  width: 100%; text-align: left; font-size: 13.5px; font-weight: 500;
+  font-family: inherit;
+}
+.nav-item:hover { background: var(--card-hover); color: var(--text); }
+.nav-item.active { background: var(--blue-soft); color: var(--blue); }
+.nav-item .icon { width: 18px; text-align: center; font-size: 15px; opacity: 0.9; }
+.nav-item .badge {
+  margin-left: auto; background: var(--red); color: #fff;
+  font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 99px;
+  min-width: 18px; text-align: center;
+}
+.main {
+  flex: 1; margin-left: 240px;
+  display: flex; flex-direction: column; min-height: 100vh;
+}
+.topbar {
+  position: sticky; top: 0; z-index: 40;
+  background: rgba(11, 15, 20, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+}
+[data-theme="light"] .topbar { background: rgba(255,255,255,0.9); }
+.topbar-title { font-size: 16px; font-weight: 600; flex: 1; min-width: 120px; }
+.secret-wrap {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--input-bg); border: 1px solid var(--input-border);
+  border-radius: var(--radius-sm); padding: 4px 4px 4px 12px;
+}
+.secret-wrap label { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.secret-wrap input {
+  background: transparent; border: none; color: var(--text);
+  padding: 6px 8px; width: 180px; outline: none; font-family: inherit; font-size: 13px;
+}
+.btn-icon {
+  width: 36px; height: 36px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--card);
+  color: var(--text); cursor: pointer; display: grid; place-items: center;
+  font-size: 16px; transition: background 0.15s;
+}
+.btn-icon:hover { background: var(--card-hover); }
+.content { padding: 24px; flex: 1; }
+.panel { display: none; animation: fadeIn 0.2s ease; }
+.panel.active { display: block; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px; margin-bottom: 24px;
+}
+.stat-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px 18px;
+  transition: border-color 0.15s;
+}
+.stat-card:hover { border-color: var(--border-light); }
+.stat-label { font-size: 12px; color: var(--muted); font-weight: 500; margin-bottom: 6px; }
+.stat-value { font-size: 24px; font-weight: 700; letter-spacing: -0.03em; }
+.stat-value.blue { color: var(--blue); }
+.stat-value.green { color: var(--green); }
+.stat-value.gold { color: var(--gold); }
+.stat-value.red { color: var(--red); }
+.stat-value.purple { color: var(--purple); }
+.stat-value.cyan { color: var(--cyan); }
+.card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 20px; margin-bottom: 18px;
+  box-shadow: var(--shadow);
+}
+.card-header {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 16px; flex-wrap: wrap;
+}
+.card-header h2 {
+  font-size: 15px; font-weight: 600; color: var(--text);
+  display: flex; align-items: center; gap: 8px;
+}
+.card-header h2 .emoji { font-size: 16px; }
+.form-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+.form-group { display: flex; flex-direction: column; gap: 6px; }
+.form-group.full { grid-column: 1 / -1; }
+label { font-size: 12px; font-weight: 500; color: var(--text-secondary); }
+input, textarea, select {
+  width: 100%; padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--input-border);
+  background: var(--input-bg); color: var(--text);
+  font-family: inherit; font-size: 13.5px;
+  transition: border-color 0.15s;
+}
+input:focus, textarea:focus, select:focus { outline: none; border-color: var(--blue); }
+textarea { resize: vertical; min-height: 80px; }
+select { cursor: pointer; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 16px; border-radius: var(--radius-sm);
+  border: none; font-family: inherit; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s; white-space: nowrap;
+}
+.btn-primary { background: var(--blue); color: #fff; }
+.btn-primary:hover { background: var(--blue-hover); }
+.btn-secondary { background: var(--card-hover); color: var(--text); border: 1px solid var(--border); }
+.btn-secondary:hover { border-color: var(--border-light); }
+.btn-success { background: var(--green); color: #fff; }
+.btn-danger { background: var(--red); color: #fff; }
+.btn-warning { background: var(--gold); color: #fff; }
+.btn-sm { padding: 6px 10px; font-size: 12px; }
+.btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+.table-wrap { overflow-x: auto; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.data th {
+  text-align: left; padding: 10px 12px;
+  background: var(--bg-elevated); color: var(--muted);
+  font-weight: 600; font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.04em; border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+table.data td {
+  padding: 10px 12px; border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+table.data tr:last-child td { border-bottom: none; }
+table.data tr:hover td { background: var(--card-hover); }
+.badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 8px; border-radius: 99px; font-size: 11px; font-weight: 600;
+}
+.badge-pending { background: var(--gold-soft); color: var(--gold); }
+.badge-approved, .badge-success { background: var(--green-soft); color: var(--green); }
+.badge-rejected, .badge-danger { background: var(--red-soft); color: var(--red); }
+.badge-info { background: var(--blue-soft); color: var(--blue); }
+.badge-muted { background: var(--card-hover); color: var(--muted); }
+.mono { font-variant-numeric: tabular-nums; font-family: ui-monospace, monospace; font-size: 12.5px; }
+.muted { color: var(--muted); }
+.text-green { color: var(--green); }
+.text-red { color: var(--red); }
+.search-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.search-bar input { width: 220px; max-width: 100%; }
+.pagination {
+  display: flex; align-items: center; gap: 8px; margin-top: 14px;
+  justify-content: flex-end; flex-wrap: wrap;
+}
+.pagination span { font-size: 12px; color: var(--muted); }
+.status-msg { margin-top: 10px; font-weight: 600; font-size: 13px; min-height: 1.2em; }
+.item-card {
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 14px; margin-top: 10px;
+}
+.item-card img {
+  max-width: 100%; max-height: 140px; border-radius: 6px;
+  margin-top: 8px; object-fit: cover;
+}
+.item-meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.collapse-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 8px; padding: 4px 10px; font-size: 12px; font-weight: 600;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--text); cursor: pointer; user-select: none;
+}
+.collapse-toggle:hover { background: var(--bg-elevated); }
+.collapse-toggle .collapse-icon {
+  display: inline-block; width: 14px; text-align: center;
+  font-weight: 700; transition: transform 0.15s ease;
+}
+.collapse-body { display: none; margin-top: 6px; }
+.collapse-body.open { display: block; }
+.winner-split-badge {
+  display: inline-block; font-size: 11px; font-weight: 700;
+  padding: 2px 8px; border-radius: 999px;
+  background: rgba(0, 210, 106, 0.15); color: #00d26a;
+  margin-left: 6px; vertical-align: middle;
+}
+.winner-list-item {
+  padding: 4px 0; font-size: 12px; border-bottom: 1px solid var(--border);
+}
+.winner-list-item:last-child { border-bottom: none; }
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+  z-index: 100; display: none; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.modal-backdrop.open { display: flex; }
+.modal {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); width: 100%; max-width: 560px;
+  max-height: 85vh; overflow-y: auto; padding: 22px; box-shadow: var(--shadow);
+}
+.modal h3 { font-size: 16px; margin-bottom: 14px; }
+.detail-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px;
+  margin-bottom: 16px;
+}
+.detail-grid .label { font-size: 11px; color: var(--muted); }
+.detail-grid .value { font-size: 13.5px; font-weight: 500; word-break: break-all; }
+.empty { text-align: center; padding: 32px 16px; color: var(--muted); font-size: 13px; }
+.checkbox-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; }
+.checkbox-row input[type="checkbox"] { width: auto; }
+
+/* Custom red/green ON-OFF switch */
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  flex-wrap: wrap;
+}
+.switch {
+  position: relative;
+  width: 56px;
+  height: 30px;
+  flex-shrink: 0;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+.switch-slider {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  background: var(--red);
+  border-radius: 999px;
+  transition: background 0.2s ease;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15);
+}
+.switch-slider::before {
+  content: '';
+  position: absolute;
+  height: 24px;
+  width: 24px;
+  left: 3px;
+  top: 3px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+}
+.switch input:checked + .switch-slider {
+  background: var(--green);
+}
+.switch input:checked + .switch-slider::before {
+  transform: translateX(26px);
+}
+.switch-state {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  min-width: 36px;
+}
+.switch-state.on { color: var(--green); }
+.switch-state.off { color: var(--red); }
+.switch-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.mobile-toggle {
+  display: none; width: 36px; height: 36px;
+  border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--card); color: var(--text); cursor: pointer; font-size: 18px;
+}
+@media (max-width: 860px) {
+  .sidebar { transform: translateX(-100%); }
+  .sidebar.open { transform: translateX(0); }
+  .main { margin-left: 0; }
+  .mobile-toggle { display: grid; place-items: center; }
+  .secret-wrap input { width: 120px; }
+  .detail-grid { grid-template-columns: 1fr; }
+}
     </style>
 </head>
 <body>
-
-    <div class="card">
-        <h2>📢 Create Announcement</h2>
-        <label>Admin Secret Key</label>
-        <input type="password" id="secret" placeholder="Enter ADMIN_SECRET">
-
-        <label>Target Audience / Destination</label>
-        <select id="destination">
-            <option value="BOTH">All (Telegram & App Notifications)</option>
-            <option value="TELEGRAM_ONLY">Telegram Users Only (No Web Notification)</option>
-            <option value="APP_ONLY">App Notifications Only (No Telegram)</option>
-        </select>
-
-        <label>Message Text (HTML Supported)</label>
-        <textarea id="message" rows="3" placeholder="Announcement body..."></textarea>
-
-        <label>Upload Image File</label>
-        <input type="file" id="fileInput" accept="image/*">
-
-        <label>OR Image URL</label>
-        <input type="url" id="imageUrl" placeholder="https://example.com/banner.jpg">
-
-        <button onclick="sendBroadcast()">Publish Broadcast 🚀</button>
-        <div id="status" style="margin-top: 10px; font-weight: bold;"></div>
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-brand">
+    <div class="logo">B</div>
+    <div>
+      <h1>Bingo Admin</h1>
+      <span>Control panel</span>
     </div>
-
-    <div class="card">
-        <h3>📋 Manage Existing Posts</h3>
-        <button onclick="loadPosts()" style="background: #333;">Fetch / Refresh Posts 🔄</button>
-        <div id="postsList"></div>
+  </div>
+  <nav class="nav">
+    <div class="nav-section">Overview</div>
+    <button class="nav-item active" data-panel="dashboard"><span class="icon">📊</span> Dashboard</button>
+    <button class="nav-item" data-panel="users"><span class="icon">👥</span> Users <span class="badge" id="navUserCount" style="display:none">0</span></button>
+    <div class="nav-section">Wallet</div>
+    <button class="nav-item" data-panel="deposits"><span class="icon">💰</span> Deposits <span class="badge" id="navDepCount" style="display:none">0</span></button>
+    <button class="nav-item" data-panel="withdraws"><span class="icon">💸</span> Withdrawals <span class="badge" id="navWdrCount" style="display:none">0</span></button>
+    <button class="nav-item" data-panel="transfers"><span class="icon">🔁</span> Transfers <span class="badge" id="navTrfCount" style="display:none">0</span></button>
+    <button class="nav-item" data-panel="payments"><span class="icon">💳</span> Payment Methods</button>
+    <button class="nav-item" data-panel="autoverify"><span class="icon">🔐</span> Auto-Verify</button>
+    <div class="nav-section">Engagement</div>
+    <button class="nav-item" data-panel="announcements"><span class="icon">📢</span> Announcements</button>
+    <button class="nav-item" data-panel="referrals"><span class="icon">🎁</span> Referrals</button>
+    <button class="nav-item" data-panel="welcomebonus"><span class="icon">🎉</span> Welcome Bonus</button>
+    <div class="nav-section">Game</div>
+    <button class="nav-item" data-panel="gamesettings"><span class="icon">🎮</span> Game Settings</button>
+    <button class="nav-item" data-panel="rake"><span class="icon">🏦</span> House Cut %</button>
+    <button class="nav-item" data-panel="gamerooms"><span class="icon">🟢</span> Game Rooms</button>
+    <button class="nav-item" data-panel="gamehistory"><span class="icon">📜</span> Game History</button>
+    <button class="nav-item" data-panel="houseprofit"><span class="icon">💰</span> House Profit</button>
+  </nav>
+</aside>
+<div class="main">
+  <header class="topbar">
+    <button class="mobile-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')" aria-label="Menu">☰</button>
+    <div class="topbar-title" id="pageTitle">Dashboard</div>
+    <div class="secret-wrap">
+      <label>Admin key</label>
+      <input type="password" id="secret" placeholder="ADMIN_SECRET" autocomplete="off">
     </div>
+    <button class="btn-icon" id="themeToggle" title="Toggle theme">🌙</button>
+    <button class="btn btn-secondary btn-sm" onclick="refreshAll()">Refresh</button>
+  </header>
+  <div class="content">
+    <section class="panel active" id="panel-dashboard">
+      <div class="stats-grid" id="statsGrid">
+        <div class="stat-card"><div class="stat-label">Total Users</div><div class="stat-value blue" id="statUsers">—</div></div>
+        <div class="stat-card"><div class="stat-label">Total Balance</div><div class="stat-value green" id="statBalance">—</div></div>
+        <div class="stat-card"><div class="stat-label">Total Bonus</div><div class="stat-value gold" id="statBonus">—</div></div>
+        <div class="stat-card"><div class="stat-label">Pending Deposits</div><div class="stat-value gold" id="statPendDep">—</div></div>
+        <div class="stat-card"><div class="stat-label">Pending Withdrawals</div><div class="stat-value red" id="statPendWdr">—</div></div>
+        <div class="stat-card"><div class="stat-label">Pending Transfers</div><div class="stat-value purple" id="statPendTrf">—</div></div>
+        <div class="stat-card"><div class="stat-label">Active Games</div><div class="stat-value cyan" id="statGames">—</div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2><span class="emoji">📅</span> Today</h2></div>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-label">Deposits requested today</div><div class="stat-value gold" id="statDepToday">—</div></div>
+          <div class="stat-card"><div class="stat-label">Withdrawals requested today</div><div class="stat-value red" id="statWdrToday">—</div></div>
+          <div class="stat-card"><div class="stat-label">Transfers today</div><div class="stat-value purple" id="statTrfToday">—</div></div>
+          <div class="stat-card"><div class="stat-label">Transfers approved today</div><div class="stat-value green" id="statTrfOkToday">—</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2><span class="emoji">🆕</span> New users</h2></div>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-label">Today</div><div class="stat-value blue" id="statNewToday">—</div></div>
+          <div class="stat-card"><div class="stat-label">This week</div><div class="stat-value blue" id="statNewWeek">—</div></div>
+          <div class="stat-card"><div class="stat-label">This month</div><div class="stat-value blue" id="statNewMonth">—</div></div>
+          <div class="stat-card"><div class="stat-label">Last 6 months</div><div class="stat-value blue" id="statNew6m">—</div></div>
+          <div class="stat-card"><div class="stat-label">Last 1 year</div><div class="stat-value blue" id="statNewYear">—</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2><span class="emoji">🟢</span> Active users (by last activity)</h2></div>
+        <div class="stats-grid">
+          <div class="stat-card"><div class="stat-label">Last 1 hour</div><div class="stat-value cyan" id="statAct1h">—</div></div>
+          <div class="stat-card"><div class="stat-label">Last 2 hours</div><div class="stat-value cyan" id="statAct2h">—</div></div>
+          <div class="stat-card"><div class="stat-label">Last 6 hours</div><div class="stat-value cyan" id="statAct6h">—</div></div>
+          <div class="stat-card"><div class="stat-label">Last 12 hours</div><div class="stat-value cyan" id="statAct12h">—</div></div>
+          <div class="stat-card"><div class="stat-label">Last 24 hours</div><div class="stat-value cyan" id="statAct24h">—</div></div>
+          <div class="stat-card"><div class="stat-label">This week</div><div class="stat-value cyan" id="statActWeek">—</div></div>
+        </div>
+        <p class="muted" style="margin-top:10px;font-size:12px;">Activity is updated when users log in (web or Telegram). Historical users may show as inactive until they log in again.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2><span class="emoji">⚡</span> Quick actions</h2></div>
+        <div class="btn-group">
+          <button class="btn btn-primary btn-sm" onclick="showPanel('users')">View users</button>
+          <button class="btn btn-secondary btn-sm" onclick="showPanel('deposits')">Review deposits</button>
+          <button class="btn btn-secondary btn-sm" onclick="showPanel('withdraws')">Review withdrawals</button>
+          <button class="btn btn-secondary btn-sm" onclick="showPanel('announcements')">Send announcement</button>
+        </div>
+        <p class="muted" style="margin-top:14px;font-size:12px;">Enter your admin secret key in the top bar, then data loads automatically.</p>
+      </div>
+    </section>
+    <section class="panel" id="panel-users">
+      <div class="card">
+        <div class="card-header">
+          <h2><span class="emoji">👥</span> All Users <span class="muted" id="usersTotalLabel" style="font-weight:500;font-size:13px;"></span></h2>
+          <div class="search-bar">
+            <input type="search" id="userSearch" placeholder="Search username, phone, telegram…">
+            <input type="date" id="userFrom" title="Joined from">
+            <input type="date" id="userTo" title="Joined to">
+            <select id="userActiveWithin" style="width:auto;min-width:140px;">
+              <option value="">Any activity</option>
+              <option value="1h">Active 1h</option>
+              <option value="2h">Active 2h</option>
+              <option value="6h">Active 6h</option>
+              <option value="12h">Active 12h</option>
+              <option value="24h">Active 24h</option>
+              <option value="week">Active this week</option>
+            </select>
+            <select id="usersPageSize" title="Rows per page">
+              <option value="10" selected>10</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+              <option value="500">500</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" onclick="loadUsers(1)">Search</button>
+            <button class="btn btn-secondary btn-sm" onclick="loadUsers(usersPage)">↻</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="data" id="usersTable">
+            <thead>
+              <tr>
+                <th>ID</th><th>Username</th><th>Display</th><th>Phone</th><th>Balance</th><th>Bonus</th>
+                <th>Wins</th><th>Referrals</th><th>Telegram</th><th>Joined</th><th>Last active</th><th>Auto-verify</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="usersBody">
+              <tr><td colspan="13" class="empty">Enter admin secret to load users.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination" id="usersPagination"></div>
+      </div>
+    </section>
+    <section class="panel" id="panel-deposits">
+      <div class="card">
+        <div class="card-header">
+          <h2><span class="emoji">💰</span> Deposit Requests</h2>
+          <div class="search-bar">
+            <input type="search" id="depQ" placeholder="Username…" style="width:140px;">
+            <select id="depStatus" style="width:auto;"><option value="">All status</option><option value="PENDING">Pending</option><option value="APPROVED">Approved</option><option value="REJECTED">Rejected</option></select>
+            <input type="date" id="depFrom"><input type="date" id="depTo">
+            <select id="depPageSize" title="Rows per page">
+              <option value="10" selected>10</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+              <option value="500">500</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" onclick="loadDepositRequests(1)">Filter</button>
+            <button class="btn btn-secondary btn-sm" onclick="loadDepositRequests()">↻</button>
+          </div>
+        </div>
+        <div class="stats-grid" id="depApprovedStats" style="margin-bottom:14px;">
+          <div class="stat-card"><div class="stat-label">Approved today</div><div class="stat-value green" id="depApprToday">—</div></div>
+          <div class="stat-card"><div class="stat-label">Approved this week</div><div class="stat-value green" id="depApprWeek">—</div></div>
+          <div class="stat-card"><div class="stat-label">Approved this month</div><div class="stat-value green" id="depApprMonth">—</div></div>
+        </div>
+        <div id="depositRequestsList"><div class="empty">Enter admin secret to load.</div></div>
+        <div class="pagination" id="depPagination"></div>
+      </div>
+    </section>
+    <section class="panel" id="panel-withdraws">
+      <div class="card">
+        <div class="card-header">
+          <h2><span class="emoji">💸</span> Withdraw Requests</h2>
+          <div class="search-bar">
+            <input type="search" id="wdrQ" placeholder="Username…" style="width:140px;">
+            <select id="wdrStatus" style="width:auto;"><option value="">All status</option><option value="PENDING">Pending</option><option value="APPROVED">Approved</option><option value="REJECTED">Rejected</option></select>
+            <input type="date" id="wdrFrom"><input type="date" id="wdrTo">
+            <select id="wdrPageSize" title="Rows per page">
+              <option value="10" selected>10</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+              <option value="500">500</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" onclick="loadWithdrawRequests(1)">Filter</button>
+            <button class="btn btn-secondary btn-sm" onclick="loadWithdrawRequests()">↻</button>
+          </div>
+        </div>
+        <div class="stats-grid" id="wdrApprovedStats" style="margin-bottom:14px;">
+          <div class="stat-card"><div class="stat-label">Approved today</div><div class="stat-value green" id="wdrApprToday">—</div></div>
+          <div class="stat-card"><div class="stat-label">Approved this week</div><div class="stat-value green" id="wdrApprWeek">—</div></div>
+          <div class="stat-card"><div class="stat-label">Approved this month</div><div class="stat-value green" id="wdrApprMonth">—</div></div>
+        </div>
+        <div id="withdrawRequestsList"><div class="empty">Enter admin secret to load.</div></div>
+        <div class="pagination" id="wdrPagination"></div>
+      </div>
+    </section>
+    <section class="panel" id="panel-transfers">
+      <div class="card">
+        <div class="card-header">
+          <h2><span class="emoji">🔁</span> Transfer Requests</h2>
+          <div class="search-bar">
+            <input type="search" id="trfQ" placeholder="From / to / phone…" style="width:160px;">
+            <select id="trfStatus" style="width:auto;"><option value="">All status</option><option value="PENDING">Pending</option><option value="APPROVED">Approved</option><option value="REJECTED">Rejected</option></select>
+            <input type="date" id="trfFrom"><input type="date" id="trfTo">
+            <button class="btn btn-secondary btn-sm" onclick="loadTransferRequests(1)">Filter</button>
+            <button class="btn btn-secondary btn-sm" onclick="loadTransferRequests()">↻</button>
+          </div>
+        </div>
+        <div id="transferRequestsList"><div class="empty">Enter admin secret to load.</div></div>
+        <div class="pagination" id="trfPagination"></div>
+      </div>
+    </section>
+    <section class="panel" id="panel-payments">
+      <div class="card">
+        <div class="card-header"><h2><span class="emoji">💳</span> Payment Methods</h2></div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Method</label>
+            <select id="pmMethod"><option value="telebirr">Telebirr</option><option value="cbe">CBE</option></select>
+          </div>
+          <div class="form-group">
+            <label>Account Number</label>
+            <input id="pmNumber" placeholder="e.g. 0987655443">
+          </div>
+          <div class="form-group">
+            <label>Account Name</label>
+            <input id="pmName" placeholder="e.g. Jack">
+          </div>
+        </div>
+        <div style="margin-top:14px;"><button class="btn btn-primary" onclick="addPaymentMethod()">Add Account</button></div>
+        <div id="paymentMethodsList" style="margin-top:18px;"></div>
+      </div>
+    </section>
+    <section class="panel" id="panel-autoverify">
+      <div class="card">
+        <div class="card-header"><h2><span class="emoji">🔐</span> Deposit Auto-Verification</h2></div>
+        <p class="muted" style="margin-bottom:14px;font-size:13px;line-height:1.55;">
+          Global switch applies to <strong>all users</strong>. You can still turn auto-verify off for individual accounts in the Users table.
+          A deposit is auto-verified only when <em>both</em> global and that user’s setting are On.
+        </p>
+        <div class="switch-row">
+          <label class="switch" title="Global auto-verify">
+            <input id="autoVerifyEnabled" type="checkbox" onchange="syncSwitchLabel(this, 'autoVerifyState')">
+            <span class="switch-slider"></span>
+          </label>
+          <span id="autoVerifyState" class="switch-state off">OFF</span>
+          <span class="switch-label">Auto-verify for all users (global)</span>
+        </div>
+        <div class="btn-group" style="margin-top:14px;">
+          <button class="btn btn-primary" onclick="saveAutoVerifySettings()">Save global setting</button>
+          <button class="btn btn-secondary btn-sm" onclick="showPanel('users')">Manage per-user</button>
+        </div>
+        <p id="autoVerifyStatus" class="muted" style="margin-top:12px;font-size:12px;"></p>
+      </div>
+    </section>
+    <section class="panel" id="panel-announcements">
+      <div class="card">
+        <div class="card-header"><h2><span class="emoji">📢</span> Create Announcement</h2></div>
+        <div class="form-grid">
+          <div class="form-group full">
+            <label>Target Audience</label>
+            <select id="destination">
+              <option value="BOTH">All (Telegram &amp; App Notifications)</option>
+              <option value="TELEGRAM_ONLY">Telegram Users Only</option>
+              <option value="APP_ONLY">App Notifications Only</option>
+            </select>
+          </div>
+          <div class="form-group full">
+            <label>Message Text (HTML Supported)</label>
+            <textarea id="message" rows="3" placeholder="Announcement body…"></textarea>
+          </div>
+          <div class="form-group">
+            <label>Upload Image</label>
+            <input type="file" id="fileInput" accept="image/*">
+          </div>
+          <div class="form-group">
+            <label>Or Image URL</label>
+            <input type="url" id="imageUrl" placeholder="https://example.com/banner.jpg">
+          </div>
+        </div>
+        <button class="btn btn-primary" style="margin-top:14px;" onclick="sendBroadcast()">Publish Broadcast 🚀</button>
+        <div id="status" class="status-msg"></div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <h2><span class="emoji">📋</span> Existing Posts</h2>
+          <div class="search-bar">
+            <input type="date" id="postFrom"><input type="date" id="postTo">
+            <button class="btn btn-primary btn-sm" id="postsToggleBtn" onclick="togglePosts()">Show posts</button>
+            <button class="btn btn-secondary btn-sm" onclick="loadPosts(1)" id="postsRefreshBtn" style="display:none;">↻</button>
+          </div>
+        </div>
+        <div id="postsList" style="display:none;"><div class="empty">Click “Show posts” to load.</div></div>
+        <div class="pagination" id="postsPagination" style="display:none;"></div>
+      </div>
+    </section>
+    
+    <section class="panel" id="panel-welcomebonus">
+      <div class="card">
+        <div class="card-header"><h2><span class="emoji">🎉</span> Telegram Welcome Bonus</h2></div>
+        <p class="muted" style="margin-bottom:14px;font-size:13px;line-height:1.55;">
+          When a <strong>new</strong> user creates an account via the Telegram Mini App, they can receive a starting balance bonus.
+          Existing users are not affected. Turn off to give <strong>0</strong> bonus to new signups.
+        </p>
+        <div class="switch-row">
+          <label class="switch" title="Welcome bonus">
+            <input id="welcomeBonusEnabled" type="checkbox" onchange="syncSwitchLabel(this, 'welcomeBonusState')">
+            <span class="switch-slider"></span>
+          </label>
+          <span id="welcomeBonusState" class="switch-state off">OFF</span>
+          <span class="switch-label">Welcome bonus for new Telegram users</span>
+        </div>
+        <div class="form-grid" style="margin-top:12px;">
+          <div class="form-group">
+            <label>Bonus amount (Birr)</label>
+            <input id="welcomeBonusAmount" type="number" min="0" step="0.01" value="10">
+          </div>
+        </div>
+        <button class="btn btn-primary" style="margin-top:14px;" onclick="saveWelcomeBonusSettings()">Save Welcome Bonus</button>
+        <p id="welcomeBonusStatus" class="muted" style="margin-top:10px;font-size:12px;"></p>
+      </div>
+    </section>
+<section class="panel" id="panel-referrals">
+      <div class="card">
+        <div class="card-header"><h2><span class="emoji">🎁</span> Referral Program Settings</h2></div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Referrals required per bonus</label>
+            <input id="refRequired" type="number" min="1" value="100">
+          </div>
+          <div class="form-group">
+            <label>Reward amount (Birr)</label>
+            <input id="refReward" type="number" min="0" value="500">
+          </div>
+        </div>
+        <button class="btn btn-primary" style="margin-top:14px;" onclick="saveReferralSettings()">Save Referral Settings</button>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <h2><span class="emoji">🏆</span> Referral Leaderboard</h2>
+          <div class="search-bar">
+            <input type="search" id="refQ" placeholder="Username…" style="width:140px;">
+            <input type="date" id="refFrom"><input type="date" id="refTo">
+            <button class="btn btn-secondary btn-sm" onclick="loadReferralLeaderboard(1)">Filter</button>
+            <button class="btn btn-secondary btn-sm" onclick="loadReferralLeaderboard()">↻</button>
+          </div>
+        </div>
+        <div id="referralLeaderboard"><div class="empty">Enter secret to load.</div></div>
+        <div class="pagination" id="refPagination"></div>
+      </div>
+    </section>
+    
+    <section class="panel" id="panel-rake">
+      <div class="card">
+        <div class="card-header"><h2><span class="emoji">🏦</span> House Cut by Room</h2></div>
+        <p class="muted" style="margin-bottom:14px;font-size:13px;line-height:1.5;">
+          Percent taken from the prize pot when a game finishes. Cut is locked when the game <strong>starts</strong> (play room). Lobby leavers still get refunds. Default is 20% per room.
+        </p>
+        <div id="rakeSettingsList" class="form-grid"></div>
+        <button class="btn btn-primary" style="margin-top:14px;" onclick="saveRakeSettings()">Save House Cut %</button>
+      </div>
+    </section>
 
-    <script>
-        async function sendBroadcast() {
-            const adminSecret = document.getElementById('secret').value;
-            const destination = document.getElementById('destination').value;
-            const message = document.getElementById('message').value;
-            const imageUrl = document.getElementById('imageUrl').value;
-            const fileInput = document.getElementById('fileInput');
-            const status = document.getElementById('status');
+    
+    <section class="panel" id="panel-gamerooms">
+      <div class="card">
+        <div class="card-header">
+          <h2><span class="emoji">🟢</span> Live game rooms</h2>
+          <button class="btn btn-ghost btn-sm" onclick="loadLiveRoomsOnly()">Refresh</button>
+        </div>
+        <div id="liveRoomsList" class="empty">Enter admin key and open this page.</div>
+      </div>
+    </section>
 
-            if (!adminSecret) return alert("Please enter your Admin Secret key.");
+    <section class="panel" id="panel-gamehistory">
+      <div class="card">
+        <div class="card-header"><h2><span class="emoji">📜</span> Game history</h2></div>
+        <div class="toolbar">
+          <input id="gamesQ" placeholder="Winner username">
+          <select id="gamesStatus">
+            <option value="">All statuses</option>
+            <option value="COMPLETED">Completed</option>
+            <option value="EXHAUSTED">Exhausted</option>
+            <option value="IN_PROGRESS">In progress (DB)</option>
+          </select>
+          <select id="gamesStake">
+            <option value="">All rooms</option>
+            <option value="10">10 Birr</option>
+            <option value="20">20 Birr</option>
+            <option value="50">50 Birr</option>
+            <option value="100">100 Birr</option>
+            <option value="200">200 Birr</option>
+            <option value="500">500 Birr</option>
+          </select>
+          <input id="gamesFrom" type="date">
+          <input id="gamesTo" type="date">
+          <select id="gamesPageSize" title="Rows per load">
+            <option value="10" selected>10</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+            <option value="500">500</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" onclick="loadAdminGames(1, true)">Filter</button>
+        </div>
+        <div id="gamesList" class="empty">Load games…</div>
+        <div class="pagination" id="gamesPager"></div>
+      </div>
+    </section>
 
-            const formData = new FormData();
-            formData.append('adminSecret', adminSecret);
-            formData.append('destination', destination);
-            formData.append('message', message);
-            formData.append('imageUrl', imageUrl);
-            if (fileInput.files[0]) formData.append('imageFile', fileInput.files[0]);
-
-            status.style.color = '#0088cc';
-            status.innerText = "Publishing post...";
-
-            try {
-                const res = await fetch('/api/admin/broadcast', { method: 'POST', body: formData });
-                const data = await res.json();
-                status.style.color = data.success ? '#00d26a' : '#ff4d4d';
-                status.innerText = data.message;
-                if (data.success) {
-                    document.getElementById('message').value = '';
-                    document.getElementById('imageUrl').value = '';
-                    fileInput.value = '';
-                    loadPosts();
-                }
-            } catch (err) {
-                status.innerText = "Network error while broadcasting.";
-            }
-        }
-
-        async function loadPosts() {
-            const adminSecret = document.getElementById('secret').value;
-            const list = document.getElementById('postsList');
-            if (!adminSecret) return list.innerHTML = `<p style="color: #ff4d4d;">Enter Secret Key above to load posts.</p>`;
-
-            try {
-                const res = await fetch('/api/admin/notifications', {
-                    headers: { 'x-admin-secret': adminSecret }
-                });
-                const data = await res.json();
-
-                if (!data.success) return list.innerHTML = `<p style="color:#ff4d4d;">${data.message}</p>`;
-
-                list.innerHTML = data.notifications.map(post => `
-                    <div class="post-card">
-                        <textarea id="msg_${post.id}" rows="2">${post.message}</textarea>
-                        <input type="text" id="img_${post.id}" value="${post.image_url || ''}" placeholder="Image Path/URL">
-                        ${post.image_url ? `<img src="${post.image_url}">` : ''}
-                        <div class="btn-group">
-                            <button class="btn-edit" onclick="updatePost(${post.id})">Save Changes ✏️</button>
-                            <button class="btn-delete" onclick="deletePost(${post.id})">Delete Post 🗑️</button>
-                        </div>
-                    </div>
-                `).join('');
-            } catch (err) {
-                list.innerHTML = `<p style="color:#ff4d4d;">Error loading posts.</p>`;
-            }
-        }
-
-        async function updatePost(id) {
-            const adminSecret = document.getElementById('secret').value;
-            const message = document.getElementById(`msg_${id}`).value;
-            const imageUrl = document.getElementById(`img_${id}`).value;
-
-            const res = await fetch(`/api/admin/notifications/${id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ adminSecret, message, imageUrl })
-            });
-            const data = await res.json();
-            alert(data.message);
-            loadPosts();
-        }
-
-        async function deletePost(id) {
-            if (!confirm("Are you sure you want to delete this post?")) return;
-            const adminSecret = document.getElementById('secret').value;
-
-            const res = await fetch(`/api/admin/notifications/${id}`, {
-                method: 'DELETE',
-                headers: { 'x-admin-secret': adminSecret }
-            });
-            const data = await res.json();
-            alert(data.message);
-            loadPosts();
-        }
-    </script>
-
-
-    <div class="card">
-        <h2>🎮 Bingo Game Settings</h2>
-        <label>Winning Pattern</label>
-        <select id="winningPattern">
-          <option value="any_one_line">Any One Line</option><option value="any_two_lines">Any Two Lines</option><option value="any_square">Any Square (2×2)</option><option value="full">Full House</option><option value="x">X</option><option value="t">T</option><option value="reverse_t">Reverse T</option><option value="cross">Cross</option><option value="vertical_line">One Vertical Line</option><option value="horizontal_line">One Horizontal Line</option><option value="big_l">Big L</option><option value="reverse_l">Reverse L</option><option value="N">N</option><option value="H">H</option><option value="Reverse H">Reverse H</option><option value="Z">Z</option><option value="K">K</option><option value="E">E</option><option value="M">M</option><option value="Five Dots">Five Dots</option>
-        </select>
-        <label>Seconds between called numbers</label><input id="drawIntervalSeconds" type="number" min="1" max="60" value="4">
-        <button onclick="saveGameSettings()">Save Game Settings</button>
+    <section class="panel" id="panel-houseprofit">
+      <div class="card">
+        <div class="card-header"><h2><span class="emoji">💰</span> House profit</h2></div>
+        <div class="toolbar">
+          <input id="profitFrom" type="date">
+          <input id="profitTo" type="date">
+          <select id="profitStake">
+            <option value="">All rooms</option>
+            <option value="10">10</option>
+            <option value="20">20</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="200">200</option>
+            <option value="500">500</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" onclick="loadHouseProfit()">Filter</button>
+        </div>
+        <div id="houseProfitBox" class="empty">—</div>
+      </div>
+    </section>
+<section class="panel" id="panel-gamesettings">
+      <div class="card">
+        <div class="card-header"><h2><span class="emoji">🎮</span> Bingo Game Settings</h2></div>
+        <div class="form-grid">
+          <div class="form-group full">
+            <label>Winning Pattern</label>
+            <select id="winningPattern">
+              <option value="any_one_line">Any One Line</option>
+              <option value="any_two_lines">Any Two Lines</option>
+              <option value="any_square">Any Square (2×2)</option>
+              <option value="full">Full House</option>
+              <option value="x">X</option>
+              <option value="t">T</option>
+              <option value="reverse_t">Reverse T</option>
+              <option value="cross">Cross</option>
+              <option value="vertical_line">One Vertical Line</option>
+              <option value="horizontal_line">One Horizontal Line</option>
+              <option value="big_l">Big L</option>
+              <option value="reverse_l">Reverse L</option>
+              <option value="N">N</option>
+              <option value="H">H</option>
+              <option value="Reverse H">Reverse H</option>
+              <option value="Z">Z</option>
+              <option value="K">K</option>
+              <option value="E">E</option>
+              <option value="M">M</option>
+              <option value="Five Dots">Five Dots</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Seconds between called numbers</label>
+            <input id="drawIntervalSeconds" type="number" min="1" max="60" value="4">
+          </div>
+        </div>
+        <button class="btn btn-primary" style="margin-top:14px;" onclick="saveGameSettings()">Save Game Settings</button>
+      </div>
+    </section>
+  </div>
+</div>
+<div class="modal-backdrop" id="userModal">
+  <div class="modal">
+    <div class="card-header" style="margin-bottom:12px;">
+      <h3 id="modalUserTitle">User</h3>
+      <button class="btn btn-secondary btn-sm" onclick="closeUserModal()">Close</button>
     </div>
+    <div id="modalUserBody"></div>
+  </div>
+</div>
+<!-- Confirm modal -->
+<div class="modal-backdrop" id="confirmModal">
+  <div class="modal" style="max-width:420px;">
+    <h3 id="confirmTitle" style="margin-bottom:8px;">Confirm</h3>
+    <p id="confirmMessage" class="muted" style="margin-bottom:16px;font-size:13.5px;line-height:1.5;"></p>
+    <div class="btn-group" style="justify-content:flex-end;">
+      <button class="btn btn-secondary btn-sm" id="confirmCancel">Cancel</button>
+      <button class="btn btn-primary btn-sm" id="confirmOk">Confirm</button>
+    </div>
+  </div>
+</div>
+<!-- Adjust amount modal -->
+<div class="modal-backdrop" id="adjustModal">
+  <div class="modal" style="max-width:420px;">
+    <h3 id="adjustTitle" style="margin-bottom:8px;">Adjust</h3>
+    <p id="adjustHint" class="muted" style="margin-bottom:12px;font-size:13px;"></p>
+    <div class="form-group" style="margin-bottom:14px;">
+      <label>Amount (use negative to subtract)</label>
+      <input type="number" id="adjustAmount" step="0.01" placeholder="e.g. 50 or -20">
+    </div>
+    <div class="btn-group" style="justify-content:flex-end;">
+      <button class="btn btn-secondary btn-sm" onclick="closeAdjustModal()">Cancel</button>
+      <button class="btn btn-warning btn-sm" id="adjustOk">Apply</button>
+    </div>
+  </div>
+
 <script>
-async function loadGameSettings(){const secret=document.getElementById('secret')?.value;if(!secret)return;const r=await fetch('/api/admin/game-settings',{headers:{'x-admin-secret':secret}});const d=await r.json();if(d.success){document.getElementById('winningPattern').value=d.winningPattern;document.getElementById('drawIntervalSeconds').value=d.drawIntervalSeconds;}}
-async function saveGameSettings(){const adminSecret=document.getElementById('secret').value;const winningPattern=document.getElementById('winningPattern').value;const drawIntervalSeconds=Number(document.getElementById('drawIntervalSeconds').value);const r=await fetch('/api/admin/game-settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({adminSecret,winningPattern,drawIntervalSeconds})});const d=await r.json();alert(d.message|| (d.success?'Game settings saved.':'Failed.'));}
-</script></body>
+const TITLES = {
+  dashboard: 'Dashboard', users: 'Users', deposits: 'Deposit Requests',
+  withdraws: 'Withdrawals', transfers: 'Transfers', payments: 'Payment Methods',
+  autoverify: 'Auto-Verify', announcements: 'Announcements', referrals: 'Referrals',
+  welcomebonus: 'Welcome Bonus',
+  gamesettings: 'Game Settings',
+  rake: 'House Cut %',
+  gamerooms: 'Game Rooms',
+  gamehistory: 'Game History',
+  houseprofit: 'House Profit'
+};
+let usersPage = 1;
+let usersLimit = 10;
+function adminSecretHeader() { return { 'x-admin-secret': document.getElementById('secret').value }; }
+function getSecret() { return document.getElementById('secret').value; }
+function requireSecret() {
+  if (!getSecret()) { alert('Please enter your Admin Secret key in the top bar.'); return false; }
+  return true;
+}
+function fmtMoney(n) { return Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function fmtDate(d) { if (!d) return '—'; try { return new Date(d).toLocaleString(); } catch { return String(d); } }
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function syncSwitchLabel(inputEl, stateId) {
+  const st = document.getElementById(stateId);
+  if (!st || !inputEl) return;
+  if (inputEl.checked) {
+    st.textContent = 'ON';
+    st.classList.remove('off');
+    st.classList.add('on');
+  } else {
+    st.textContent = 'OFF';
+    st.classList.remove('on');
+    st.classList.add('off');
+  }
+}
+
+
+async function loadWelcomeBonusSettings() {
+  if (!getSecret()) return;
+  try {
+    const r = await fetch('/api/admin/welcome-bonus-settings', { headers: adminSecretHeader() });
+    const d = await r.json();
+    if (!d.success) return;
+    const en = document.getElementById('welcomeBonusEnabled');
+    const am = document.getElementById('welcomeBonusAmount');
+    if (en) { en.checked = !!d.enabled; syncSwitchLabel(en, 'welcomeBonusState'); }
+    if (am) am.value = d.amount;
+    const st = document.getElementById('welcomeBonusStatus');
+    if (st) st.textContent = d.enabled
+      ? ('New Telegram users get ' + Number(d.amount).toFixed(2) + ' Birr.')
+      : 'Welcome bonus is OFF — new users start at 0 Birr.';
+  } catch (e) { console.error(e); }
+}
+async function saveWelcomeBonusSettings() {
+  if (!requireSecret()) return;
+  const enabled = document.getElementById('welcomeBonusEnabled').checked;
+  const amount = Number(document.getElementById('welcomeBonusAmount').value);
+  if (!Number.isFinite(amount) || amount < 0) return alert('Enter a valid amount (0 or more).');
+  const msg = enabled
+    ? ('Save welcome bonus ON at ' + amount + ' Birr for new Telegram users?')
+    : ('Turn OFF welcome bonus? New Telegram users will start with 0 Birr (amount field is kept as ' + amount + ' for when you turn it back on).');
+  if (!(await confirmAction('Confirm welcome bonus', msg, 'Save'))) {
+    loadWelcomeBonusSettings();
+    return;
+  }
+  const r = await fetch('/api/admin/welcome-bonus-settings', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adminSecret: getSecret(), enabled: enabled, amount: amount })
+  });
+  const d = await r.json();
+  if (d.success) {
+    alert('Saved.');
+    loadWelcomeBonusSettings();
+  } else alert(d.message || 'Failed.');
+}
+
+
+function confirmAction(title, message, okText) {
+  return new Promise(function(resolve) {
+    document.getElementById('confirmTitle').textContent = title || 'Confirm';
+    document.getElementById('confirmMessage').textContent = message || 'Are you sure?';
+    var okBtn = document.getElementById('confirmOk');
+    okBtn.textContent = okText || 'Confirm';
+    var modal = document.getElementById('confirmModal');
+    modal.classList.add('open');
+    function cleanup(result) {
+      modal.classList.remove('open');
+      okBtn.onclick = null;
+      document.getElementById('confirmCancel').onclick = null;
+      modal.onclick = null;
+      resolve(result);
+    }
+    okBtn.onclick = function() { cleanup(true); };
+    document.getElementById('confirmCancel').onclick = function() { cleanup(false); };
+    modal.onclick = function(e) { if (e.target.id === 'confirmModal') cleanup(false); };
+  });
+}
+var _adjustResolve = null;
+function openAdjustModal(title, hint) {
+  return new Promise(function(resolve) {
+    _adjustResolve = resolve;
+    document.getElementById('adjustTitle').textContent = title || 'Adjust';
+    document.getElementById('adjustHint').textContent = hint || '';
+    document.getElementById('adjustAmount').value = '';
+    document.getElementById('adjustModal').classList.add('open');
+    setTimeout(function(){ document.getElementById('adjustAmount').focus(); }, 50);
+  });
+}
+function closeAdjustModal(val) {
+  document.getElementById('adjustModal').classList.remove('open');
+  if (_adjustResolve) { _adjustResolve(val); _adjustResolve = null; }
+}
+var _adjOk = document.getElementById('adjustOk');
+if (_adjOk) _adjOk.onclick = function() {
+  var n = Number(document.getElementById('adjustAmount').value);
+  if (!Number.isFinite(n) || n === 0) { alert('Enter a non-zero number.'); return; }
+  closeAdjustModal(n);
+};
+var _adjModal = document.getElementById('adjustModal');
+if (_adjModal) _adjModal.addEventListener('click', function(e) {
+  if (e.target.id === 'adjustModal') closeAdjustModal(null);
+});
+let depPage = 1, wdrPage = 1, trfPage = 1, postsPage = 1, refPage = 1, postsVisible = false;
+
+function showPanel(name) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const panel = document.getElementById('panel-' + name);
+  if (panel) panel.classList.add('active');
+  const nav = document.querySelector('.nav-item[data-panel="' + name + '"]');
+  if (nav) nav.classList.add('active');
+  document.getElementById('pageTitle').textContent = TITLES[name] || name;
+  document.getElementById('sidebar').classList.remove('open');
+  if (getSecret()) {
+    if (name === 'dashboard') loadStats();
+    if (name === 'users') loadUsers(usersPage);
+    if (name === 'transfers') loadTransferRequests();
+    if (name === 'payments') loadPaymentMethodsAdmin();
+    if (name === 'autoverify') loadAutoVerifySettings();
+    if (name === 'announcements') { /* posts load only on Show */ }
+    if (name === 'referrals') { loadReferralSettingsAdmin(); loadReferralLeaderboard(); }
+    if (name === 'welcomebonus') loadWelcomeBonusSettings();
+    if (name === 'gamesettings') loadGameSettings();
+    if (name === 'rake') loadRakeSettings();
+    if (name === 'gamerooms') loadLiveRoomsOnly();
+    if (name === 'gamehistory') loadAdminGames(1, true);
+    if (name === 'houseprofit') loadHouseProfit();
+    if (name === 'deposits') { loadDepositRequestStats(); loadDepositRequests(1); }
+    if (name === 'withdraws') { loadWithdrawRequestStats(); loadWithdrawRequests(1); }
+  }
+}
+document.querySelectorAll('.nav-item').forEach(btn => {
+  btn.addEventListener('click', () => showPanel(btn.dataset.panel));
+});
+const themeToggle = document.getElementById('themeToggle');
+themeToggle.addEventListener('click', () => {
+  const html = document.documentElement;
+  const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  themeToggle.textContent = next === 'dark' ? '🌙' : '☀️';
+  localStorage.setItem('admin-theme', next);
+});
+(function () {
+  const saved = localStorage.getItem('admin-theme');
+  if (saved) {
+    document.documentElement.setAttribute('data-theme', saved);
+    themeToggle.textContent = saved === 'dark' ? '🌙' : '☀️';
+  }
+})();
+async function loadStats() {
+  if (!getSecret()) return;
+  try {
+    const r = await fetch('/api/admin/stats', { headers: adminSecretHeader() });
+    const d = await r.json();
+    if (!d.success) return;
+    const s = d.stats;
+    document.getElementById('statUsers').textContent = s.totalUsers.toLocaleString();
+    document.getElementById('statBalance').textContent = fmtMoney(s.totalBalance) + ' Br';
+    document.getElementById('statBonus').textContent = fmtMoney(s.totalBonus) + ' Br';
+    document.getElementById('statPendDep').textContent = s.pendingDeposits;
+    document.getElementById('statPendWdr').textContent = s.pendingWithdraws;
+    document.getElementById('statPendTrf').textContent = s.pendingTransfers;
+    document.getElementById('statGames').textContent = s.activeGames;
+    var sh = document.getElementById('statHouseToday'); if (sh) sh.textContent = fmtMoney(s.houseProfitToday || 0) + ' Br';
+    var sg = document.getElementById('statGamesToday'); if (sg) sg.textContent = (s.gamesCompletedToday || 0);
+    var el;
+    el = document.getElementById('statDepToday'); if (el) el.textContent = s.depositsToday;
+    el = document.getElementById('statWdrToday'); if (el) el.textContent = s.withdrawsToday;
+    el = document.getElementById('statTrfToday'); if (el) el.textContent = s.transfersToday;
+    el = document.getElementById('statTrfOkToday'); if (el) el.textContent = s.transfersApprovedToday;
+    if (s.newUsers) {
+      el = document.getElementById('statNewToday'); if (el) el.textContent = s.newUsers.today;
+      el = document.getElementById('statNewWeek'); if (el) el.textContent = s.newUsers.week;
+      el = document.getElementById('statNewMonth'); if (el) el.textContent = s.newUsers.month;
+      el = document.getElementById('statNew6m'); if (el) el.textContent = s.newUsers.months6;
+      el = document.getElementById('statNewYear'); if (el) el.textContent = s.newUsers.year;
+    }
+    if (s.activeUsers) {
+      el = document.getElementById('statAct1h'); if (el) el.textContent = s.activeUsers.h1;
+      el = document.getElementById('statAct2h'); if (el) el.textContent = s.activeUsers.h2;
+      el = document.getElementById('statAct6h'); if (el) el.textContent = s.activeUsers.h6;
+      el = document.getElementById('statAct12h'); if (el) el.textContent = s.activeUsers.h12;
+      el = document.getElementById('statAct24h'); if (el) el.textContent = s.activeUsers.h24;
+      el = document.getElementById('statActWeek'); if (el) el.textContent = s.activeUsers.week;
+    }
+    const setBadge = (id, n) => {
+      const el = document.getElementById(id);
+      if (n > 0) { el.style.display = ''; el.textContent = n; }
+      else { el.style.display = 'none'; }
+    };
+    setBadge('navUserCount', s.totalUsers);
+    setBadge('navDepCount', s.pendingDeposits);
+    setBadge('navWdrCount', s.pendingWithdraws);
+    setBadge('navTrfCount', s.pendingTransfers);
+  } catch (e) { console.error(e); }
+}
+async function loadUsers(page) {
+  if (page === undefined) page = 1;
+  if (!requireSecret()) return;
+  usersPage = page;
+  const q = document.getElementById('userSearch').value.trim();
+  const params = new URLSearchParams({ page: page, limit: adminPageSize('usersPageSize', 10) });
+  if (q) params.set('q', q);
+  var uf = document.getElementById('userFrom');
+  var ut = document.getElementById('userTo');
+  var ua = document.getElementById('userActiveWithin');
+  if (uf && uf.value) params.set('from', uf.value);
+  if (ut && ut.value) params.set('to', ut.value);
+  if (ua && ua.value) params.set('activeWithin', ua.value);
+  try {
+    const r = await fetch('/api/admin/users?' + params, { headers: adminSecretHeader() });
+    const d = await r.json();
+    const body = document.getElementById('usersBody');
+    if (!d.success) {
+      body.innerHTML = '<tr><td colspan="13" class="empty">' + esc(d.message || 'Failed') + '</td></tr>';
+      return;
+    }
+    document.getElementById('usersTotalLabel').textContent = '(' + d.total + ' total)';
+    if (!d.users.length) {
+      body.innerHTML = '<tr><td colspan="13" class="empty">No users found.</td></tr>';
+    } else {
+      body.innerHTML = d.users.map(function(u) {
+        return '<tr>' +
+          '<td class="mono">' + u.id + '</td>' +
+          '<td><strong>' + esc(u.username) + '</strong></td>' +
+          '<td>' + esc(u.displayName || '—') + '</td>' +
+          '<td class="mono">' + esc(u.phoneNumber || '—') + (u.phoneVerified ? ' <span class="badge badge-success">✓</span>' : '') + '</td>' +
+          '<td class="mono text-green">' + fmtMoney(u.balance) + '</td>' +
+          '<td class="mono">' + fmtMoney(u.bonusBalance) + '</td>' +
+          '<td class="mono">' + u.wins + '</td>' +
+          '<td class="mono">' + u.referralCount + (u.referredBy ? '<div class="muted" style="font-size:11px;">by ' + esc(u.referredBy) + '</div>' : '') + '</td>' +
+          '<td class="mono muted">' + (u.telegramId || '—') + '</td>' +
+          '<td class="muted" style="font-size:12px;white-space:nowrap;">' + fmtDate(u.createdAt) + '</td>' +
+          '<td class="muted" style="font-size:12px;white-space:nowrap;">' + fmtDate(u.lastActiveAt) + '</td>' +
+          '<td>' + (u.autoVerifyEnabled ? '<span class="badge badge-success">On</span>' : '<span class="badge badge-danger">Off</span>') + ' <button class="btn btn-secondary btn-sm" style="margin-left:4px;" onclick="toggleUserAutoVerify(\'' + esc(u.username) + '\', ' + (!u.autoVerifyEnabled) + ')">' + (u.autoVerifyEnabled ? 'Off' : 'On') + '</button></td>' +
+          '<td><div class="btn-group">' +
+            '<button class="btn btn-secondary btn-sm" onclick="viewUser(\'' + esc(u.username) + '\')">View</button>' +
+            '<button class="btn btn-warning btn-sm" onclick="adjustBalance(\'' + esc(u.username) + '\')">± Balance</button>' +
+            '<button class="btn btn-secondary btn-sm" onclick="adjustBonus(\'' + esc(u.username) + '\')">± Bonus</button>' +
+          '</div></td></tr>';
+      }).join('');
+    }
+    const pag = document.getElementById('usersPagination');
+    pag.innerHTML = '<span>Page ' + d.page + ' of ' + d.totalPages + '</span>' +
+      '<button class="btn btn-secondary btn-sm"' + (d.page <= 1 ? ' disabled' : '') + ' onclick="loadUsers(' + (d.page - 1) + ')">Prev</button>' +
+      '<button class="btn btn-secondary btn-sm"' + (d.page >= d.totalPages ? ' disabled' : '') + ' onclick="loadUsers(' + (d.page + 1) + ')">Next</button>';
+  } catch (e) {
+    console.error(e);
+    document.getElementById('usersBody').innerHTML = '<tr><td colspan="13" class="empty">Network error.</td></tr>';
+  }
+}
+document.getElementById('userSearch').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') loadUsers(1);
+});
+async function viewUser(username) {
+  if (!requireSecret()) return;
+  const r = await fetch('/api/admin/users/' + encodeURIComponent(username), { headers: adminSecretHeader() });
+  const d = await r.json();
+  if (!d.success) return alert(d.message || 'Failed');
+  const u = d.user;
+  const txs = d.transactions || [];
+  document.getElementById('modalUserTitle').textContent = u.username;
+  let txHtml = '';
+  if (txs.length) {
+    txHtml = '<div class="table-wrap"><table class="data"><thead><tr><th>ID</th><th>Amount</th><th>Type</th><th>Date</th></tr></thead><tbody>' +
+      txs.map(function(t) {
+        return '<tr><td class="mono">' + t.id + '</td><td class="mono ' + (t.amount >= 0 ? 'text-green' : 'text-red') + '">' + fmtMoney(t.amount) +
+          '</td><td>' + esc(t.type) + '</td><td class="muted">' + fmtDate(t.createdAt) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  } else {
+    txHtml = '<p class="muted">No transactions.</p>';
+  }
+  document.getElementById('modalUserBody').innerHTML =
+    '<div class="detail-grid">' +
+      '<div><div class="label">ID</div><div class="value mono">' + u.id + '</div></div>' +
+      '<div><div class="label">Display name</div><div class="value">' + esc(u.displayName || '—') + '</div></div>' +
+      '<div><div class="label">Phone</div><div class="value mono">' + esc(u.phoneNumber || '—') + (u.phoneVerified ? ' (verified)' : '') + '</div></div>' +
+      '<div><div class="label">Telegram ID</div><div class="value mono">' + (u.telegramId || '—') + '</div></div>' +
+      '<div><div class="label">Balance</div><div class="value text-green mono">' + fmtMoney(u.balance) + ' Br</div></div>' +
+      '<div><div class="label">Bonus</div><div class="value mono">' + fmtMoney(u.bonusBalance) + ' Br</div></div>' +
+      '<div><div class="label">Wins</div><div class="value">' + u.wins + '</div></div>' +
+      '<div><div class="label">Referrals</div><div class="value">' + u.referralCount + '</div></div>' +
+      '<div><div class="label">Referred by</div><div class="value">' + esc(u.referredBy || '—') + '</div></div>' +
+      '<div><div class="label">Auto-verify</div><div class="value">' + (u.autoVerifyEnabled ? 'On' : 'Off') + '</div></div>' +
+      '<div><div class="label">Language / Theme</div><div class="value">' + esc(u.preferredLanguage) + ' / ' + esc(u.preferredTheme) + '</div></div>' +
+      '<div><div class="label">Voice / Sound</div><div class="value">' + esc(u.preferredVoicePack) + ' / ' + (u.soundEnabled ? 'On' : 'Off') + '</div></div>' +
+      '<div><div class="label">Joined</div><div class="value">' + fmtDate(u.createdAt) + '</div></div>' +
+    '</div>' +
+    '<div class="btn-group" style="margin-bottom:16px;">' +
+      '<button class="btn btn-warning btn-sm" onclick="adjustBalance(\'' + esc(u.username) + '\')">Adjust balance</button>' +
+      '<button class="btn btn-secondary btn-sm" onclick="adjustBonus(\'' + esc(u.username) + '\')">Adjust bonus</button>' +
+      '<button class="btn btn-secondary btn-sm" onclick="toggleUserAutoVerify(\'' + esc(u.username) + '\', ' + (!u.autoVerifyEnabled) + ')">' +
+        (u.autoVerifyEnabled ? 'Disable' : 'Enable') + ' auto-verify</button>' +
+    '</div>' +
+    '<h3 style="font-size:13px;margin-bottom:8px;color:var(--muted);">Recent transactions</h3>' + txHtml;
+  document.getElementById('userModal').classList.add('open');
+}
+function closeUserModal() { document.getElementById('userModal').classList.remove('open'); }
+document.getElementById('userModal').addEventListener('click', function(e) {
+  if (e.target.id === 'userModal') closeUserModal();
+});
+async function adjustBalance(username) {
+  if (!requireSecret()) return;
+  const amount = await openAdjustModal('Adjust balance', 'Change balance for ' + username + '. Use a negative number to subtract.');
+  if (amount === null || amount === undefined) return;
+  const ok = await confirmAction('Confirm balance change', 'Apply ' + amount + ' Birr to ' + username + "'s balance?", 'Apply');
+  if (!ok) return;
+  const r = await fetch('/api/admin/adjust-balance', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adminSecret: getSecret(), username: username, amount: amount })
+  });
+  const d = await r.json();
+  alert(d.success ? 'New balance: ' + fmtMoney(d.balance) + ' Birr' : (d.message || 'Failed.'));
+  loadUsers(usersPage);
+  if (document.getElementById('userModal').classList.contains('open')) viewUser(username);
+}
+async function toggleUserAutoVerify(username, enabled) {
+  if (!requireSecret()) return;
+  const msg = enabled
+    ? 'Enable auto-verify for ' + username + '? Their deposits can be verified automatically when global auto-verify is also On.'
+    : 'Disable auto-verify for ' + username + '? Their deposits will always need manual review.';
+  if (!(await confirmAction('User auto-verify', msg, enabled ? 'Enable' : 'Disable'))) return;
+  const r = await fetch('/api/admin/users/' + encodeURIComponent(username) + '/auto-verify', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adminSecret: getSecret(), enabled: enabled })
+  });
+  const d = await r.json();
+  alert(d.success ? 'Auto-verify ' + (d.autoVerifyEnabled ? 'enabled' : 'disabled') + ' for ' + d.username : (d.message || 'Failed.'));
+  loadUsers(usersPage);
+  if (document.getElementById('userModal').classList.contains('open')) viewUser(username);
+}
+async function sendBroadcast() {
+  if (!requireSecret()) return;
+  const formData = new FormData();
+  formData.append('adminSecret', getSecret());
+  formData.append('destination', document.getElementById('destination').value);
+  formData.append('message', document.getElementById('message').value);
+  formData.append('imageUrl', document.getElementById('imageUrl').value);
+  const fileInput = document.getElementById('fileInput');
+  if (fileInput.files[0]) formData.append('imageFile', fileInput.files[0]);
+  const status = document.getElementById('status');
+  status.style.color = 'var(--blue)';
+  status.innerText = 'Publishing post…';
+  try {
+    const res = await fetch('/api/admin/broadcast', { method: 'POST', body: formData });
+    const data = await res.json();
+    status.style.color = data.success ? 'var(--green)' : 'var(--red)';
+    status.innerText = data.message;
+    if (data.success) {
+      document.getElementById('message').value = '';
+      document.getElementById('imageUrl').value = '';
+      fileInput.value = '';
+      loadPosts();
+    }
+  } catch (e) {
+    status.style.color = 'var(--red)';
+    status.innerText = 'Network error.';
+  }
+}
+function togglePosts() {
+  postsVisible = !postsVisible;
+  const list = document.getElementById('postsList');
+  const pag = document.getElementById('postsPagination');
+  const btn = document.getElementById('postsToggleBtn');
+  const ref = document.getElementById('postsRefreshBtn');
+  if (postsVisible) {
+    list.style.display = '';
+    if (pag) pag.style.display = '';
+    if (ref) ref.style.display = '';
+    btn.textContent = 'Hide posts';
+    loadPosts(1);
+  } else {
+    list.style.display = 'none';
+    if (pag) pag.style.display = 'none';
+    if (ref) ref.style.display = 'none';
+    btn.textContent = 'Show posts';
+    list.innerHTML = '<div class="empty">Posts hidden.</div>';
+  }
+}
+async function loadPosts(page) {
+  if (!getSecret() || !postsVisible) return;
+  if (page) postsPage = page;
+  const params = new URLSearchParams({ page: postsPage, limit: 25 });
+  const fr = document.getElementById('postFrom'); const to = document.getElementById('postTo');
+  if (fr && fr.value) params.set('from', fr.value);
+  if (to && to.value) params.set('to', to.value);
+  try {
+    const res = await fetch('/api/admin/notifications?' + params, { headers: adminSecretHeader() });
+    const data = await res.json();
+    const list = document.getElementById('postsList');
+    if (!data.success) { list.innerHTML = '<div class="empty">' + esc(data.message || 'Failed') + '</div>'; return; }
+    const posts = data.notifications || data.posts || [];
+    if (!posts.length) list.innerHTML = '<div class="empty">No posts yet.</div>';
+    else list.innerHTML = posts.map(function(p) {
+      return '<div class="item-card"><div>' + (p.message || '') + '</div>' +
+        (p.image_url ? '<img src="' + esc(p.image_url) + '" alt="">' : '') +
+        '<div class="item-meta">#' + p.id + ' · ' + fmtDate(p.created_at) + '</div>' +
+        '<div class="btn-group" style="margin-top:8px;">' +
+        '<button class="btn btn-warning btn-sm" onclick="editPost(' + p.id + ')">Edit</button>' +
+        '<button class="btn btn-danger btn-sm" onclick="deletePost(' + p.id + ')">Delete</button></div></div>';
+    }).join('');
+    const pag = document.getElementById('postsPagination');
+    if (pag) pag.innerHTML = '<span>Page ' + (data.page||1) + ' of ' + (data.totalPages||1) + ' (' + (data.total||0) + ')</span>' +
+      '<button class="btn btn-secondary btn-sm"' + ((data.page||1)<=1?' disabled':'') + ' onclick="loadPosts(' + ((data.page||1)-1) + ')">Prev</button>' +
+      '<button class="btn btn-secondary btn-sm"' + ((data.page||1)>=(data.totalPages||1)?' disabled':'') + ' onclick="loadPosts(' + ((data.page||1)+1) + ')">Next</button>';
+  } catch (e) {
+    document.getElementById('postsList').innerHTML = '<div class="empty">Network error.</div>';
+  }
+}
+async function editPost(id) {
+  if (!requireSecret()) return;
+  const message = prompt('New message text:');
+  if (message === null) return;
+  const res = await fetch('/api/admin/notifications/' + id, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adminSecret: getSecret(), message: message })
+  });
+  const data = await res.json();
+  alert(data.message || (data.success ? 'Updated.' : 'Failed.'));
+  loadPosts();
+}
+async function deletePost(id) {
+  if (!requireSecret()) return;
+  if (!confirm('Delete this post?')) return;
+  const res = await fetch('/api/admin/notifications/' + id, {
+    method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adminSecret: getSecret() })
+  });
+  const data = await res.json();
+  alert(data.message || (data.success ? 'Deleted.' : 'Failed.'));
+  loadPosts();
+}
+
+let gamesPage = 1;
+
+
+const ADMIN_PAGE_SIZES = [10, 50, 100, 200, 500];
+function adminPageSize(selectId, fallback) {
+  const el = document.getElementById(selectId);
+  const n = el ? parseInt(el.value, 10) : (fallback || 10);
+  return ADMIN_PAGE_SIZES.includes(n) ? n : (fallback || 10);
+}
+
+async function loadDepositRequestStats() {
+  if (!getSecret()) return;
+  try {
+    const r = await fetch('/api/admin/request-stats?type=deposit', { headers: adminSecretHeader() });
+    const d = await r.json();
+    if (!d.success) return;
+    const s = d.stats || {};
+    const t = document.getElementById('depApprToday'); if (t) t.textContent = s.approved_today ?? '—';
+    const w = document.getElementById('depApprWeek'); if (w) w.textContent = s.approved_week ?? '—';
+    const m = document.getElementById('depApprMonth'); if (m) m.textContent = s.approved_month ?? '—';
+  } catch (e) { console.error(e); }
+}
+async function loadWithdrawRequestStats() {
+  if (!getSecret()) return;
+  try {
+    const r = await fetch('/api/admin/request-stats?type=withdraw', { headers: adminSecretHeader() });
+    const d = await r.json();
+    if (!d.success) return;
+    const s = d.stats || {};
+    const t = document.getElementById('wdrApprToday'); if (t) t.textContent = s.approved_today ?? '—';
+    const w = document.getElementById('wdrApprWeek'); if (w) w.textContent = s.approved_week ?? '—';
+    const m = document.getElementById('wdrApprMonth'); if (m) m.textContent = s.approved_month ?? '—';
+  } catch (e) { console.error(e); }
+}
+
+async function loadLiveRoomsOnly() {
+  if (!getSecret()) return;
+  const liveBox = document.getElementById('liveRoomsList');
+  if (liveBox) liveBox.innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    const r = await fetch('/api/admin/games?page=1&limit=1', { headers: adminSecretHeader() });
+    const d = await r.json();
+    if (!d.success) {
+      if (liveBox) liveBox.innerHTML = '<div class="empty">' + esc(d.message || 'Failed') + '</div>';
+      return;
+    }
+    const live = d.liveRooms || [];
+    if (!liveBox) return;
+    if (!live.length) {
+      liveBox.innerHTML = '<div class="empty">No active rooms right now.</div>';
+    } else {
+      liveBox.innerHTML = live.map(function(room) {
+        const cid = 'parts-live-' + room.stake + '-' + (room.gameId || '0');
+        return '<div class="item-card">' +
+          '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;">' +
+          '<strong>' + room.stake + ' Birr room</strong>' +
+          '<span class="badge badge-pending">' + esc(room.status) + '</span></div>' +
+          '<div class="item-meta">Players: ' + room.playerCount + ' · Cards: ' + room.cardCount +
+          (room.prizePool != null ? ' · Pot display: ' + fmtMoney(room.prizePool) : '') +
+          (room.cutPercent != null ? ' · Cut: ' + room.cutPercent + '%' : '') +
+          (room.gameId ? ' · Game #' + room.gameId : '') + '</div>' +
+          renderParticipants(room.players, cid) + '</div>';
+      }).join('');
+    }
+  } catch (e) {
+    if (liveBox) liveBox.innerHTML = '<div class="empty">Failed</div>';
+  }
+}
+
+
+async function loadRakeSettings() {
+  if (!getSecret()) return;
+  const box = document.getElementById('rakeSettingsList');
+  if (!box) return;
+  box.innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    const r = await fetch('/api/admin/rake-settings', { headers: adminSecretHeader() });
+    const d = await r.json();
+    if (!d.success) {
+      box.innerHTML = '<div class="empty">' + esc(d.message || 'Failed to load. Check admin key & server restart.') + '</div>';
+      return;
+    }
+    const stakes = [10, 20, 50, 100, 200, 500];
+    const map = {};
+    (d.settings || []).forEach(function(s) { map[Number(s.stake)] = s.cutPercent; });
+    box.innerHTML = stakes.map(function(st) {
+      const val = map[st] != null ? map[st] : 20;
+      return '<div class="form-group">' +
+        '<label>' + st + ' Birr room — house cut %</label>' +
+        '<input type="number" min="0" max="100" step="0.01" data-rake-stake="' + st + '" value="' + val + '">' +
+        '</div>';
+    }).join('');
+  } catch (e) {
+    console.error(e);
+    box.innerHTML = '<div class="empty">Failed to load house cut settings</div>';
+  }
+}
+
+async function saveRakeSettings() {
+  if (!requireSecret()) return;
+  const inputs = document.querySelectorAll('[data-rake-stake]');
+  if (!inputs.length) {
+    alert('Settings not loaded yet. Open House Cut again or refresh.');
+    return;
+  }
+  const settings = [];
+  for (let i = 0; i < inputs.length; i++) {
+    const inp = inputs[i];
+    const stake = Number(inp.getAttribute('data-rake-stake'));
+    const cutPercent = Number(inp.value);
+    if (!Number.isFinite(cutPercent) || cutPercent < 0 || cutPercent > 100) {
+      return alert('Cut % for ' + stake + ' room must be between 0 and 100.');
+    }
+    settings.push({ stake: stake, cutPercent: cutPercent });
+  }
+  const summary = settings.map(function(s) { return s.stake + ' → ' + s.cutPercent + '%'; }).join('\n');
+  if (!(await confirmAction('Save house cut', 'Save these house cut percentages?\n\n' + summary, 'Save'))) {
+    loadRakeSettings();
+    return;
+  }
+  try {
+    const r = await fetch('/api/admin/rake-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ adminSecret: getSecret(), settings: settings })
+    });
+    const d = await r.json();
+    if (d.success) {
+      alert('House cut saved.');
+      loadRakeSettings();
+    } else alert(d.message || 'Failed to save.');
+  } catch (e) {
+    alert('Failed to save house cut.');
+  }
+}
+
+function renderParticipants(parts, collapseId) {
+  if (!parts || !parts.length) return '<div class="item-meta">No participants</div>';
+  const id = collapseId || ('parts-' + Math.random().toString(36).slice(2, 9));
+  const body = parts.map(function(p) {
+    return '<div style="padding:6px 0;border-bottom:1px solid var(--border);">' +
+      '<strong>' + esc(p.username) + '</strong> · ' + (p.cardCount || 0) + ' card(s)' +
+      (p.cards && p.cards.length ? ' · cards: <span class="mono">' + esc(p.cards.join(', ')) + '</span>' : '') +
+      (p.amountPaid != null ? ' · paid ' + fmtMoney(p.amountPaid) : '') +
+      (p.notReady ? ' · <span class="badge badge-muted">not ready</span>' : '') +
+      '</div>';
+  }).join('');
+  return '<button type="button" class="collapse-toggle" onclick="toggleCollapse(\'' + id + '\', this)" aria-expanded="false">' +
+    '<span class="collapse-icon">+</span> Participants (' + parts.length + ')</button>' +
+    '<div class="collapse-body" id="' + id + '">' + body + '</div>';
+}
+
+function toggleCollapse(id, btn) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const open = el.classList.toggle('open');
+  if (btn) {
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    const icon = btn.querySelector('.collapse-icon');
+    if (icon) icon.textContent = open ? '−' : '+';
+  }
+}
+
+function renderWinnersBlock(g) {
+  const winners = Array.isArray(g.winners) ? g.winners : [];
+  const winnerCount = Number(g.winnerCount) || winners.length || 0;
+  const split = winnerCount > 1;
+
+  if (g.status === 'EXHAUSTED' && !winnerCount && !g.winner) {
+    return '<div class="item-meta">No winner — pot to house</div>';
+  }
+  if (!winnerCount && !g.winner) return '';
+
+  if (split) {
+    const list = winners.map(function(w) {
+      return '<div class="winner-list-item">' +
+        '<strong>' + esc(w.displayName || w.username) + '</strong>' +
+        (w.cardNumber != null ? ' · card #' + w.cardNumber : '') +
+        (w.prize != null ? ' · ' + fmtMoney(w.prize) : '') +
+        '</div>';
+    }).join('');
+    const detailId = 'winners-' + g.id;
+    return '<div class="item-meta">Winners: <strong>Split × ' + winnerCount + '</strong>' +
+      '<span class="winner-split-badge">split</span></div>' +
+      '<button type="button" class="collapse-toggle" onclick="toggleCollapse(\'' + detailId + '\', this)" aria-expanded="false">' +
+      '<span class="collapse-icon">+</span> View winning cards / details</button>' +
+      '<div class="collapse-body" id="' + detailId + '">' + list + '</div>';
+  }
+
+  // Single winner
+  const name = winners.length
+    ? (winners[0].displayName || winners[0].username)
+    : g.winner;
+  const card = winners.length && winners[0].cardNumber != null
+    ? winners[0].cardNumber
+    : g.winningCard;
+  const prize = winners.length && winners[0].prize != null
+    ? winners[0].prize
+    : g.winnerPrize;
+  return '<div class="item-meta">Winner: <strong>' + esc(name || '—') + '</strong>' +
+    (card != null ? ' · winning card #' + card : '') +
+    (g.pattern ? ' · pattern: ' + esc(g.pattern) : '') +
+    (prize != null ? ' · prize: ' + fmtMoney(prize) : '') +
+    '</div>';
+}
+
+
+async function loadAdminGames(page, resetList) {
+  if (!getSecret()) return;
+  if (page) gamesPage = page;
+  const limit = adminPageSize('gamesPageSize', 10);
+  const params = new URLSearchParams({ page: String(gamesPage), limit: String(limit) });
+  const q = document.getElementById('gamesQ');
+  const st = document.getElementById('gamesStatus');
+  const sk = document.getElementById('gamesStake');
+  const fr = document.getElementById('gamesFrom');
+  const to = document.getElementById('gamesTo');
+  if (q && q.value.trim()) params.set('q', q.value.trim());
+  if (st && st.value) params.set('status', st.value);
+  if (sk && sk.value) params.set('stake', sk.value);
+  if (fr && fr.value) params.set('from', fr.value);
+  if (to && to.value) params.set('to', to.value);
+
+  const list = document.getElementById('gamesList');
+  if (list) list.innerHTML = '<div class="empty">Loading…</div>';
+
+  try {
+    const r = await fetch('/api/admin/games?' + params.toString(), { headers: adminSecretHeader() });
+    const d = await r.json();
+    if (!d.success) {
+      if (list) list.innerHTML = '<div class="empty">' + esc(d.message || 'Failed') + '</div>';
+      return;
+    }
+
+    const games = d.games || [];
+    if (list) {
+      if (!games.length) {
+        list.innerHTML = '<div class="empty">No games found for this filter.</div>';
+      } else {
+        list.innerHTML = games.map(function(g) {
+          const badge = g.status === 'COMPLETED' ? 'badge-approved' : (g.status === 'EXHAUSTED' ? 'badge-muted' : 'badge-pending');
+          const split = (Number(g.winnerCount) || 0) > 1;
+          return '<div class="item-card">' +
+            '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;">' +
+            '<strong>#' + g.id + ' · ' + g.stake + ' Birr room</strong>' +
+            '<span class="badge ' + badge + '">' + esc(g.status) + '</span></div>' +
+            '<div class="item-meta">Players: ' + g.playerCount + ' · Cards: ' + g.cardCount +
+            ' · Pot: ' + fmtMoney(g.prizePool) +
+            ' · Cut: ' + g.cutPercent + '% (house ' + fmtMoney(g.houseCut) + ')' +
+            ' · Winner prize: ' + fmtMoney(g.winnerPrize) +
+            (split ? ' <span class="winner-split-badge">Split × ' + g.winnerCount + '</span>' : '') +
+            '</div>' +
+            renderWinnersBlock(g) +
+            '<div class="item-meta">' + fmtDate(g.createdAt) +
+              (g.endedAt ? ' → ' + fmtDate(g.endedAt) : '') + '</div>' +
+            renderParticipants(g.participants, 'parts-g-' + g.id) + '</div>';
+        }).join('');
+      }
+    }
+
+    const pager = document.getElementById('gamesPager');
+    if (pager) {
+      const total = d.total || 0;
+      const pages = Math.max(1, Math.ceil(total / limit));
+      pager.innerHTML =
+        '<button class="btn btn-ghost btn-sm" ' + (gamesPage <= 1 ? 'disabled' : '') +
+        ' onclick="loadAdminGames(' + (gamesPage - 1) + ')">Prev</button>' +
+        '<span class="muted">Page ' + gamesPage + ' / ' + pages + ' (' + total + ' rows · ' + limit + '/page)</span>' +
+        '<button class="btn btn-ghost btn-sm" ' + (gamesPage >= pages ? 'disabled' : '') +
+        ' onclick="loadAdminGames(' + (gamesPage + 1) + ')">Next</button>';
+    }
+  } catch (e) {
+    console.error(e);
+    if (list) list.innerHTML = '<div class="empty">Failed to load games</div>';
+  }
+}
+
+
+async function loadHouseProfit() {
+  if (!getSecret()) return;
+  const box = document.getElementById('houseProfitBox');
+  if (!box) return;
+  box.innerHTML = '<div class="empty">Loading…</div>';
+  const params = new URLSearchParams();
+  const fr = document.getElementById('profitFrom');
+  const to = document.getElementById('profitTo');
+  const sk = document.getElementById('profitStake');
+  if (fr && fr.value) params.set('from', fr.value);
+  if (to && to.value) params.set('to', to.value);
+  if (sk && sk.value) params.set('stake', sk.value);
+  try {
+    const r = await fetch('/api/admin/house-profit?' + params.toString(), { headers: adminSecretHeader() });
+    const d = await r.json();
+    if (!d.success) {
+      box.innerHTML = '<div class="empty">' + esc(d.message || 'Failed') + '</div>';
+      return;
+    }
+    const s = d.summary || {};
+    let out = '<div class="stats-grid" style="margin-bottom:14px;">' +
+      '<div class="stat-card"><div class="stat-label">House profit</div><div class="stat-value green">' + fmtMoney(s.total_house || 0) + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Games</div><div class="stat-value">' + (s.games || 0) + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Total pots</div><div class="stat-value">' + fmtMoney(s.total_pots || 0) + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Paid to winners</div><div class="stat-value">' + fmtMoney(s.total_paid_winners || 0) + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Exhausted games</div><div class="stat-value">' + (s.exhausted_games || 0) + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">From exhausted pots</div><div class="stat-value gold">' + fmtMoney(s.exhausted_house || 0) + '</div></div>' +
+      '</div>';
+    out += '<h3 style="font-size:14px;margin:12px 0 8px;">Today by room</h3>';
+    const today = d.todayByStake || [];
+    if (!today.length) out += '<div class="empty">No completed games today.</div>';
+    else out += today.map(function(row) {
+      return '<div class="item-meta">' + row.stake + ' Birr · ' + row.games + ' games · house ' + fmtMoney(row.house) + '</div>';
+    }).join('');
+    out += '<h3 style="font-size:14px;margin:12px 0 8px;">By room (filter)</h3>';
+    (d.byStake || []).forEach(function(row) {
+      out += '<div class="item-meta">' + row.stake + ' Birr · ' + row.games + ' games · house ' + fmtMoney(row.house) +
+        ' · avg cut ' + Number(row.avgCut || 0).toFixed(1) + '%</div>';
+    });
+    out += '<h3 style="font-size:14px;margin:12px 0 8px;">By day</h3>';
+    (d.byDay || []).forEach(function(row) {
+      out += '<div class="item-meta">' + esc(String(row.day).slice(0, 10)) + ' · ' + row.games + ' games · house ' + fmtMoney(row.house) + '</div>';
+    });
+    box.innerHTML = out;
+  } catch (e) {
+    console.error(e);
+    box.innerHTML = '<div class="empty">Failed to load profit</div>';
+  }
+}
+
+
+async function loadGameSettings() {
+  if (!getSecret()) return;
+  const r = await fetch('/api/admin/game-settings', { headers: adminSecretHeader() });
+  const d = await r.json();
+  if (d.success) {
+    document.getElementById('winningPattern').value = d.winningPattern;
+    document.getElementById('drawIntervalSeconds').value = d.drawIntervalSeconds;
+  }
+}
+async function saveGameSettings() {
+  if (!requireSecret()) return;
+  if (!(await confirmAction("Save game settings", "Save the current winning pattern and draw interval?", "Save"))) return;
+  const r = await fetch('/api/admin/game-settings', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      adminSecret: getSecret(),
+      winningPattern: document.getElementById('winningPattern').value,
+      drawIntervalSeconds: Number(document.getElementById('drawIntervalSeconds').value)
+    })
+  });
+  const d = await r.json();
+  alert(d.message || (d.success ? 'Game settings saved.' : 'Failed.'));
+}
+async function loadPaymentMethodsAdmin() {
+  if (!getSecret()) return;
+  const r = await fetch('/api/admin/payment-methods', { headers: adminSecretHeader() });
+  const d = await r.json();
+  const list = document.getElementById('paymentMethodsList');
+  if (!d.success) { list.innerHTML = '<div class="empty">' + esc(d.message || 'Failed') + '</div>'; return; }
+  if (!d.methods || !d.methods.length) { list.innerHTML = '<div class="empty">No payment methods.</div>'; return; }
+  list.innerHTML = '<div class="table-wrap"><table class="data"><thead><tr><th>ID</th><th>Method</th><th>Number</th><th>Name</th><th>Active</th><th></th></tr></thead><tbody>' +
+    d.methods.map(function(m) {
+      return '<tr><td class="mono">' + m.id + '</td><td>' + esc(m.method) + '</td><td class="mono">' + esc(m.account_number) +
+        '</td><td>' + esc(m.account_name) + '</td><td>' + (m.active ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-muted">Off</span>') +
+        '</td><td><button class="btn btn-danger btn-sm" onclick="deletePaymentMethod(' + m.id + ')">Delete</button></td></tr>';
+    }).join('') + '</tbody></table></div>';
+}
+async function addPaymentMethod() {
+  if (!requireSecret()) return;
+  const accountNumber = document.getElementById('pmNumber').value.trim();
+  const accountName = document.getElementById('pmName').value.trim();
+  if (!accountNumber || !accountName) return alert('Fill number and name.');
+  const r = await fetch('/api/admin/payment-methods', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      adminSecret: getSecret(),
+      method: document.getElementById('pmMethod').value,
+      accountNumber: accountNumber,
+      accountName: accountName
+    })
+  });
+  const d = await r.json();
+  alert(d.success ? 'Added.' : (d.message || 'Failed.'));
+  if (d.success) {
+    document.getElementById('pmNumber').value = '';
+    document.getElementById('pmName').value = '';
+    loadPaymentMethodsAdmin();
+  }
+}
+async function deletePaymentMethod(id) {
+  if (!requireSecret()) return;
+  if (!confirm('Delete this payment method?')) return;
+  await fetch('/api/admin/payment-methods/' + id, { method: 'DELETE', headers: adminSecretHeader() });
+  loadPaymentMethodsAdmin();
+}
+async function loadAutoVerifySettings() {
+  if (!getSecret()) return;
+  const r = await fetch('/api/admin/deposit-verification-settings', { headers: adminSecretHeader() });
+  const d = await r.json();
+  if (d.success) {
+    const el = document.getElementById('autoVerifyEnabled');
+    if (el) { el.checked = d.autoVerifyEnabled; syncSwitchLabel(el, 'autoVerifyState'); }
+  }
+}
+async function saveAutoVerifySettings() {
+  if (!requireSecret()) return;
+  const enabled = document.getElementById('autoVerifyEnabled').checked;
+  const msg = enabled
+    ? 'Turn ON global auto-verify for all users? Individual users who are set to Off will still require manual review.'
+    : 'Turn OFF global auto-verify for ALL users? Every deposit will go to manual review until you turn this back on.';
+  if (!(await confirmAction('Global auto-verify', msg, enabled ? 'Turn On' : 'Turn Off'))) {
+    // revert checkbox to server state
+    loadAutoVerifySettings();
+    return;
+  }
+  const r = await fetch('/api/admin/deposit-verification-settings', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adminSecret: getSecret(), autoVerifyEnabled: enabled })
+  });
+  const d = await r.json();
+  const st = document.getElementById('autoVerifyStatus');
+  if (d.success) {
+    if (st) st.textContent = 'Global auto-verify is now ' + (enabled ? 'ON' : 'OFF') + '.';
+    alert('Saved. Global auto-verify is ' + (enabled ? 'ON' : 'OFF') + '.');
+  } else {
+    alert(d.message || 'Failed.');
+    loadAutoVerifySettings();
+  }
+}
+async function loadDepositRequests(page) {
+  if (!getSecret()) return;
+  if (page) depPage = page;
+  const params = new URLSearchParams({ page: String(depPage), limit: String(adminPageSize('depPageSize', 10)) });
+  const q = document.getElementById('depQ'); const st = document.getElementById('depStatus');
+  const fr = document.getElementById('depFrom'); const to = document.getElementById('depTo');
+  if (q && q.value.trim()) params.set('q', q.value.trim());
+  if (st && st.value) params.set('status', st.value);
+  if (fr && fr.value) params.set('from', fr.value);
+  if (to && to.value) params.set('to', to.value);
+  const r = await fetch('/api/admin/deposit-requests?' + params, { headers: adminSecretHeader() });
+  const d = await r.json();
+  const list = document.getElementById('depositRequestsList');
+  if (!d.success) { list.innerHTML = '<div class="empty">' + esc(d.message || 'Failed') + '</div>'; return; }
+  const rows = d.requests || [];
+  if (!rows.length) { list.innerHTML = '<div class="empty">No deposit requests.</div>'; }
+  else {
+    list.innerHTML = rows.map(function(x) {
+      const status = (x.status || '').toLowerCase();
+      const badge = status === 'pending' ? 'badge-pending' : status === 'approved' ? 'badge-approved' : 'badge-rejected';
+      return '<div class="item-card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">' +
+        '<strong>' + esc(x.username) + '</strong><span class="badge ' + badge + '">' + esc(x.status) + '</span></div>' +
+        '<div class="item-meta">' + esc(x.method) + ' · Amount: <span class="mono">' + (x.amount != null ? fmtMoney(x.amount) : '—') + '</span>' +
+        (x.transaction_id ? ' · Txn: <span class="mono">' + esc(x.transaction_id) + '</span>' : '') +
+        (x.credited_amount != null ? ' · Credited: ' + fmtMoney(x.credited_amount) : '') +
+        (x.auto_verify_enabled === false ? ' · <span class="badge badge-muted">auto-verify off</span>' : '') +
+        '</div>' +
+        (x.verification_note ? '<div style="margin-top:8px;padding:10px 12px;border-radius:8px;font-size:12.5px;line-height:1.45;border:1px solid ' +
+          (status === 'approved' ? 'rgba(34,197,94,0.35)' : status === 'rejected' ? 'rgba(239,68,68,0.35)' : 'rgba(245,158,11,0.35)') +
+          ';background:' + (status === 'approved' ? 'var(--green-soft)' : status === 'rejected' ? 'var(--red-soft)' : 'var(--gold-soft)') +
+          ';color:' + (status === 'approved' ? 'var(--green)' : status === 'rejected' ? 'var(--red)' : 'var(--gold)') +
+          ';">' + esc(x.verification_note) + '</div>' : '') +
+        (x.submitted_text ? '<div style="margin-top:6px;font-size:12px;white-space:pre-wrap;background:var(--bg-elevated);padding:8px;border-radius:6px;">' + esc(x.submitted_text) + '</div>' : '') +
+        '<div class="item-meta">' + fmtDate(x.created_at) + '</div>' +
+        (status === 'pending' ? '<div class="btn-group" style="margin-top:8px;">' +
+          '<button class="btn btn-success btn-sm" onclick="approveDeposit(' + x.id + ')">Approve</button>' +
+          '<button class="btn btn-danger btn-sm" onclick="rejectDeposit(' + x.id + ')">Reject</button></div>' : '') +
+        '</div>';
+    }).join('');
+  }
+  const pag = document.getElementById('depPagination');
+  if (pag) pag.innerHTML = '<span>Page ' + (d.page||1) + ' of ' + (d.totalPages||1) + ' (' + (d.total||0) + ')</span>' +
+    '<button class="btn btn-secondary btn-sm"' + ((d.page||1)<=1?' disabled':'') + ' onclick="loadDepositRequests(' + ((d.page||1)-1) + ')">Prev</button>' +
+    '<button class="btn btn-secondary btn-sm"' + ((d.page||1)>=(d.totalPages||1)?' disabled':'') + ' onclick="loadDepositRequests(' + ((d.page||1)+1) + ')">Next</button>';
+}
+async function approveDeposit(id) {
+  if (!requireSecret()) return;
+  const amount = await openAdjustModal('Approve deposit', 'Enter the amount (Birr) to credit to the user.');
+  if (amount === null || amount === undefined) return;
+  if (amount <= 0) return alert('Enter a positive amount.');
+  if (!(await confirmAction('Confirm approval', 'Credit ' + amount + ' Birr for deposit #' + id + '?', 'Approve'))) return;
+  const r = await fetch('/api/admin/deposit-requests/' + id + '/approve', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adminSecret: getSecret(), amount: amount })
+  });
+  const d = await r.json();
+  alert(d.success ? 'Approved.' : (d.message || 'Failed.'));
+  loadDepositRequests(); loadStats();
+}
+async function rejectDeposit(id) {
+  if (!requireSecret()) return;
+  if (!(await confirmAction('Reject deposit', 'Reject deposit request #' + id + '?', 'Reject'))) return;
+  const r = await fetch('/api/admin/deposit-requests/' + id + '/reject', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adminSecret: getSecret() })
+  });
+  const d = await r.json();
+  alert(d.success ? 'Rejected.' : (d.message || 'Failed.'));
+  loadDepositRequests(); loadStats();
+}
+
+async function loadWithdrawRequests(page) {
+  if (!getSecret()) return;
+  if (page) wdrPage = page;
+  const params = new URLSearchParams({ page: String(wdrPage), limit: String(adminPageSize('wdrPageSize', 10)) });
+  const q = document.getElementById('wdrQ'); const st = document.getElementById('wdrStatus');
+  const fr = document.getElementById('wdrFrom'); const to = document.getElementById('wdrTo');
+  if (q && q.value.trim()) params.set('q', q.value.trim());
+  if (st && st.value) params.set('status', st.value);
+  if (fr && fr.value) params.set('from', fr.value);
+  if (to && to.value) params.set('to', to.value);
+  const r = await fetch('/api/admin/withdraw-requests?' + params, { headers: adminSecretHeader() });
+  const d = await r.json();
+  const list = document.getElementById('withdrawRequestsList');
+  if (!d.success) { list.innerHTML = '<div class="empty">' + esc(d.message || 'Failed') + '</div>'; return; }
+  const rows = d.requests || [];
+  if (!rows.length) list.innerHTML = '<div class="empty">No withdraw requests.</div>';
+  else list.innerHTML = rows.map(function(x) {
+    const status = (x.status || '').toLowerCase();
+    const badge = status === 'pending' ? 'badge-pending' : status === 'approved' ? 'badge-approved' : 'badge-rejected';
+    return '<div class="item-card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">' +
+      '<strong>' + esc(x.username) + '</strong><span class="badge ' + badge + '">' + esc(x.status) + '</span></div>' +
+      '<div class="item-meta">' + esc(x.method) + ' · <span class="mono text-red">' + fmtMoney(x.amount) + ' Br</span>' +
+      ' · To: <span class="mono">' + esc(x.destination) + '</span>' +
+      (x.account_owner_name ? ' (' + esc(x.account_owner_name) + ')' : '') + '</div>' +
+      '<div class="item-meta">' + fmtDate(x.created_at) + '</div>' +
+      (status === 'pending' ? '<div class="btn-group" style="margin-top:8px;">' +
+        '<button class="btn btn-success btn-sm" onclick="approveWithdraw(' + x.id + ')">Approve</button>' +
+        '<button class="btn btn-danger btn-sm" onclick="rejectWithdraw(' + x.id + ')">Reject</button></div>' : '') +
+      '</div>';
+  }).join('');
+  const pag = document.getElementById('wdrPagination');
+  if (pag) pag.innerHTML = '<span>Page ' + (d.page||1) + ' of ' + (d.totalPages||1) + ' (' + (d.total||0) + ')</span>' +
+    '<button class="btn btn-secondary btn-sm"' + ((d.page||1)<=1?' disabled':'') + ' onclick="loadWithdrawRequests(' + ((d.page||1)-1) + ')">Prev</button>' +
+    '<button class="btn btn-secondary btn-sm"' + ((d.page||1)>=(d.totalPages||1)?' disabled':'') + ' onclick="loadWithdrawRequests(' + ((d.page||1)+1) + ')">Next</button>';
+}
+async function approveWithdraw(id) {
+  if (!requireSecret()) return;
+  if (!confirm('Approve this withdrawal?')) return;
+  const r = await fetch('/api/admin/withdraw-requests/' + id + '/approve', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adminSecret: getSecret() })
+  });
+  const d = await r.json();
+  alert(d.success ? 'Approved.' : (d.message || 'Failed.'));
+  loadWithdrawRequests(); loadStats();
+}
+async function rejectWithdraw(id) {
+  if (!requireSecret()) return;
+  if (!confirm('Reject this withdrawal? (balance will be refunded)')) return;
+  const r = await fetch('/api/admin/withdraw-requests/' + id + '/reject', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adminSecret: getSecret() })
+  });
+  const d = await r.json();
+  alert(d.success ? 'Rejected.' : (d.message || 'Failed.'));
+  loadWithdrawRequests(); loadStats();
+}
+async function loadTransferRequests(page) {
+  if (!getSecret()) return;
+  if (page) trfPage = page;
+  const params = new URLSearchParams({ page: trfPage, limit: 25 });
+  const q = document.getElementById('trfQ'); const st = document.getElementById('trfStatus');
+  const fr = document.getElementById('trfFrom'); const to = document.getElementById('trfTo');
+  if (q && q.value.trim()) params.set('q', q.value.trim());
+  if (st && st.value) params.set('status', st.value);
+  if (fr && fr.value) params.set('from', fr.value);
+  if (to && to.value) params.set('to', to.value);
+  const r = await fetch('/api/admin/transfer-requests?' + params, { headers: adminSecretHeader() });
+  const d = await r.json();
+  const list = document.getElementById('transferRequestsList');
+  if (!d.success) { list.innerHTML = '<div class="empty">' + esc(d.message || 'Failed') + '</div>'; return; }
+  const rows = d.requests || [];
+  if (!rows.length) list.innerHTML = '<div class="empty">No transfer requests.</div>';
+  else list.innerHTML = rows.map(function(x) {
+    const status = (x.status || '').toLowerCase();
+    const badge = status === 'pending' ? 'badge-pending' : status === 'approved' ? 'badge-approved' : 'badge-rejected';
+    return '<div class="item-card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">' +
+      '<strong>' + esc(x.sender_username) + ' → ' + esc(x.recipient_username || x.recipient_phone) + '</strong><span class="badge ' + badge + '">' + esc(x.status) + '</span></div>' +
+      '<div class="item-meta">From: <span class="mono">' + esc(x.sender_username) + '</span> · To phone: <span class="mono">' + esc(x.recipient_phone) + '</span>' +
+      (x.recipient_username ? ' (' + esc(x.recipient_username) + ')' : '') +
+      ' · <span class="mono">' + fmtMoney(x.amount) + ' Br</span></div>' +
+      '<div class="item-meta">' + fmtDate(x.created_at) + '</div>' +
+      (status === 'pending' ? '<div class="btn-group" style="margin-top:8px;">' +
+        '<button class="btn btn-success btn-sm" onclick="approveTransfer(' + x.id + ')">Approve</button>' +
+        '<button class="btn btn-danger btn-sm" onclick="rejectTransfer(' + x.id + ')">Reject</button></div>' : '') +
+      '</div>';
+  }).join('');
+  const pag = document.getElementById('trfPagination');
+  if (pag) pag.innerHTML = '<span>Page ' + (d.page||1) + ' of ' + (d.totalPages||1) + ' (' + (d.total||0) + ')</span>' +
+    '<button class="btn btn-secondary btn-sm"' + ((d.page||1)<=1?' disabled':'') + ' onclick="loadTransferRequests(' + ((d.page||1)-1) + ')">Prev</button>' +
+    '<button class="btn btn-secondary btn-sm"' + ((d.page||1)>=(d.totalPages||1)?' disabled':'') + ' onclick="loadTransferRequests(' + ((d.page||1)+1) + ')">Next</button>';
+}
+async function approveTransfer(id) {
+  if (!requireSecret()) return;
+  if (!confirm('Approve this transfer?')) return;
+  const r = await fetch('/api/admin/transfer-requests/' + id + '/approve', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adminSecret: getSecret() })
+  });
+  const d = await r.json();
+  alert(d.success ? 'Approved.' : (d.message || 'Failed.'));
+  loadTransferRequests(); loadStats();
+}
+async function rejectTransfer(id) {
+  if (!requireSecret()) return;
+  if (!confirm('Reject this transfer? (sender will be refunded)')) return;
+  const r = await fetch('/api/admin/transfer-requests/' + id + '/reject', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adminSecret: getSecret() })
+  });
+  const d = await r.json();
+  alert(d.success ? 'Rejected.' : (d.message || 'Failed.'));
+  loadTransferRequests(); loadStats();
+}
+async function loadReferralSettingsAdmin() {
+  if (!getSecret()) return;
+  const r = await fetch('/api/admin/referral-settings', { headers: adminSecretHeader() });
+  const d = await r.json();
+  if (d.success) {
+    document.getElementById('refRequired').value = d.referralsRequired;
+    document.getElementById('refReward').value = d.rewardAmount;
+  }
+}
+async function saveReferralSettings() {
+  if (!requireSecret()) return;
+  if (!(await confirmAction("Save referral settings", "Save the referral program settings?", "Save"))) return;
+  const r = await fetch('/api/admin/referral-settings', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      adminSecret: getSecret(),
+      referralsRequired: Number(document.getElementById('refRequired').value),
+      rewardAmount: Number(document.getElementById('refReward').value)
+    })
+  });
+  const d = await r.json();
+  alert(d.success ? 'Saved.' : (d.message || 'Failed.'));
+}
+async function loadReferralLeaderboard(page) {
+  if (!getSecret()) {
+    document.getElementById('referralLeaderboard').innerHTML = '<div class="empty">Enter Secret Key above.</div>';
+    return;
+  }
+  if (page) refPage = page;
+  const params = new URLSearchParams({ page: refPage, limit: 25 });
+  const q = document.getElementById('refQ'); const fr = document.getElementById('refFrom'); const to = document.getElementById('refTo');
+  if (q && q.value.trim()) params.set('q', q.value.trim());
+  if (fr && fr.value) params.set('from', fr.value);
+  if (to && to.value) params.set('to', to.value);
+  const r = await fetch('/api/admin/referrals?' + params, { headers: adminSecretHeader() });
+  const d = await r.json();
+  const list = document.getElementById('referralLeaderboard');
+  if (!d.success) { list.innerHTML = '<div class="empty">' + esc(d.message) + '</div>'; return; }
+  const rows = d.users || [];
+  if (!rows.length) list.innerHTML = '<div class="empty">No referral activity yet.</div>';
+  else list.innerHTML = '<div class="table-wrap"><table class="data"><thead><tr><th>User</th><th>Referrals</th><th>Bonus</th><th>Invited By</th><th>Joined</th><th></th></tr></thead><tbody>' +
+    rows.map(function(u) {
+      return '<tr><td><strong>' + esc(u.username) + '</strong></td><td class="mono">' + u.referralCount +
+        '</td><td class="mono">' + fmtMoney(u.bonusBalance) + '</td><td>' + esc(u.referredBy || '—') +
+        '</td><td class="muted">' + fmtDate(u.createdAt) + '</td>' +
+        '<td><button class="btn btn-secondary btn-sm" onclick="adjustBonus(\'' + esc(u.username) + '\')">Adjust</button></td></tr>';
+    }).join('') + '</tbody></table></div>';
+  const pag = document.getElementById('refPagination');
+  if (pag) pag.innerHTML = '<span>Page ' + (d.page||1) + ' of ' + (d.totalPages||1) + ' (' + (d.total||0) + ')</span>' +
+    '<button class="btn btn-secondary btn-sm"' + ((d.page||1)<=1?' disabled':'') + ' onclick="loadReferralLeaderboard(' + ((d.page||1)-1) + ')">Prev</button>' +
+    '<button class="btn btn-secondary btn-sm"' + ((d.page||1)>=(d.totalPages||1)?' disabled':'') + ' onclick="loadReferralLeaderboard(' + ((d.page||1)+1) + ')">Next</button>';
+}
+async function adjustBonus(username) {
+  if (!requireSecret()) return;
+  const amount = await openAdjustModal('Adjust bonus', 'Change bonus for ' + username + '. Use a negative number to subtract.');
+  if (amount === null || amount === undefined) return;
+  const ok = await confirmAction('Confirm bonus change', 'Apply ' + amount + ' Birr to ' + username + "'s bonus?", 'Apply');
+  if (!ok) return;
+  const r = await fetch('/api/admin/adjust-bonus', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ adminSecret: getSecret(), username: username, amount: amount })
+  });
+  const d = await r.json();
+  alert(d.success ? 'New bonus: ' + fmtMoney(d.bonusBalance) + ' Birr' : (d.message || 'Failed.'));
+  if (typeof loadReferralLeaderboard === 'function') loadReferralLeaderboard(refPage || 1);
+  if (document.querySelector('#panel-users.active')) loadUsers(usersPage);
+}
+
+function refreshAll() {
+  if (!requireSecret()) return;
+  loadStats();
+  const active = document.querySelector('.panel.active');
+  if (active) showPanel(active.id.replace('panel-', ''));
+}
+document.getElementById('secret').addEventListener('change', function() {
+  loadStats();
+  loadAutoVerifySettings();
+    loadGameSettings();
+  loadPaymentMethodsAdmin();
+  loadDepositRequests();
+  loadWithdrawRequests();
+  loadTransferRequests();
+  loadReferralSettingsAdmin();
+  loadWelcomeBonusSettings();
+  loadReferralLeaderboard();
+  loadUsers(1);
+});
+document.getElementById('secret').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') e.target.dispatchEvent(new Event('change'));
+});
+</script>
+
+</div>
+
+</body>
 </html>

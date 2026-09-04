@@ -1,182 +1,178 @@
-body { 
-    font-family: Arial, sans-serif; 
-    background: #121212; 
-    color: white; 
-    margin: 0;
-    padding: 0;
-    padding-bottom: 70px; /* Space for bottom nav */
-    display: flex;
-    justify-content: center;
+/* Legacy stylesheet kept for compatibility.
+   Primary player UI design system lives in index.html.
+   Align tokens with the dark theme used there. */
+
+body {
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  background: #0b0f14;
+  color: #e8eef6;
+  margin: 0;
+  padding: 0;
+  padding-bottom: 70px;
+  display: flex;
+  justify-content: center;
+  -webkit-font-smoothing: antialiased;
 }
 
 .container {
-    width: 100%;
-    max-width: 480px;
-    padding: 16px;
-    box-sizing: border-box;
+  width: 100%;
+  max-width: 480px;
+  padding: 16px;
+  box-sizing: border-box;
 }
 
-.card { 
-    background: #1e1e1e; 
-    padding: 20px; 
-    border-radius: 16px; 
-    box-shadow: 0 4px 15px rgba(0,0,0,0.5); 
-    text-align: center;
-    margin-top: 10px;
+.card {
+  background: #151d27;
+  padding: 20px;
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  text-align: center;
+  margin-top: 10px;
+  border: 1px solid #243041;
 }
 
-input { 
-    width: 100%; 
-    padding: 12px; 
-    margin: 8px 0; 
-    border-radius: 8px; 
-    border: 1px solid #333; 
-    background: #2a2a2a; 
-    color: white; 
-    box-sizing: border-box;
-    font-size: 16px;
+input {
+  width: 100%;
+  padding: 12px 14px;
+  margin: 8px 0;
+  border-radius: 10px;
+  border: 1px solid #2a3a4d;
+  background: #0f1620;
+  color: #e8eef6;
+  box-sizing: border-box;
+  font-size: 16px;
+  font-family: inherit;
 }
 
-button { 
-    width: 100%; 
-    padding: 14px; 
-    margin: 8px 0; 
-    border-radius: 8px; 
-    border: none; 
-    background: #0088cc; 
-    color: white; 
-    font-weight: bold; 
-    font-size: 16px;
-    cursor: pointer; 
+button {
+  width: 100%;
+  padding: 14px;
+  margin: 8px 0;
+  border-radius: 10px;
+  border: none;
+  background: #3b82f6;
+  color: white;
+  font-weight: 600;
+  font-size: 15px;
+  font-family: inherit;
+  cursor: pointer;
 }
 
-.btn-play { background: #28a745; font-size: 20px; padding: 18px; margin: 0; }
-.btn-phone { background: #0088cc; font-size: 16px; padding: 14px; }
-.secondary-btn { background: #333; }
+.btn-play { background: linear-gradient(135deg, #3b82f6, #6366f1); font-size: 18px; padding: 16px; margin: 0; }
+.btn-phone { background: #3b82f6; font-size: 16px; padding: 14px; }
+.secondary-btn { background: #334155; }
 .hidden { display: none !important; }
 
-/* Persistent Header Bar */
 .header-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background: #1e1e1e;
-    padding: 12px 16px;
-    border-radius: 12px;
-    margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #151d27;
+  padding: 12px 16px;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  border: 1px solid #243041;
 }
 
-.username-text { font-weight: bold; font-size: 18px; color: #00d26a; }
+.username-text { font-weight: 700; font-size: 18px; color: #22c55e; }
 
 .logout-btn {
-    background: #ff4d4d;
-    border: none;
-    color: white;
-    border-radius: 8px;
-    padding: 8px 12px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: bold;
-    width: auto;
-    margin: 0;
+  background: #ef4444;
+  border: none;
+  color: white;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  width: auto;
+  margin: 0;
 }
 
-/* Card Selector Grid */
 .card-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
-    gap: 6px;
-    max-height: 360px;
-    overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
+  gap: 6px;
+  max-height: 360px;
+  overflow-y: auto;
 }
 
 .card-item {
-    background: #2a2a2a;
-    border: 1px solid #444;
-    border-radius: 6px;
-    padding: 8px 0;
-    font-weight: bold;
-    font-size: 13px;
-    cursor: pointer;
-    user-select: none;
+  background: #1a2430;
+  border: 1px solid #2c3b4f;
+  border-radius: 6px;
+  padding: 8px 0;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
 }
 
-.card-item.selected { background: #28a745; border-color: #00d26a; }
-.card-item.taken { background: #441111; border-color: #ff4d4d; color: #ff8888; cursor: not-allowed; opacity: 0.6; }
+.card-item.selected { background: #3b82f6; border-color: #60a5fa; }
+.card-item.taken { background: rgba(239, 68, 68, 0.2); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5; cursor: not-allowed; opacity: 0.7; }
 
-/* Bottom Navigation Bar */
 .bottom-nav {
-    position: fixed;
-    bottom: 0;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 100%;
-    max-width: 480px;
-    height: 60px;
-    background: #1e1e1e;
-    border-top: 1px solid #333;
-    display: flex;
-    justify-content: space-around;
-    align-items: center;
-    z-index: 1000;
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  height: 60px;
+  background: rgba(15, 22, 32, 0.96);
+  border-top: 1px solid #243041;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  z-index: 1000;
+  backdrop-filter: blur(12px);
 }
 
 .nav-item {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    color: #888;
-    text-decoration: none;
-    font-size: 11px;
-    cursor: pointer;
-    width: 25%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: #6b7a90;
+  text-decoration: none;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  width: 25%;
 }
 
-.nav-item.active { color: #0088cc; font-weight: bold; }
+.nav-item.active { color: #3b82f6; font-weight: 700; }
 .nav-icon { font-size: 20px; margin-bottom: 2px; }
 
-/* Add this to public/style.css */
-.hidden {
-    display: none !important;
-}
-
-/* Sleek Post Cards */
 .notif-card {
-    background: #1a1a24;
-    border: 1px solid #2d2d3f;
-    border-radius: 12px;
-    padding: 16px;
-    margin-bottom: 16px;
-    text-align: left;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  background: #151d27;
+  border: 1px solid #243041;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  text-align: left;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
 .notif-card img {
-    width: 100%;
-    max-height: 220px;
-    object-fit: cover;
-    border-radius: 8px;
-    margin-bottom: 12px;
-    border: 1px solid #33334d;
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  border: 1px solid #243041;
 }
 
 .notif-card .notif-body {
-    font-size: 14px;
-    line-height: 1.6;
-    color: #e0e0e0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #d0dae8;
 }
 
 .notif-card .notif-date {
-    font-size: 11px;
-    color: #71717a;
-    margin-top: 10px;
-    display: flex;
-    align-items: center;
-    gap: 4px;
+  font-size: 11px;
+  color: #6b7a90;
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
-
-
-
-
-
-

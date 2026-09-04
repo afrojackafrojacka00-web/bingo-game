@@ -4,78 +4,655 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Bingo Web Game</title>
+<meta name="theme-color" content="#0b0f14">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <style>
-:root { --bg:#121212; --card:#1e1e1e; --muted:#aaa; --line:#333; --blue:#0088cc; --green:#00d26a; --red:#ff4d4d; --gold:#e6a100; }
+:root, [data-theme="dark"] {
+  --bg:#0b0f14;
+  --card:#151d27;
+  --muted:#8b9bb0;
+  --line:#243041;
+  --blue:#3b82f6;
+  --blue-hover:#2563eb;
+  --green:#22c55e;
+  --red:#ef4444;
+  --gold:#f59e0b;
+  --input-bg:#0f1620;
+  --input-text:#e8eef6;
+  --input-border:#2a3a4d;
+  --text-color:#e8eef6;
+  --card-border:#243041;
+  --info-box-bg:#111821;
+  --notice-bg:rgba(239,68,68,0.12);
+  --notice-text:#fca5a5;
+  --nav-bg:rgba(15,22,32,0.96);
+  --nav-border:#243041;
+  --nav-color:#6b7a90;
+  --nav-active:#3b82f6;
+  --ball-bg:#1a2430;
+  --ball-border:#2c3b4f;
+  --winner-grid-bg:#1a2430;
+  --voice-btn-bg:#111821;
+  --voice-btn-border:#2a3a4d;
+  --voice-btn-active:rgba(59,130,246,0.15);
+  --pay-method-bg:#111821;
+  --pay-method-border:#2a3a4d;
+  --pay-method-active:rgba(59,130,246,0.15);
+  --pay-info-bg:#111821;
+  --pay-account-bg:#1a2430;
+  --pending-pill-bg:rgba(245,158,11,0.15);
+  --referral-bg:rgba(34,197,94,0.1);
+  --referral-border:rgba(34,197,94,0.35);
+  --status-bg:#111821;
+  --notif-card-bg:#151d27;
+  --notif-card-border:#243041;
+  --notif-body:#d0dae8;
+  --notif-date:#6b7a90;
+  --preview-bg:#111821;
+  --preview-text:#e8eef6;
+  --preview-border:#243041;
+  --shadow:0 8px 24px rgba(0,0,0,0.35);
+  --radius:14px;
+  --radius-sm:10px;
+  --focus:0 0 0 3px rgba(59,130,246,0.35);
+}
+
+[data-theme="light"] {
+  --bg:#f3f5f8;
+  --card:#ffffff;
+  --muted:#64748b;
+  --line:#e2e8f0;
+  --blue:#2563eb;
+  --blue-hover:#1d4ed8;
+  --green:#16a34a;
+  --red:#dc2626;
+  --gold:#d97706;
+  --input-bg:#f8fafc;
+  --input-text:#0f172a;
+  --input-border:#cbd5e1;
+  --text-color:#0f172a;
+  --card-border:#e2e8f0;
+  --info-box-bg:#f8fafc;
+  --notice-bg:#fef2f2;
+  --notice-text:#b91c1c;
+  --nav-bg:rgba(255,255,255,0.96);
+  --nav-border:#e2e8f0;
+  --nav-color:#94a3b8;
+  --nav-active:#2563eb;
+  --ball-bg:#f1f5f9;
+  --ball-border:#cbd5e1;
+  --winner-grid-bg:#f1f5f9;
+  --voice-btn-bg:#f8fafc;
+  --voice-btn-border:#e2e8f0;
+  --voice-btn-active:#eff6ff;
+  --pay-method-bg:#f8fafc;
+  --pay-method-border:#e2e8f0;
+  --pay-method-active:#eff6ff;
+  --pay-info-bg:#f8fafc;
+  --pay-account-bg:#f1f5f9;
+  --pending-pill-bg:#fff7ed;
+  --referral-bg:#ecfdf5;
+  --referral-border:#a7f3d0;
+  --status-bg:#f1f5f9;
+  --notif-card-bg:#ffffff;
+  --notif-card-border:#e2e8f0;
+  --notif-body:#1e293b;
+  --notif-date:#64748b;
+  --preview-bg:#f8fafc;
+  --preview-text:#0f172a;
+  --preview-border:#e2e8f0;
+  --shadow:0 8px 24px rgba(15,23,42,0.08);
+  --focus:0 0 0 3px rgba(37,99,235,0.25);
+}
+
 * { box-sizing:border-box; }
-body { font-family:Arial,sans-serif; background:var(--bg); color:#fff; margin:0; padding:15px 15px 85px; }
+html { -webkit-text-size-adjust:100%; }
+body {
+  font-family:'Inter', system-ui, -apple-system, sans-serif;
+  background:var(--bg);
+  color:var(--text-color);
+  margin:0;
+  padding:16px 16px 88px;
+  line-height:1.5;
+  min-height:100dvh;
+  -webkit-font-smoothing:antialiased;
+}
 .hidden { display:none !important; }
-.card { background:var(--card); padding:20px; border-radius:14px; margin-bottom:16px; text-align:center; border:1px solid #2b2b2b; }
-input, textarea, button { width:100%; padding:12px; margin-top:8px; border-radius:9px; border:1px solid var(--line); background:#2a2a2a; color:#fff; box-sizing:border-box; }
-button { cursor:pointer; font-weight:bold; border:none; }
+.card {
+  background:var(--card);
+  padding:20px;
+  border-radius:var(--radius);
+  margin-bottom:16px;
+  text-align:center;
+  border:1px solid var(--card-border);
+  color:var(--text-color);
+  box-shadow:var(--shadow);
+}
+input, textarea, select {
+  width:100%;
+  padding:12px 14px;
+  margin-top:8px;
+  border-radius:var(--radius-sm);
+  border:1px solid var(--input-border);
+  background:var(--input-bg);
+  color:var(--input-text);
+  box-sizing:border-box;
+  font-size:16px;
+  font-family:inherit;
+  transition:border-color .15s ease, box-shadow .15s ease;
+}
+input:focus, textarea:focus, select:focus {
+  outline:none;
+  border-color:var(--blue);
+  box-shadow:var(--focus);
+}
+input::placeholder, textarea::placeholder { color:var(--muted); }
+button {
+  width:100%;
+  padding:14px;
+  margin:8px 0;
+  border-radius:var(--radius-sm);
+  border:none;
+  background:var(--blue);
+  color:#fff;
+  font-weight:600;
+  font-size:15px;
+  font-family:inherit;
+  cursor:pointer;
+  transition:background .15s ease, transform .1s ease, opacity .15s ease;
+}
+button:hover:not(:disabled) { background:var(--blue-hover); }
+button:active:not(:disabled) { transform:scale(0.98); }
 button:disabled { opacity:.55; cursor:not-allowed; }
-.btn-play { background:var(--blue); font-size:16px; margin-top:15px; }
-.btn-secondary { background:#333; }
-.btn-danger { background:var(--red); }
-.btn-success { background:var(--green); color:#07140d; }
-.header-bar { display:flex; justify-content:space-between; align-items:center; gap:10px; background:var(--card); padding:10px 14px; border-radius:10px; margin-bottom:15px; border:1px solid #2d2d3f; }
-.user-info { display:flex; align-items:center; gap:8px; font-size:14px; flex-wrap:wrap; }
-.status-container { display:inline-flex; align-items:center; gap:4px; background:#2a2a2a; padding:3px 8px; border-radius:12px; font-size:12px; }
-.status-dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
-.status-dot.online { background:var(--green); box-shadow:0 0 6px var(--green); }
-.status-dot.offline { background:var(--red); box-shadow:0 0 6px var(--red); }
-.btn-logout { background:var(--red); width:auto; padding:7px 10px; margin:0; }
-.bottom-nav { position:fixed; z-index:100; bottom:0; left:0; right:0; background:var(--card); display:flex; justify-content:space-around; padding:12px 0; border-top:1px solid var(--line); }
-.nav-item { color:var(--muted); text-align:center; font-size:12px; cursor:pointer; width:25%; line-height:1.6; }
-.nav-item.active { color:var(--blue); font-weight:bold; }
-.wallet-balance { font-size:34px; font-weight:800; color:var(--green); margin:12px 0 4px; }
+.btn-play {
+  background:linear-gradient(135deg, var(--blue), #6366f1);
+  font-size:18px;
+  font-weight:700;
+  padding:16px;
+  margin:0;
+  letter-spacing:-0.01em;
+}
+.btn-play:hover:not(:disabled) { filter:brightness(1.05); background:linear-gradient(135deg, var(--blue-hover), #4f46e5); }
+.btn-secondary { background:#334155; color:#fff; }
+[data-theme="light"] .btn-secondary { background:#e2e8f0; color:#0f172a; }
+.btn-danger { background:var(--red); color:#fff; }
+.btn-success { background:var(--green); color:#052e16; }
+.btn-logout {
+  background:var(--red);
+  width:auto;
+  padding:8px 14px;
+  margin:0;
+  color:#fff;
+  font-size:13px;
+  font-weight:600;
+}
+.back-btn {
+  width:auto;
+  margin:0;
+  padding:8px 14px;
+  background:#334155;
+  color:#fff;
+  font-size:13px;
+  font-weight:600;
+}
+[data-theme="light"] .back-btn { background:#e2e8f0; color:#0f172a; }
+.header-bar {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  background:var(--card);
+  padding:12px 14px;
+  border-radius:var(--radius-sm);
+  margin-bottom:16px;
+  border:1px solid var(--card-border);
+  color:var(--text-color);
+  box-shadow:var(--shadow);
+}
+.user-info {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:14px;
+  font-weight:500;
+  flex-wrap:wrap;
+  color:var(--text-color);
+}
+.status-container {
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  background:var(--status-bg);
+  padding:4px 10px;
+  border-radius:999px;
+  font-size:12px;
+  font-weight:500;
+}
+.status-dot {
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  display:inline-block;
+}
+.status-dot.online { background:var(--green); box-shadow:0 0 8px rgba(34,197,94,0.6); }
+.status-dot.offline { background:var(--red); box-shadow:0 0 8px rgba(239,68,68,0.5); }
+.bottom-nav {
+  position:fixed;
+  z-index:100;
+  bottom:0;
+  left:0;
+  right:0;
+  background:var(--nav-bg);
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+  display:flex;
+  justify-content:space-around;
+  padding:10px 0 calc(10px + env(safe-area-inset-bottom, 0px));
+  border-top:1px solid var(--nav-border);
+}
+.nav-item {
+  color:var(--nav-color);
+  text-align:center;
+  font-size:11px;
+  font-weight:500;
+  cursor:pointer;
+  width:25%;
+  line-height:1.5;
+  transition:color .15s ease;
+  -webkit-tap-highlight-color:transparent;
+}
+.nav-item.active { color:var(--nav-active); font-weight:700; }
+.wallet-balance { 
+  font-size:34px; 
+  font-weight:800; 
+  color:var(--green); 
+  margin:12px 0 4px; 
+}
 .history-list { display:flex; flex-direction:column; gap:12px; }
-.history-card { background:var(--card); border:1px solid #2b2b2b; border-radius:14px; padding:16px; text-align:left; border-left:4px solid var(--muted); }
+.history-card {
+  background:var(--card);
+  border:1px solid var(--card-border);
+  border-radius:var(--radius);
+  padding:16px;
+  text-align:left;
+  border-left:4px solid var(--muted);
+  color:var(--text-color);
+  box-shadow:var(--shadow);
+  transition:border-color .15s ease;
+}
 .history-card.won { border-left-color:var(--green); }
 .history-card.lost { border-left-color:var(--red); }
-.history-top { display:flex; justify-content:space-between; align-items:center; }
-.history-outcome { font-weight:800; font-size:15px; }
-.history-date { font-size:11px; color:var(--muted); }
-.tx-row { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #2b2b2b; }
+.history-top { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.history-outcome { font-weight:700; font-size:15px; letter-spacing:-0.01em; }
+.history-date { font-size:11px; color:var(--muted); font-weight:500; }
+.tx-row { 
+  display:flex; 
+  justify-content:space-between; 
+  align-items:center; 
+  padding:10px 0; 
+  border-bottom:1px solid var(--card-border);
+  color:var(--text-color);
+}
 .tx-row:last-child { border-bottom:none; }
 .tx-type { font-weight:bold; font-size:14px; }
 .tx-date { font-size:11px; color:var(--muted); margin-top:2px; }
 .tx-amount { font-weight:800; font-size:14px; }
 .tx-amount.positive { color:var(--green); }
 .tx-amount.negative { color:var(--red); }
-#languageSelect { margin-top:6px; }
-.grid-container { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; margin-top:15px; }
-.card-item { background:#2a2a2a; padding:13px 0; text-align:center; font-weight:bold; border-radius:7px; cursor:pointer; border:1px solid #444; }
-.card-item.selected { background:var(--blue); border-color:#00aaff; }
-.card-item.taken { background:#444; color:#888; cursor:not-allowed; opacity:.65; }
-.page-title { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; }
-.back-btn { width:auto; margin:0; padding:8px 12px; background:#333; }
+.grid-container { 
+  display:grid; 
+  grid-template-columns:repeat(5,1fr); 
+  gap:8px; 
+  margin-top:15px; 
+}
+.card-item {
+  background:var(--input-bg);
+  padding:13px 0;
+  text-align:center;
+  font-weight:600;
+  border-radius:8px;
+  cursor:pointer;
+  border:1px solid var(--input-border);
+  color:var(--input-text);
+  transition:background .12s ease, border-color .12s ease, transform .1s ease;
+  -webkit-tap-highlight-color:transparent;
+  user-select:none;
+}
+.card-item:hover:not(.taken):not(.selected) { border-color:var(--blue); }
+.card-item.selected { background:var(--blue); border-color:var(--blue); color:#fff; box-shadow:0 0 0 1px rgba(59,130,246,0.4); }
+.card-item.taken {
+  background:rgba(239,68,68,0.2);
+  color:var(--muted);
+  cursor:not-allowed;
+  opacity:.7;
+  border-color:rgba(239,68,68,0.35);
+}
+.page-title { 
+  display:flex; 
+  justify-content:space-between; 
+  align-items:center; 
+  gap:10px; 
+  margin-bottom:10px; 
+  color:var(--text-color);
+}
 .room-list { display:flex; flex-direction:column; gap:10px; }
-.room-row { display:grid; grid-template-columns:1.15fr .8fr 1fr; gap:8px; align-items:center; background:#252525; border:1px solid #343434; border-radius:12px; padding:14px; text-align:left; }
-.room-stake { font-size:18px; font-weight:800; }
-.room-meta { font-size:12px; color:var(--muted); margin-top:5px; }
-.room-status { font-size:12px; line-height:1.45; }
-.room-status.waiting { color:#9aa0a6; }
+.room-row {
+  display:grid;
+  grid-template-columns:1.15fr .8fr 1fr;
+  gap:8px;
+  align-items:center;
+  background:var(--card);
+  border:1px solid var(--card-border);
+  border-radius:var(--radius-sm);
+  padding:14px;
+  text-align:left;
+  color:var(--text-color);
+  transition:border-color .15s ease, box-shadow .15s ease;
+}
+.room-row:hover { border-color:var(--blue); }
+.room-stake { font-size:18px; font-weight:800; letter-spacing:-0.02em; }
+.room-meta { font-size:12px; color:var(--muted); margin-top:5px; font-weight:500; }
+.room-status { font-size:12px; line-height:1.45; font-weight:500; }
+.room-status.waiting { color:var(--muted); }
 .room-status.joining { color:var(--gold); }
 .room-status.playing { color:var(--red); }
-.room-join { width:auto; margin:0; padding:10px 12px; background:var(--blue); }
-.my-game { border-color:var(--blue); }
-.info-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:9px; margin:15px 0; }
-.info-box { background:#252525; padding:12px; border-radius:10px; text-align:left; }
-.info-box span { display:block; color:var(--muted); font-size:11px; margin-bottom:4px; }
-.info-box strong { font-size:16px; }
-.notice { color:#ffb4b4; margin-bottom:10px; background:#2b1717; padding:10px; border-radius:8px; }
-.status-pill { display:inline-block; padding:5px 9px; border-radius:999px; background:#292929; font-size:12px; }
+.room-join {
+  width:auto;
+  margin:0;
+  padding:10px 16px;
+  background:var(--blue);
+  color:#fff;
+  font-size:13px;
+  font-weight:600;
+  border-radius:8px;
+}
+.my-game { border-color:var(--blue); box-shadow:0 0 0 1px rgba(59,130,246,0.25); }
+.info-grid {
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:10px;
+  margin:15px 0;
+}
+.info-box {
+  background:var(--info-box-bg);
+  padding:12px;
+  border-radius:var(--radius-sm);
+  text-align:left;
+  color:var(--text-color);
+  border:1px solid var(--card-border);
+}
+.info-box span { display:block; color:var(--muted); font-size:11px; font-weight:600; letter-spacing:0.04em; margin-bottom:4px; }
+.info-box strong { font-size:16px; font-weight:700; letter-spacing:-0.01em; }
+.notice { 
+  color:var(--notice-text); 
+  margin-bottom:10px; 
+  background:var(--notice-bg); 
+  padding:10px; 
+  border-radius:8px; 
+}
+.status-pill { 
+  display:inline-block; 
+  padding:5px 9px; 
+  border-radius:999px; 
+  background:var(--info-box-bg); 
+  font-size:12px;
+}
 .small { color:var(--muted); font-size:13px; }
-.called-numbers{display:flex;flex-wrap:wrap;gap:7px;justify-content:center;margin:14px 0}.ball{width:34px;height:34px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:#333;border:1px solid #555;font-weight:800}.my-game-cards{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:14px}.game-card-choice{background:#0088cc;padding:12px}.game-card-choice small{display:block;opacity:.8;margin-top:3px}
-.modal { position:fixed; z-index:9999; inset:0; background:rgba(0,0,0,.85); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; padding:16px; }
+.called-numbers{display:flex;flex-wrap:wrap;gap:7px;justify-content:center;margin:14px 0}
+.ball{
+  width:34px;
+  height:34px;
+  border-radius:50%;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  background:var(--ball-bg);
+  border:1px solid var(--ball-border);
+  font-weight:800;
+  color:var(--text-color);
+}
+.my-game-cards{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:14px}
+.game-card-choice{background:#0088cc;padding:12px;color:#fff;border-radius:8px}
+.game-card-choice small{display:block;opacity:.8;margin-top:3px}
+.modal { 
+  position:fixed; 
+  z-index:9999; 
+  inset:0; 
+  background:rgba(0,0,0,0.85); 
+  backdrop-filter:blur(4px); 
+  display:flex; 
+  align-items:center; 
+  justify-content:center; 
+  padding:16px;
+}
+[data-theme="light"] .modal {
+  background:rgba(255,255,255,0.92);
+}
 .modal .card { width:100%; max-width:420px; margin:0; }
 .card-link { color:var(--blue); cursor:pointer; text-decoration:underline; text-underline-offset:2px; }
-.winner-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:4px; margin:15px 0; }
-.winner-grid span { padding:12px 2px; background:#2a2a2a; border-radius:6px; font-weight:700; }
+.winner-grid { 
+  display:grid; 
+  grid-template-columns:repeat(5,1fr); 
+  gap:4px; 
+  margin:15px 0; 
+}
+.winner-grid span { 
+  padding:12px 2px; 
+  background:var(--winner-grid-bg); 
+  border-radius:6px; 
+  font-weight:700;
+  color:var(--text-color);
+}
 .winner-grid .win { background:var(--green); color:#071a0e; font-weight:bold; outline:2px solid #b8ffca; }
-@media (max-width:390px) { .room-row { grid-template-columns:1fr auto; } .room-status { grid-column:1; } .room-join { grid-column:2; grid-row:1 / span 2; } }
+.voice-pack-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; }
+.voice-pack-btn { 
+  background:var(--voice-btn-bg); 
+  border:2px solid var(--voice-btn-border); 
+  border-radius:10px; 
+  padding:10px 4px; 
+  font-size:22px; 
+  display:flex; 
+  flex-direction:column; 
+  align-items:center; 
+  gap:4px;
+  color:var(--text-color);
+  width:100%;
+  margin:0;
+}
+.voice-pack-btn span { font-size:10px; font-weight:bold; color:var(--muted); }
+.voice-pack-btn.active { border-color:var(--blue); background:var(--voice-btn-active); }
+.voice-pack-btn.active span { color:var(--text-color); }
+.wallet-action-row { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:16px; }
+.wallet-action-btn { 
+  background:var(--card); 
+  border:1px solid var(--card-border); 
+  border-radius:12px; 
+  padding:14px 4px; 
+  display:flex; 
+  flex-direction:column; 
+  align-items:center; 
+  gap:6px; 
+  font-size:22px;
+  color:var(--text-color);
+  width:100%;
+  margin:0;
+}
+.wallet-action-btn span { font-size:12px; font-weight:bold; color:var(--text-color); }
+.pay-method-toggle { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px; }
+.pay-method-btn { 
+  background:var(--pay-method-bg); 
+  border:2px solid var(--pay-method-border); 
+  border-radius:10px; 
+  padding:10px; 
+  display:flex; 
+  flex-direction:column; 
+  align-items:center; 
+  gap:6px;
+  color:var(--text-color);
+  width:100%;
+  margin:0;
+}
+.pay-method-btn img { width:48px; height:48px; object-fit:cover; border-radius:8px; }
+.pay-method-btn span { font-size:13px; font-weight:bold; color:var(--text-color); }
+.pay-method-btn.active { border-color:var(--blue); background:var(--pay-method-active); }
+.pay-method-info { 
+  text-align:left; 
+  background:var(--pay-info-bg); 
+  border-radius:10px; 
+  padding:12px; 
+  margin-top:12px; 
+  font-size:13px; 
+  line-height:1.6; 
+  white-space:pre-wrap;
+  color:var(--text-color);
+}
+.pay-account-row { 
+  display:flex; 
+  justify-content:space-between; 
+  align-items:center; 
+  background:var(--pay-account-bg); 
+  border-radius:8px; 
+  padding:8px 10px; 
+  margin:6px 0;
+  color:var(--text-color);
+}
+.pay-copy-btn { 
+  width:auto; 
+  padding:5px 12px; 
+  margin:0 0 0 8px; 
+  background:#333; 
+  font-size:12px;
+  color:#fff;
+  border-radius:6px;
+}
+[data-theme="light"] .pay-copy-btn { background:#ddd; color:#111; }
+.pending-row { 
+  display:flex; 
+  justify-content:space-between; 
+  align-items:center; 
+  padding:9px 0; 
+  border-bottom:1px solid var(--card-border); 
+  font-size:13px;
+  color:var(--text-color);
+}
+.pending-row:last-child { border-bottom:none; }
+.pending-pill { 
+  background:var(--pending-pill-bg); 
+  color:var(--gold); 
+  padding:3px 9px; 
+  border-radius:999px; 
+  font-size:11px; 
+  font-weight:bold; 
+}
+.referral-box { 
+  background:var(--referral-bg); 
+  border:1px solid var(--referral-border); 
+  border-radius:12px; 
+  padding:14px; 
+  margin-top:18px; 
+  text-align:left;
+  color:var(--text-color);
+}
+.referral-link-row { display:flex; gap:8px; margin-top:8px; }
+.referral-link-row input { margin-top:0; font-size:12px; }
+.referral-link-row button { 
+  width:auto; 
+  margin:0; 
+  padding:8px 16px; 
+  font-size:12px;
+}
+.home-extra-buttons { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:16px; }
+.home-extra-buttons button { 
+  width:100%; 
+  margin:0; 
+  padding:14px; 
+}
+
+/* Notification Modal Styles */
+/* Notification Modal Styles */
+#notifModal .card {
+  max-height:85vh;
+  display:flex;
+  flex-direction:column;
+}
+#notifListContainer {
+  overflow-y:auto;
+  text-align:left;
+  flex:1;
+}
+.notif-card {
+  background:var(--notif-card-bg);
+  border:1px solid var(--notif-card-border);
+  border-radius:12px;
+  padding:16px;
+  margin-bottom:16px;
+  text-align:left;
+  box-shadow:0 4px 12px rgba(0,0,0,0.3);
+  color:var(--notif-body);
+}
+.notif-card img {
+  width:100%;
+  border-radius:8px;
+  margin-bottom:12px;
+  border:1px solid var(--notif-card-border);
+  display:block;
+}
+.notif-card .notif-body {
+  font-size:14px;
+  line-height:1.6;
+  color:var(--notif-body);
+}
+.notif-card .notif-date {
+  font-size:11px;
+  color:var(--notif-date);
+  margin-top:10px;
+  display:flex;
+  align-items:center;
+  gap:4px;
+}
+#notifListContainer .small {
+  color:var(--muted);
+}
+
+/* Card Preview Styles */
+#cardPreview {
+  margin:10px 0;
+  text-align:left;
+}
+#cardPreview > div {
+  background:var(--preview-bg);
+  border:1px solid var(--preview-border);
+  border-radius:10px;
+  padding:10px;
+  color:var(--preview-text);
+}
+#cardPreview b {
+  color:var(--text-color);
+}
+#cardPreview .btn-play {
+  background:var(--blue);
+  color:#fff;
+  padding:8px 16px;
+  font-size:14px;
+  margin-top:8px;
+}
+#cardPreview .btn-play:hover {
+  opacity:0.9;
+}
+#cardPreview .btn-play:disabled {
+  opacity:0.5;
+  cursor:not-allowed;
+}
+
+@media (max-width:390px) { 
+  .room-row { grid-template-columns:1fr auto; } 
+  .room-status { grid-column:1; } 
+  .room-join { grid-column:2; grid-row:1 / span 2; } 
+}
 </style>
 </head>
 <body>
@@ -112,6 +689,14 @@ button:disabled { opacity:.55; cursor:not-allowed; }
    <option value="en">English</option>
    <option value="am">አማርኛ (Amharic)</option>
   </select>
+  <label class="small" style="display:block;text-align:left;margin-top:14px;">Theme</label>
+  <select id="themeSelect" onchange="changeTheme(this.value)">
+   <option value="dark">Dark</option>
+   <option value="light">Light</option>
+  </select>
+  <label class="small" style="display:block;text-align:left;margin-top:14px;">Display name</label>
+  <input id="displayNameInput" placeholder="Shown name (optional)">
+  <button class="btn-secondary" style="margin-top:8px;" onclick="saveDisplayName()">Save Display Name</button>
  </div>
 </div>
 
@@ -125,12 +710,49 @@ button:disabled { opacity:.55; cursor:not-allowed; }
 </div>
 
 <div id="authBox" class="card">
- <div id="loginForm"><h2>Welcome Back 👋</h2><input id="loginUsername" placeholder="Username"><input id="loginPassword" type="password" placeholder="Password"><button class="btn-play" onclick="loginUser()">Log In 🚀</button><p class="small">Don't have an account? <a href="#" onclick="switchToRegister()" style="color:var(--blue)">Register</a></p></div>
- <div id="registerForm" class="hidden"><h2>Create Account 📝</h2><input id="regUsername" placeholder="Username"><input id="regPassword" type="password" placeholder="Password"><input id="regPhone" type="tel" placeholder="Phone Number (Optional)"><button class="btn-play" onclick="registerUser()">Register & Play 🚀</button><p class="small">Already have an account? <a href="#" onclick="switchToLogin()" style="color:var(--blue)">Log In</a></p></div>
+ <div id="loginForm">
+   <h2>Welcome Back 👋</h2>
+   <input id="loginUsername" placeholder="Username" autocomplete="username">
+   <input id="loginPassword" type="password" placeholder="Password" autocomplete="current-password">
+   <button class="btn-play" onclick="loginUser()">Log In 🚀</button>
+   <div id="webLoginHelp" style="margin-top:18px;padding:14px;border-radius:10px;background:rgba(0,136,204,0.12);border:1px solid rgba(0,136,204,0.35);text-align:left;">
+     <p class="small" style="margin:0 0 8px;font-weight:600;color:var(--blue);">New here? Accounts are created on Telegram only.</p>
+     <ol class="small" style="margin:0;padding-left:18px;line-height:1.55;color:var(--text);">
+       <li>Open our Telegram bot / Mini App</li>
+       <li>Your account is created automatically</li>
+       <li>Go to <strong>Account</strong> → set a username (optional) and password (min 6 characters)</li>
+       <li>Come back here and log in with that username and password</li>
+     </ol>
+     <p class="small" style="margin:10px 0 0;"><a id="telegramBotLink" href="https://t.me/kal_bingo_bot" target="_blank" rel="noopener" style="color:var(--blue);font-weight:600;">Open Telegram bot →</a></p>
+   </div>
+ </div>
 </div>
 
 <div id="tabGames" class="tab-content hidden">
- <div id="homeBox" class="card"><h2 data-i18n="readyTitle">Ready to Play? 🎲</h2><p class="small" data-i18n="readyBody">Choose a stake, join a room, select your cards and play.</p><button class="btn-play" onclick="goToGameScreen()" data-i18n="playBtn">Play Bingo 🚀</button></div>
+ <div id="homeBox" class="card"><h2 data-i18n="readyTitle">Ready to Play? 🎲</h2><p class="small" data-i18n="readyBody">Choose a stake, join a room, select your cards and play.</p><button class="btn-play" onclick="goToGameScreen()" data-i18n="playBtn">Play Classic Bingo 🚀</button>
+  <button class="btn-play" style="margin-top:10px;background:linear-gradient(135deg,#f59e0b,#ef4444);" onclick="openInstantBingo()">⚡ Instant Bingo</button>
+  <p class="small" style="margin-top:8px;">Instant: 20 numbers · up to 4 cards · line ×2 · corners ×2.5 · same wallet</p>
+
+   <div id="referralBox" class="referral-box">
+     <h3 style="margin:0 0 6px;">🎁 Invite Friends, Earn Bonus</h3>
+     <p class="small" id="referralProgressText">Invite friends using your link below.</p>
+     <label class="small" style="display:block;margin-top:8px;">Telegram Mini App link</label>
+     <div class="referral-link-row">
+       <input type="text" id="referralLinkInput" readonly>
+       <button class="btn-secondary" style="width:auto;" onclick="copyReferralLink()">Copy</button>
+     </div>
+     <label style ="display: none;" class="small" style="display:block;margin-top:8px;">Web link</label>
+     <div style ="display: none;" class="referral-link-row">
+       <input type="text" id="referralWebLinkInput" readonly>
+       <button class="btn-secondary" style="width:auto;" onclick="navigator.clipboard?.writeText(document.getElementById('referralWebLinkInput').value).then(()=>showNotification('Web link copied!'))">Copy</button>
+     </div>
+   </div>
+
+   <div class="home-extra-buttons">
+     <button class="btn-secondary" id="homeButton1">Button 1</button>
+     <button class="btn-secondary" id="homeButton2">Button 2</button>
+   </div>
+ </div>
 
  <div id="roomsBox" class="hidden">
    <div class="page-title"><h2 style="margin:0">🎮 Bingo Rooms</h2><button class="back-btn" onclick="showHome()">← Back</button></div>
@@ -138,13 +760,42 @@ button:disabled { opacity:.55; cursor:not-allowed; }
    <div id="roomsList" class="room-list"></div>
  </div>
 
- <div id="selectionBox" class="card hidden">
+ <div id="instantBox" class="hidden">
+   <div class="page-title">
+     <h2 style="margin:0">⚡ Instant Bingo</h2>
+     <button class="back-btn" onclick="showHome()">← Back</button>
+   </div>
+   <div class="card" style="text-align:left;">
+     <p class="small">One shared draw of <strong>20 numbers</strong> for everyone in the round. Pick up to <strong>4 cards</strong>. Line (row/col/diag) pays <strong>×2</strong>, four corners <strong>×2.5</strong> on that card’s stake. Same account &amp; wallet as Classic Bingo.</p>
+     <label class="small">Stake</label>
+     <select id="instantStake" style="width:100%;margin-top:6px;"></select>
+     <div id="instantRoundMeta" class="small" style="margin:10px 0;"></div>
+     <div class="info-grid" style="margin:10px 0;">
+       <div class="info-box"><span>COST</span><strong id="instantCost">0 Birr</strong></div>
+       <div class="info-box"><span>SELECTED</span><strong id="instantSelectedCount">0 / 4</strong></div>
+     </div>
+     <div id="instantCardGrid" class="grid-container" style="max-height:280px;overflow:auto;"></div>
+     <button class="btn-play" id="instantJoinBtn" onclick="joinInstantRound()" style="margin-top:12px;">Join round</button>
+     <p id="instantMsg" class="small" style="margin-top:8px;"></p>
+   </div>
+   <div class="card" style="text-align:left;margin-top:12px;">
+     <h3 style="margin:0 0 8px;font-size:15px;">Last results / history</h3>
+     <div id="instantHistory" class="small">Play a round to see results here.</div>
+   </div>
+ </div>
+
+ <div id="selectionBox" class="card hidden" style="padding-bottom:90px;">
    <div class="page-title"><h2 id="selectionTitle" style="margin:0">Select Your Cards 🎟️</h2><button class="back-btn" onclick="leaveCurrentRoom()">Leave</button></div>
-   <p><span id="lobbyStatus" class="status-pill">Joining</span></p>
+   <p style="display:none;"><span id="lobbyStatus" class="status-pill">Joining</span></p>
    <p>⏱ <strong id="lobbyTimer">40s</strong> &nbsp; | &nbsp; 👥 Ready: <strong id="readyCount">0</strong></p>
    <div id="lockoutNotice" class="notice hidden"></div>
-   <div id="cardGrid" class="grid-container"></div>
-   <div style="margin-top:15px;"><p>Selected Cards: <strong id="selectedCount">0</strong></p><button id="playGameBtn" class="btn-play" disabled onclick="launchGame()">READY 🚀</button></div>
+   <input type="search" id="cardSearchInput" placeholder="Search card number..." style="margin:10px 0;" oninput="searchCards(this.value)">
+   <div id="cardPreview" class="hidden" style="margin:10px 0;text-align:left;"></div>
+   <div id="cardGrid" class="grid-container" style="max-height:50vh;overflow-y:auto;"></div>
+   <div id="readyBar" style="position:fixed;bottom:70px;left:0;right:0;background:var(--card);border-top:1px solid var(--line);padding:10px 15px;z-index:50;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+     <span>Selected: <strong id="selectedCount">0</strong></span>
+     <button id="playGameBtn" class="btn-play" style="width:auto;margin:0;padding:10px 24px;" disabled onclick="launchGame()">READY 🚀</button>
+   </div>
  </div>
 
  <div id="gamePlayBox" class="card hidden">
@@ -169,6 +820,16 @@ button:disabled { opacity:.55; cursor:not-allowed; }
   <h2 data-i18n="walletTitle">💰 My Wallet</h2>
   <div id="walletBalanceDisplay" class="wallet-balance">0.00 Birr</div>
   <p class="small" data-i18n="walletSub">Your current balance</p>
+  <p class="small" id="walletBonusDisplay" style="margin-top:-6px;">Bonus: 0.00 Birr</p>
+ </div>
+ <div class="wallet-action-row">
+   <button class="wallet-action-btn" onclick="openDepositModal()">⬇️<span>Deposit</span></button>
+   <button class="wallet-action-btn" onclick="openWithdrawModal()">⬆️<span>Withdraw</span></button>
+   <button class="wallet-action-btn" onclick="openTransferModal()">🔁<span>Transfer</span></button>
+ </div>
+ <div id="pendingRequestsCard" class="card hidden" style="text-align:left;">
+   <h3 style="margin-top:0;">Pending Requests</h3>
+   <div id="pendingRequestsList"></div>
  </div>
  <div class="card" style="text-align:left;">
   <h3 style="margin-top:0;" data-i18n="walletTxTitle">Recent Transactions</h3>
@@ -176,7 +837,82 @@ button:disabled { opacity:.55; cursor:not-allowed; }
  </div>
 </div>
 
-<div id="tabAccount" class="tab-content hidden"><div class="card"><h2 data-i18n="accountTitle">Account Settings ⚙️</h2><p class="small" data-i18n="accountBody">Set a password for standard web login.</p><input type="password" id="webPasswordInput" placeholder="Enter new web password"><button class="btn-play" onclick="setWebPassword()" data-i18n="accountSaveBtn">Save Web Password 🔒</button></div></div>
+<div id="depositModal" class="modal hidden">
+ <div class="card" style="max-height:90vh;overflow-y:auto;">
+  <div class="page-title"><h3 style="margin:0;color:var(--blue)">Deposit</h3><button class="back-btn" onclick="closeModal('depositModal')">✕</button></div>
+  <label class="small" style="display:block;text-align:left;">Amount (Birr)</label>
+  <input type="number" id="depositAmount" placeholder="e.g. 100" min="1" step="0.01">
+  <label class="small" style="display:block;text-align:left;">Transaction ID</label>
+  <input type="text" id="depositTransactionId" placeholder="e.g. FT26093JCD32">
+  <label class="small" style="display:block;text-align:left;">Confirmation SMS (optional)</label>
+  <input type="text" id="depositSubmittedText" placeholder="Paste the confirmation SMS text (optional)">
+  <button class="btn-play" onclick="submitDepositRequest()">Submit Deposit</button>
+  <div class="pay-method-toggle">
+    <button id="depositMethodTelebirr" class="pay-method-btn active" onclick="selectDepositMethod('telebirr')"><img src="/images/telebirr.jpg" alt=""><span>telebirr</span></button>
+    <button id="depositMethodCbe" class="pay-method-btn" onclick="selectDepositMethod('cbe')"><img src="/images/cbe.jpg" alt=""><span>CBE</span></button>
+  </div>
+  <div id="depositMethodInfo" class="pay-method-info"></div>
+ </div>
+</div>
+
+<div id="withdrawModal" class="modal hidden">
+ <div class="card" style="max-height:90vh;overflow-y:auto;">
+  <div class="page-title"><h3 style="margin:0;color:var(--blue)">Withdraw</h3><button class="back-btn" onclick="closeModal('withdrawModal')">✕</button></div>
+  <p class="small">Your balance: <strong id="withdrawBalanceDisplay">0.00</strong> Birr · Minimum 21 Birr</p>
+  <div class="pay-method-toggle">
+    <button id="withdrawMethodTelebirr" class="pay-method-btn active" onclick="selectWithdrawMethod('telebirr')"><img src="/images/telebirr.jpg" alt=""><span>telebirr</span></button>
+    <button id="withdrawMethodCbe" class="pay-method-btn" onclick="selectWithdrawMethod('cbe')"><img src="/images/cbe.jpg" alt=""><span>CBE</span></button>
+  </div>
+  <label class="small" style="display:block;text-align:left;margin-top:14px;">Amount (Birr)</label>
+  <input type="number" id="withdrawAmount" placeholder="21 or more">
+  <label class="small" style="display:block;text-align:left;" id="withdrawDestLabel">Destination number</label>
+  <input type="text" id="withdrawDestination" placeholder="Phone / account number">
+  <div id="withdrawCbeExtra" class="hidden">
+    <label class="small" style="display:block;text-align:left;">Account owner name</label>
+    <input type="text" id="withdrawOwnerName" placeholder="Full name on the account">
+  </div>
+  <button class="btn-play" onclick="submitWithdrawRequest()">Submit Withdrawal</button>
+ </div>
+</div>
+
+<div id="transferModal" class="modal hidden">
+ <div class="card">
+  <div class="page-title"><h3 style="margin:0;color:var(--blue)">Transfer</h3><button class="back-btn" onclick="closeModal('transferModal')">✕</button></div>
+  <p class="small">Your balance: <strong id="transferBalanceDisplay">0.00</strong> Birr · More than 20 Birr</p>
+  <label class="small" style="display:block;text-align:left;margin-top:14px;">Amount (Birr)</label>
+  <input type="number" id="transferAmount" placeholder="More than 20">
+  <label class="small" style="display:block;text-align:left;">Recipient phone number</label>
+  <input type="text" id="transferRecipient" placeholder="Recipient's registered phone number">
+  <button class="btn-play" onclick="submitTransferRequest()">Submit Transfer</button>
+ </div>
+</div>
+
+<div id="tabAccount" class="tab-content hidden"><div class="card"><h2 data-i18n="accountTitle">Account Settings ⚙️</h2>
+ <div id="accountUsernameBlock" style="margin-bottom:14px;text-align:left;">
+   <label class="small" style="display:block;margin-bottom:6px;" data-i18n="accountUsernameLabel">Username</label>
+   <input type="text" id="accountUsernameInput" placeholder="Username" autocomplete="username" style="width:100%;box-sizing:border-box;">
+   <p class="small" style="margin:6px 0 0;" data-i18n="accountUsernameHint">You can keep this username or change it. Used for web login.</p>
+ </div>
+ <div id="webPasswordSection">
+   <p class="small" data-i18n="accountBody">Set a password for standard web login (Telegram only).</p>
+   <input type="password" id="webPasswordInput" placeholder="New password (min 6 characters)" autocomplete="new-password">
+   <input type="password" id="webPasswordConfirmInput" placeholder="Confirm password" autocomplete="new-password" style="margin-top:8px;">
+   <button class="btn-play" onclick="setWebPassword()" data-i18n="accountSaveBtn">Save Web Password 🔒</button>
+ </div>
+ <div id="webPasswordWebOnlyNote" class="hidden" style="margin-top:8px;">
+   <p class="small" data-i18n="accountWebPasswordNote">Password can only be set or changed inside the Telegram Mini App for security.</p>
+ </div>
+ <div style="margin-top:22px;text-align:left;">
+   <label class="small" style="display:block;margin-bottom:8px;">Number-Calling Voice</label>
+   <div id="voicePackPicker" class="voice-pack-grid">
+     <button class="voice-pack-btn" data-pack="john" onclick="selectVoicePack('john')">👨🏽<span>John</span></button>
+     <button class="voice-pack-btn" data-pack="amharic" onclick="selectVoicePack('amharic')">🧔🏽<span>Amharic</span></button>
+     <button class="voice-pack-btn" data-pack="oromifa" onclick="selectVoicePack('oromifa')">👳🏽<span>Oromifa</span></button>
+     <button class="voice-pack-btn" data-pack="jerry" onclick="selectVoicePack('jerry')">👩🏽<span>Jerry</span></button>
+     <button class="voice-pack-btn" data-pack="arada" onclick="selectVoicePack('arada')">😎<span>Arada</span></button>
+   </div>
+ </div>
+</div></div>
 
 <div id="bottomNav" class="bottom-nav hidden">
   <div class="nav-item active" onclick="switchTab('tabGames',this)">🎮<br><span data-i18n="navGames">Games</span></div>
@@ -184,16 +920,6 @@ button:disabled { opacity:.55; cursor:not-allowed; }
   <div class="nav-item" onclick="switchTab('tabWallet',this)">💰<br><span data-i18n="navWallet">Wallet</span></div>
   <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
 </div>
-<script src="app.js"></script>
+<script src="app.js?v=20260903-history-fix"></script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-

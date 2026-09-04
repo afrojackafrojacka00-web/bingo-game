@@ -1,24 +1,87 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><title>Live Bingo</title><link rel="stylesheet" href="game.css"><script src="https://telegram.org/js/telegram-web-app.js"></script><script src="/socket.io/socket.io.js"></script></head><body>
-<header><div class="head-left"><span class="live"><i></i> LIVE</span><b id="patternName">Any One Line</b><small id="playersPlaying">0 players playing</small></div><div class="prize-block"><small>PRIZE</small><b><span id="prizePool">0.00</span> Birr</b></div></header>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta name="theme-color" content="#0b0f14">
+  <title>Live Bingo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="game.css">
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+<header>
+  <div class="head-left">
+    <span class="live"><i></i> LIVE</span>
+    <b id="patternName">Any One Line</b>
+    <small id="playersPlaying">0 players playing</small>
+  </div>
+  <div class="prize-block">
+    <small>PRIZE</small>
+    <b><span id="prizePool">0.00</span> Birr</b>
+  </div>
+</header>
 <main>
-<section class="status">
-  <div class="last-called"><small class="lc-label">Last Called</small><div id="lastCalledBalls" class="lc-balls"><span class="empty">--</span></div></div>
-  <div class="stat-block center"><strong id="lastNumber">--</strong></div>
-  <div class="stat-block count"><strong id="calledCount">0 / 75</strong></div>
-</section>
-<section class="game-layout">
-  <aside class="number-board"><h3>B I N G O</h3><div id="numberBoard" class="numbers"></div></aside>
-  <section class="card-side">
-    <div class="card-side-head">
-      <h3>Your Cards</h3>
-      <div class="controls">
-        <button id="autoMarkToggle" class="switch-pill" type="button" role="switch" aria-checked="true"><span class="dot"></span><span class="switch-label">AUTO</span></button>
-        <button id="blinkToggle" class="switch-pill" type="button" role="switch" aria-checked="true"><span class="dot"></span><span class="switch-label">Blink</span></button>
-        <button id="leaveGameBtn" class="switch-pill leave" type="button" onclick="leaveGame()"><span class="switch-label">Leave</span></button>
-      </div>
+  <section class="status">
+    <div class="last-called">
+      <small class="lc-label">Last Called</small>
+      <div id="lastCalledBalls" class="lc-balls"><span class="empty">--</span></div>
     </div>
-    <div id="cardsEl" class="cards"><p>Loading cards…</p></div>
+    <div class="stat-block center"><strong id="lastNumber">--</strong></div>
+    <div class="stat-block count"><strong id="calledCount">0 / 75</strong></div>
   </section>
-</section>
+  <section class="game-layout">
+    <aside class="number-board">
+      <h3>B I N G O</h3>
+      <div id="numberBoard" class="numbers"></div>
+    </aside>
+    <section class="card-side">
+      <div class="card-side-head">
+        <h3>Your Cards</h3>
+        <div class="controls">
+          <button id="autoMarkToggle" class="switch-pill" type="button" role="switch" aria-checked="true">
+            <span class="dot"></span><span class="switch-label">AUTO</span>
+          </button>
+          <button id="blinkToggle" class="switch-pill" type="button" role="switch" aria-checked="true">
+            <span class="dot"></span><span class="switch-label">Blink</span>
+          </button>
+          <button id="soundToggle" class="switch-pill icon-only" type="button" role="switch" aria-checked="true" aria-label="Toggle sound">
+            <span id="soundToggleIcon">🔊</span>
+          </button>
+          <button id="colorPickerBtn" class="switch-pill color-picker-btn" type="button" onclick="toggleColorPicker()">
+            <span class="color-dot" id="currentColorDot" style="background:#22c55e;"></span>
+            <span class="switch-label">Color</span>
+          </button>
+          <button id="leaveGameBtn" class="switch-pill leave" type="button" onclick="leaveGame()">
+            <span class="switch-label">Leave</span>
+          </button>
+        </div>
+      </div>
+      <div id="cardsEl" class="cards"><p>Loading cards…</p></div>
+    </section>
+  </section>
 </main>
-<div id="winnerOverlay" class="overlay"><div class="winner"><h2 id="winnerTitle">BINGO!</h2><p id="winnerText"></p><div id="winnerCard"></div><p class="returning">Returning to card selection…</p></div></div><div id="toast" class="toast"></div><script src="game.js"></script></body></html>
+
+<div id="winnerOverlay" class="overlay">
+  <div class="winner">
+    <h2 id="winnerTitle">BINGO!</h2>
+    <p id="winnerText"></p>
+    <div id="winnerCard"></div>
+    <p class="returning">Returning to card selection…</p>
+  </div>
+</div>
+<div id="toast" class="toast"></div>
+
+<div id="colorPickerOverlay" class="overlay">
+  <div class="color-picker-modal">
+    <h3 style="margin:0 0 15px;color:var(--gold);">🎨 Choose Highlight Color</h3>
+    <div class="color-grid" id="colorGrid"></div>
+    <button class="switch-pill" style="margin-top:15px;padding:10px 20px;background:var(--card);border:1px solid var(--line);" onclick="closeColorPicker()">Close</button>
+  </div>
+</div>
+<script src="game.js"></script>
+</body>
+</html>

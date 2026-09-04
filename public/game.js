@@ -2,6 +2,22 @@ const socket=io();
 const params=new URLSearchParams(location.search),active=JSON.parse(localStorage.getItem('bingoActiveGame')||'{}');
 const stake=Number(params.get('stake')||active.stake),username=active.username||localStorage.getItem('bingoUser')||'';
 let cards=[],drawn=new Set(),autoMark=true,showBlink=true,ended=false,locked=new Set(),room={},winnerTimer=null,manualMarks=new Map();
+let voicePack='john',soundEnabled=true;
+let audioCtx=null,audioBuffers={},currentSource=null,audioCutTimer=null,audioUnlocked=false;
+let selectedColor = localStorage.getItem('bingoHighlightColor') || '#00d26a';
+const availableColors = [
+  '#FF6B6B', // Red
+  '#FF9F43', // Orange
+  '#FECA57', // Yellow
+  '#54A0FF', // Blue
+  '#5F27CD', // Purple
+  '#1DD1A1', // Teal
+  '#FF6B81', // Pink
+  '#0ABDE3', // Cyan
+  '#10AC84', // Green
+  '#EE5A24', // Dark Orange
+];
+
 const P=(...x)=>x,ROWS=Array.from({length:5},(_,r)=>P(...Array.from({length:5},(_,c)=>[r,c]))),COLS=Array.from({length:5},(_,c)=>P(...Array.from({length:5},(_,r)=>[r,c]))),DIAGS=[P([0,0],[1,1],[2,2],[3,3],[4,4]),P([0,4],[1,3],[2,2],[3,1],[4,0])];
 const ONE=[...ROWS,...COLS,...DIAGS,[[0,0],[4,0],[0,4],[4,4]],[[1,1],[3,1],[1,3],[3,3]],[[2,1],[1,2],[2,2],[3,2],[2,3]]],TWO=[...ROWS,...COLS,...DIAGS,[[0,0],[4,0],[0,4],[4,4]],[[1,1],[3,1],[1,3],[3,3]]];
 const FIXED={
@@ -41,7 +57,7 @@ function renderLastCalled(){
 }
 function board(){let h='<div class="board-head">B</div><div class="board-head">I</div><div class="board-head">N</div><div class="board-head">G</div><div class="board-head">O</div>';for(let r=1;r<=15;r++)for(let c=0;c<5;c++){const n=r+c*15;h+=`<div class="ball ${drawn.has(n)?'called':''}">${n}</div>`}numberBoard.innerHTML=h}
 function render(){board();cardsEl.innerHTML=cards.map(card).join('')||'<p>No cards found.</p>'}
-function card(c){const close=showBlink?near(c.grid):new Set(),marks=manualMarks.get(c.cardNumber)||new Set();return `<article class="bingo"><div class="ct"><b>CARD #${c.cardNumber}</b><small>${locked.has(c.cardNumber)?'LOCKED':autoMark?'AUTO':'MANUAL'}</small></div><table><thead><tr><th>B</th><th>I</th><th>N</th><th>G</th><th>O</th></tr></thead><tbody>${c.grid.map((row,r)=>'<tr>'+row.map((v,col)=>{const free=v==='FREE'||(r===2&&col===2),n=Number(v),called=drawn.has(n),marked=free||(autoMark&&called)||(!autoMark&&marks.has(n)),bl=!called&&close.has(`${r},${col}`);return `<td class="${free?'free ':''}${marked?'marked ':''}${bl?'blink ':''}" data-card="${c.cardNumber}" data-number="${free?'':n}" onclick="manualMark(${c.cardNumber},${n||0})">${free?'FREE':v}</td>`}).join('')+'</tr>').join('')}</tbody></table><button ${ended||locked.has(c.cardNumber)?'disabled':''} onclick="claim(${c.cardNumber})">${locked.has(c.cardNumber)?'CARD LOCKED':'BINGO'}</button></article>`}
+function card(c){const close=showBlink?near(c.grid):new Set(),marks=manualMarks.get(c.cardNumber)||new Set();return `<article class="bingo"><div class="ct"><b>CARD #${c.cardNumber}</b><small>${locked.has(c.cardNumber)?'LOCKED':autoMark?'AUTO':'MANUAL'}</small></div><table><thead><tr><th>B</th><th>I</th><th>N</th><th>G</th><th>O</th></tr></thead><tbody>${c.grid.map((row,r)=>'<tr>'+row.map((v,col)=>{const free=v==='FREE'||(r===2&&col===2),n=Number(v),called=drawn.has(n),marked=free||(autoMark&&called)||(!autoMark&&marks.has(n)),bl=!called&&close.has(`${r},${col}`);return `<td class="${free?'free ':''}${marked?'marked ':''}${bl?'blink ':''}" data-card="${c.cardNumber}" data-number="${free?'':n}" onclick="manualMark(${c.cardNumber},${n||0})" ${marked && !free ? `style="background:${getHighlightColor()};color:#fff;border-color:${getHighlightColor()};"` : ''}>${free?'FREE':v}</td>`}).join('')+'</tr>').join('')}</tbody></table><button ${ended||locked.has(c.cardNumber)?'disabled':''} onclick="claim(${c.cardNumber})">${locked.has(c.cardNumber)?'CARD LOCKED':'BINGO'}</button></article>`}
 
 // Manual mode: let the player mark ANY cell on their card, not only ones
 // that have actually been called. This is purely a visual aid — the server
@@ -75,7 +91,205 @@ async function leaveGame(){
 }
 
 function subscribe(){if(stake&&username)socket.emit('subscribe_room',{stake,username},()=>state())}
-socket.on('connect',subscribe);socket.on('number_drawn',d=>{if(Number(d.stake)!==stake||ended)return;drawn.add(Number(d.number));room.lastNumber=Number(d.number);header();render()});socket.on('room_state',d=>{if(Number(d.stake)===stake){room={...room,...d};header();}});socket.on('card_locked',d=>{if(Number(d.stake)===stake){locked.add(Number(d.cardNumber));render();toast(d.message)}});socket.on('game_won',d=>{if(Number(d.stake)===stake){ended=true;showWinner(d)}});socket.on('game_ended',d=>{if(Number(d.stake)===stake){ended=true;setTimeout(goBack,300)}});
-function showWinner(d){if(winnerTimer)return;winnerTitle.textContent=d.winner===username?'YOU WON!':'BINGO!';winnerText.textContent=`${d.winner} won ${Number(d.prize).toFixed(2)} Birr · ${d.patternName}`;const set=new Set((d.winningCells||[]).map(x=>x.join(',')));winnerCard.innerHTML=`<div class="winner-grid">${d.grid.flatMap((row,r)=>row.map((v,c)=>`<span class="${set.has([r,c].join(','))?'win':''}">${v==='FREE'?'FREE':v}</span>`)).join('')}</div>`;winnerOverlay.classList.add('show');winnerTimer=setTimeout(goBack,5000)}
+socket.on('connect',subscribe);socket.on('number_drawn',d=>{if(Number(d.stake)!==stake||ended)return;drawn.add(Number(d.number));room.lastNumber=Number(d.number);header();render();playNumberAudio(Number(d.number))});socket.on('room_state',d=>{if(Number(d.stake)===stake){room={...room,...d};header();}});socket.on('card_locked',d=>{if(Number(d.stake)===stake){locked.add(Number(d.cardNumber));render();toast(d.message)}});socket.on('game_won',d=>{if(Number(d.stake)===stake){ended=true;showWinner(d)}});socket.on('game_ended',d=>{if(Number(d.stake)===stake){ended=true;setTimeout(goBack,300)}});
+function showWinner(d){
+    if(winnerTimer)return;
+    const winners=d.winners||[{winner:d.winner,winnerDisplay:d.winnerDisplay,prize:d.prize,cardNumber:d.cardNumber,grid:d.grid,winningCells:d.winningCells}];
+    const iWon=winners.some(w=>w.winner===username);
+    winnerTitle.textContent=iWon?'YOU WON!':'BINGO!';
+
+    if(winners.length===1){
+        const w=winners[0];
+        winnerText.textContent=`${w.winnerDisplay||w.winner} won ${Number(w.prize).toFixed(2)} Birr · ${d.patternName}`;
+        const set=new Set((w.winningCells||[]).map(x=>x.join(',')));
+        winnerCard.innerHTML=`<div class="winner-grid">${w.grid.flatMap((row,r)=>row.map((v,c)=>`<span class="${set.has([r,c].join(','))?'win':''}">${v==='FREE'?'FREE':v}</span>`)).join('')}</div>`;
+    } else {
+        winnerText.textContent=`Split ${winners.length} ways · ${d.patternName}`;
+        const blocks=winners.map(w=>{
+            const set=new Set((w.winningCells||[]).map(x=>x.join(',')));
+                        const cells=w.grid.flatMap((row,r)=>row.map((v,c)=>{
+                const isFree=v==='FREE'||(r===2&&c===2);
+                const isWin=set.has(`${r},${c}`);
+                return `<span style="display:flex;align-items:center;justify-content:center;aspect-ratio:1;font-size:9px;border-radius:3px;background:${isWin?'#00d26a':'rgba(255,255,255,0.08)'};color:${isWin?'#04210f':'#fff'};font-weight:${isWin?'700':'400'};">${isFree?'★':v}</span>`;
+            })).join('');
+            return `<div style="width:110px;text-align:center;">
+                <div style="font-size:11px;font-weight:600;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${w.winnerDisplay||w.winner}</div>
+                <div style="font-size:10px;opacity:.8;margin-bottom:4px;">${Number(w.prize).toFixed(2)} Birr</div>
+                <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:2px;">${cells}</div>
+                <div style="font-size:9px;opacity:.6;margin-top:3px;">Card #${w.cardNumber}</div>
+            </div>`;
+        }).join('');
+        winnerCard.innerHTML=`<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:8px;max-width:340px;margin:0 auto;">${blocks}</div>`;
+    }
+    winnerOverlay.classList.add('show');
+    winnerTimer=setTimeout(goBack,5000);
+}
 function goBack(){localStorage.removeItem('bingoActiveGame');location.href=`/index.html?returnStake=${encodeURIComponent(stake)}`}
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)state()});window.addEventListener('focus',state);state();
+
+// ---- number-call audio: every player picks their own pack in Account
+// Settings, so this is entirely client-side — the server just says which
+// number was drawn, same as always. All 75 files for the chosen pack are
+// preloaded up front (not fetched on demand) specifically so there is no
+// network round trip, and therefore no lag, at the moment a number is
+// actually called. ----
+
+
+function ensureAudioCtx(){
+    if(!audioCtx){
+        const AC=window.AudioContext||window.webkitAudioContext;
+        if(!AC)return null;
+        audioCtx=new AC();
+    }
+    if(audioCtx.state==='suspended') audioCtx.resume().catch(()=>{});
+    return audioCtx;
+}
+function unlockAudio(){
+    if(audioUnlocked)return;
+    const ctx=ensureAudioCtx();
+    if(!ctx)return;
+    try{
+        const buf=ctx.createBuffer(1,1,22050);
+        const src=ctx.createBufferSource();
+        src.buffer=buf;
+        src.connect(ctx.destination);
+        src.start(0);
+        audioUnlocked=true;
+    }catch(e){}
+}
+async function preloadVoicePack(pack){
+    const ctx=ensureAudioCtx();
+    if(!ctx)return;
+    audioBuffers={};
+    const jobs=[];
+    for(let n=1;n<=75;n++){
+        jobs.push(fetch(`/audio/${pack}/${n}.m4a`)
+            .then(r=>r.arrayBuffer())
+            .then(ab=>ctx.decodeAudioData(ab.slice(0)))
+            .then(buf=>{audioBuffers[n]=buf;})
+            .catch(()=>{}));
+    }
+    await Promise.all(jobs);
+}
+function stopCurrentAudio(){
+    if(audioCutTimer){clearTimeout(audioCutTimer);audioCutTimer=null;}
+    if(currentSource){
+        try{currentSource.stop(0);}catch(e){}
+        try{currentSource.disconnect();}catch(e){}
+        currentSource=null;
+    }
+}
+function playNumberAudio(n){
+    if(!soundEnabled)return;
+    unlockAudio();
+    const ctx=ensureAudioCtx();
+    if(!ctx)return;
+    const buf=audioBuffers[n];
+    if(!buf)return;
+    stopCurrentAudio();
+    const src=ctx.createBufferSource();
+    src.buffer=buf;
+    src.connect(ctx.destination);
+    currentSource=src;
+    try{src.start(0);}catch(e){return;}
+    const maxMs=Math.max(800,(Number(room.drawIntervalSeconds)||4)*1000-250);
+    audioCutTimer=setTimeout(()=>{stopCurrentAudio();},maxMs);
+    src.onended=()=>{if(currentSource===src)currentSource=null;};
+}
+async function loadVoicePack(){
+    try{
+        const r=await fetch(`/api/user-details?username=${encodeURIComponent(username)}`);
+        const d=await r.json();
+        if(d.success&&d.user){
+            if(d.user.preferred_voice_pack) voicePack=d.user.preferred_voice_pack;
+            soundEnabled=d.user.sound_enabled!==false;
+            const theme=d.user.preferred_theme||localStorage.getItem('bingoTheme')||'dark';
+            document.documentElement.setAttribute('data-theme',theme==='light'?'light':'dark');
+        }
+    }catch{}
+    syncSoundToggleUI();
+    unlockAudio();
+    preloadVoicePack(voicePack);
+    
+    // Load saved color
+    const savedColor = localStorage.getItem('bingoHighlightColor');
+    if (savedColor) {
+        selectedColor = savedColor;
+        const dot = document.getElementById('currentColorDot');
+        if (dot) dot.style.background = savedColor;
+    }
+}
+['pointerdown','touchstart','click'].forEach(ev=>{
+    document.addEventListener(ev,()=>unlockAudio(),{once:true,passive:true});
+});
+
+// Sound on/off is its own icon-only switch (no label, per request), and is
+// saved server-side — so leaving it off carries into every future game and
+// every future login, on any device, exactly like the voice pack choice.
+const soundToggleEl=document.getElementById('soundToggle');
+const soundToggleIconEl=document.getElementById('soundToggleIcon');
+function syncSoundToggleUI(){
+    soundToggleEl.setAttribute('aria-checked',soundEnabled?'true':'false');
+    soundToggleIconEl.textContent=soundEnabled?'🔊':'🔇';
+}
+// Color Picker Functions
+function toggleColorPicker() {
+  const overlay = document.getElementById('colorPickerOverlay');
+  if (!overlay) return;
+  overlay.classList.toggle('show');
+  if (overlay.classList.contains('show')) {
+    renderColorOptions();
+  }
+}
+
+function closeColorPicker() {
+  const overlay = document.getElementById('colorPickerOverlay');
+  if (overlay) overlay.classList.remove('show');
+}
+
+function renderColorOptions() {
+  const grid = document.getElementById('colorGrid');
+  if (!grid) return;
+  
+  grid.innerHTML = availableColors.map(color => `
+    <div class="color-option ${color === selectedColor ? 'active' : ''}" 
+         style="background:${color};" 
+         onclick="selectColor('${color}')"
+         title="${color}">
+    </div>
+  `).join('');
+}
+
+function selectColor(color) {
+  selectedColor = color;
+  localStorage.setItem('bingoHighlightColor', color);
+  
+  // Update the dot in the color picker button
+  const dot = document.getElementById('currentColorDot');
+  if (dot) dot.style.background = color;
+  
+  // Update active state in grid
+  document.querySelectorAll('.color-option').forEach(el => {
+    el.classList.toggle('active', el.style.background === color || el.style.backgroundColor === color);
+  });
+  
+  // Re-render cards with new color
+  render();
+  
+  // Close the picker
+  closeColorPicker();
+}
+
+// Helper to get the current highlight color
+function getHighlightColor() {
+  return selectedColor;
+}
+
+
+soundToggleEl.addEventListener('click',()=>{
+    unlockAudio();
+    soundEnabled=!soundEnabled;
+    syncSoundToggleUI();
+    fetch('/api/user/sound-setting',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,soundEnabled})}).catch(()=>{});
+});
+
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)state()});window.addEventListener('focus',state);loadVoicePack();state();

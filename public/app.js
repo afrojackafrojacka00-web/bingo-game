@@ -26,6 +26,59 @@ function isTelegramClient() {
     return !!window.Telegram?.WebApp?.initData;
 }
 
+// ---- Web session (localStorage) ----
+// Remember username for convenience, but expire after inactivity so a shared
+// browser does not stay logged in forever.
+const WEB_SESSION_IDLE_MS = 30 * 60 * 1000; // 30 minutes
+const WEB_SESSION_ACTIVITY_KEY = 'bingoLastActive';
+
+function touchWebSession() {
+    try { localStorage.setItem(WEB_SESSION_ACTIVITY_KEY, String(Date.now())); } catch (_) {}
+}
+
+function clearWebSession() {
+    try {
+        localStorage.removeItem('bingoUser');
+        localStorage.removeItem(WEB_SESSION_ACTIVITY_KEY);
+    } catch (_) {}
+}
+
+function getSavedWebUserIfActive() {
+    // Telegram Mini App is bound to the Telegram account — do not idle-logout there.
+    if (isTelegramClient()) {
+        return localStorage.getItem('bingoUser');
+    }
+    const saved = localStorage.getItem('bingoUser');
+    if (!saved) return null;
+    const last = Number(localStorage.getItem(WEB_SESSION_ACTIVITY_KEY) || 0);
+    if (!last || (Date.now() - last) > WEB_SESSION_IDLE_MS) {
+        clearWebSession();
+        return null;
+    }
+    touchWebSession();
+    return saved;
+}
+
+function startWebSessionWatch() {
+    if (isTelegramClient()) return;
+    // Refresh activity on user interaction
+    const bump = () => { if (currentUsername) touchWebSession(); };
+    ['click', 'keydown', 'touchstart', 'scroll'].forEach(ev => {
+        document.addEventListener(ev, bump, { passive: true });
+    });
+    // Periodic check
+    setInterval(() => {
+        if (!currentUsername || isTelegramClient()) return;
+        const last = Number(localStorage.getItem(WEB_SESSION_ACTIVITY_KEY) || 0);
+        if (!last || (Date.now() - last) > WEB_SESSION_IDLE_MS) {
+            logoutUser();
+            alertUser('You were logged out due to inactivity. Please log in again.');
+        }
+    }, 60 * 1000);
+}
+
+
+
 function confirmAction(message) {
     return new Promise(resolve => {
         if (isTelegramClient()) window.Telegram.WebApp.showConfirm(message, ok => resolve(!!ok));
@@ -184,12 +237,59 @@ async function resyncCurrentRoom() {
     });
 }
 
+let cardsOffset = 0, cardsHasMore = true, cardsLoading = false, cardSearchQ = '';
 async function ensureCardsCached() {
-    if (cachedCards) return;
-    const res = await fetch('/api/cards/numbers');
-    const data = await res.json();
-    if (data.success) cachedCards = data.cardNumbers;
+    if (cachedCards && cachedCards.length) return;
+    cardsOffset = 0; cardsHasMore = true;
+    await loadMoreCards(true);
 }
+async function loadMoreCards(reset) {
+    if (cardsLoading || (!cardsHasMore && !reset)) return;
+    cardsLoading = true;
+    try {
+        const q = cardSearchQ ? `&q=${encodeURIComponent(cardSearchQ)}` : '';
+        const res = await fetch(`/api/cards/numbers?limit=100&offset=${reset?0:cardsOffset}${q}`, {cache:'no-store'});
+        const data = await res.json();
+        if (!data.success) return;
+        if (reset) cachedCards = data.cardNumbers || [];
+        else cachedCards = (cachedCards || []).concat(data.cardNumbers || []);
+        cardsOffset = cachedCards.length;
+        cardsHasMore = !!data.hasMore;
+        renderCardNumbers(cachedCards);
+    } finally { cardsLoading = false; }
+}
+let searchDebounce;
+function searchCards(val) {
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(async () => {
+        cardSearchQ = (val || '').trim();
+        cardsOffset = 0; cardsHasMore = true;
+        await loadMoreCards(true);
+        if (cardSearchQ && /^\d+$/.test(cardSearchQ)) previewCard(Number(cardSearchQ));
+        else document.getElementById('cardPreview')?.classList.add('hidden');
+    }, 250);
+}
+async function previewCard(num) {
+    const el = document.getElementById('cardPreview');
+    if (!el) return;
+    try {
+        const res = await fetch(`/api/cards/${num}`, {cache:'no-store'});
+        const data = await res.json();
+        if (!data.success) { el.classList.add('hidden'); return; }
+        const g = data.card.grid;
+        const taken = !!takenCardsMap[num];
+        const mine = selectedCards.has(num);
+        el.innerHTML = `<div style="background:var(--preview-bg);border-radius:10px;padding:10px;color:var(--preview-text);border:1px solid var(--preview-border);">
+          <b style="color:var(--text-color);">Card #${num}</b> <span style="color:var(--text-color);">${mine?'(yours)':taken?'(taken)':'(available)'}</span>
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:3px;margin-top:8px;font-size:11px;">
+          ${g.map((row,r)=>row.map((v,c)=>`<span style="background:var(--input-bg);padding:4px 0;text-align:center;border-radius:4px;color:var(--input-text);border:1px solid var(--input-border);">${v==='FREE'||(r===2&&c===2)?'★':v}</span>`).join('')).join('')}
+          </div>
+          ${!taken&&!mine?`<button class="btn-play" style="margin-top:8px;background:var(--blue);color:#fff;padding:8px 16px;font-size:14px;border:none;border-radius:8px;cursor:pointer;" onclick="toggleCard(${num})">Select this card</button>`:''}
+        </div>`;
+        el.classList.remove('hidden');
+    } catch { el.classList.add('hidden'); }
+}
+//12345
 
 
 function setConnection(online) {
@@ -372,6 +472,7 @@ function showHome() {
     hide('roomsBox');
     hide('selectionBox');
     hide('gamePlayBox');
+    hide('instantBox');
     show('homeBox');
 }
 
@@ -410,7 +511,7 @@ async function openSelection() {
     hide('roomsBox');
     hide('gamePlayBox');
     show('selectionBox');
-    document.getElementById('selectionTitle').innerText = `🎟️ ${currentStake} Birr — Select Cards`;
+    document.getElementById('selectionTitle').innerText = ` ${currentStake} Birr`;
 
     await ensureCardsCached();
     if (!cachedCards) return showNotification('Failed to load cards.');
@@ -426,11 +527,17 @@ function returnToSelection() {
 
 function renderCardNumbers(cardNumbers) {
     const grid = document.getElementById('cardGrid');
-    grid.innerHTML = cardNumbers.map(number =>
+    if (!grid) return;
+    grid.innerHTML = (cardNumbers || []).map(number =>
         `<div class="card-item" data-card="${number}" onclick="toggleCard(${number})">${number}</div>`
-    ).join('');
+    ).join('') + (cardsHasMore ? '<div id="cardSentinel" style="grid-column:1/-1;height:20px;"></div>' : '');
     updateGridUI();
     updateSelectedCount();
+    const sent = document.getElementById('cardSentinel');
+    if (sent && !sent._obs) {
+        sent._obs = new IntersectionObserver(entries => { if (entries[0].isIntersecting) loadMoreCards(false); }, {root:grid, rootMargin:'100px'});
+        sent._obs.observe(sent);
+    }
 }
 
 function toggleCard(cardNumber) {
@@ -542,6 +649,22 @@ function updateCalledNumbers() {
 
 // ---------------- AUTH / USER ----------------
 window.addEventListener('DOMContentLoaded', async () => {
+    // Referral capture: a link like yoursite.com/index.html?ref=CODE should
+    // only ever be consumed once, by whoever registers next on this device —
+    // stash it and strip the param immediately so it can't leak into a later
+    // refresh/login the way returnStake used to.
+    const refParam = new URLSearchParams(location.search).get('ref');
+    if (refParam) {
+        if (!localStorage.getItem('bingoUser')) localStorage.setItem('bingoReferralCode', refParam);
+        history.replaceState(null, '', location.pathname);
+    }
+
+    const botLink = document.getElementById('telegramBotLink');
+    if (botLink) {
+        const botUser = 'kal_bingo_bot'; // keep in sync with TELEGRAM_BOT_USERNAME
+        botLink.href = 'https://t.me/' + botUser;
+    }
+
     const tg = window.Telegram?.WebApp;
     const initData = tg?.initData;
 
@@ -563,9 +686,10 @@ window.addEventListener('DOMContentLoaded', async () => {
             } else showAuthBox();
         } catch { showAuthBox(); }
     } else {
-        const saved = localStorage.getItem('bingoUser');
+        const saved = getSavedWebUserIfActive();
         if (saved) await showHomeScreen(saved);
         else showAuthBox();
+        startWebSessionWatch();
     }
 });
 
@@ -578,6 +702,7 @@ function showAuthBox() {
 async function showHomeScreen(username) {
     currentUsername = username;
     localStorage.setItem('bingoUser', username);
+    touchWebSession();
     document.getElementById('playerDisplay').innerText = username;
     hide('authBox'); show('headerBar'); show('bottomNav');
     applyLanguage(localStorage.getItem('bingoLang') || 'en', false);
@@ -585,6 +710,7 @@ async function showHomeScreen(username) {
     showHome();
 
     await loadUserData(username);
+    applyAccountTabForClient();
     await fetchNotifications(username);
 
     const searchParams = new URLSearchParams(location.search);
@@ -613,10 +739,40 @@ async function showHomeScreen(username) {
     notificationRefreshTimer = setInterval(() => {
         if (currentUsername) fetchNotifications(currentUsername);
     }, 10000);
+
+    loadReferralInfo(username);
 }
 
-function switchToRegister() { hide('loginForm'); show('registerForm'); }
-function switchToLogin() { hide('registerForm'); show('loginForm'); }
+// ---------------- REFERRALS (home page) ----------------
+async function loadReferralInfo(username) {
+    const box = document.getElementById('referralBox');
+    if (!box || !username) return;
+    try {
+        const res = await fetch(`/api/referral-info?username=${encodeURIComponent(username)}`, { cache: 'no-store' });
+        const data = await res.json();
+        if (!data.success) return;
+
+        const tg = data.telegramLink || '';
+        const web = data.webLink || '';
+        document.getElementById('referralLinkInput').value = tg || web;
+        const webEl = document.getElementById('referralWebLinkInput');
+        if (webEl) webEl.value = web;
+        document.getElementById('referralProgressText').innerText =
+            `${data.referralCount} joined so far · ${data.progressInMilestone}/${data.referralsRequired} toward your next ${data.rewardAmount} Birr bonus`;
+    } catch (err) { console.error('Referral info error:', err); }
+}
+
+function copyReferralLink() {
+    const input = document.getElementById('referralLinkInput');
+    if (!input) return;
+    navigator.clipboard?.writeText(input.value).then(
+        () => showNotification('Referral link copied!'),
+        () => {}
+    );
+}
+
+function switchToRegister() { /* web registration disabled */ }
+function switchToLogin() { /* login only */ }
 
 async function loginUser() {
     const username = document.getElementById('loginUsername').value.trim();
@@ -636,10 +792,13 @@ async function registerUser() {
     const phoneNumber = document.getElementById('regPhone').value.trim();
     if (!username || !password) return alert('Please fill in username and password.');
     try {
-        const res = await fetch('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password,phoneNumber})});
+        const referredBy = localStorage.getItem('bingoReferralCode') || null;
+        const res = await fetch('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password,phoneNumber,referredBy})});
         const data = await res.json();
-        if (data.success) await showHomeScreen(data.username);
-        else alert(data.message || 'Registration failed.');
+        if (data.success) {
+            localStorage.removeItem('bingoReferralCode');
+            await showHomeScreen(data.username);
+        } else alert(data.message || 'Registration failed.');
     } catch { alert('Registration failed.'); }
 }
 
@@ -650,12 +809,20 @@ async function loadUserData(username) {
         if (data.success && data.user) {
             const balance = Number(data.user.balance || 0).toFixed(2);
             document.getElementById('balanceDisplay').innerText = balance;
+            const userField = document.getElementById('accountUsernameInput');
+            if (userField && data.user.username) userField.value = data.user.username;
 
             const walletBalance = document.getElementById('walletBalanceDisplay');
             if (walletBalance) walletBalance.innerText = `${balance} Birr`;
 
+            const bonusDisplay = document.getElementById('walletBonusDisplay');
+            if (bonusDisplay) bonusDisplay.innerText = `Bonus: ${Number(data.user.bonus_balance || 0).toFixed(2)} Birr`;
+
+            const display = data.user.display_name || data.user.username;
             const profileUsername = document.getElementById('profileUsername');
-            if (profileUsername) profileUsername.innerText = data.user.username;
+            if (profileUsername) profileUsername.innerText = display;
+            const playerDisplay = document.getElementById('playerDisplay');
+            if (playerDisplay) playerDisplay.innerText = display;
 
             const profilePhone = document.getElementById('profilePhone');
             if (profilePhone) profilePhone.innerText = data.user.phone_number || 'Not set';
@@ -664,8 +831,37 @@ async function loadUserData(username) {
             const langSelect = document.getElementById('languageSelect');
             if (langSelect) langSelect.value = lang;
             applyLanguage(lang, false);
+
+            const theme = data.user.preferred_theme || 'dark';
+            applyTheme(theme);
+            const themeSelect = document.getElementById('themeSelect');
+            if (themeSelect) themeSelect.value = theme;
+
+            syncVoicePackUI(data.user.preferred_voice_pack || 'john');
         }
     } catch (err) { console.error(err); }
+}
+
+// ---------------- VOICE PACK (Account Settings) ----------------
+function syncVoicePackUI(pack) {
+    document.querySelectorAll('#voicePackPicker .voice-pack-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.pack === pack);
+    });
+}
+
+async function selectVoicePack(pack) {
+    syncVoicePackUI(pack); // instant feedback, corrected below if the save fails
+    try {
+        const res = await fetch('/api/user/voice-pack', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: currentUsername, voicePack: pack })
+        });
+        const data = await res.json();
+        if (!data.success) alertUser(data.message || 'Could not save voice.');
+    } catch {
+        alertUser('Could not save voice.');
+    }
 }
 
 // ---------------- INFINITE SCROLL (shared helper) ----------------
@@ -735,6 +931,12 @@ async function fetchHistory(username, reset = true) {
     }
 }
 
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[ch]));
+}
+
 function renderHistory(games, reset = true) {
     const container = document.getElementById('historyList');
     if (!container) return;
@@ -746,24 +948,36 @@ function renderHistory(games, reset = true) {
     }
 
     const html = games.map(game => {
-        const won = game.won;
+        const won = !!game.won;
+        const split = Number(game.winnerCount) > 1;
         const outcomeClass = won ? 'won' : 'lost';
-        const outcomeLabel = won ? '🏆 You Won' : (game.winner ? '❌ You Lost' : '➖ No Winner');
+        const outcomeLabel = won ? '🏆 You Won' : ((game.winner || split) ? '❌ You Lost' : '➖ No Winner');
         const dateStr = new Date(game.date).toLocaleString();
-        const cardCell = game.winningCardNumber
-            ? `<strong class="card-link" onclick="viewWinningCard(${game.gameId})">#${game.winningCardNumber}</strong>`
+
+        const winners = Array.isArray(game.winners) ? game.winners : [];
+        const winnerNames = split
+            ? (winners.length
+                ? winners.map(w => escapeHtml(w.displayName || w.username)).join(', ')
+                : escapeHtml(game.winner || 'Multiple winners'))
+            : escapeHtml(game.winner || 'None');
+
+        const cardCell = (game.winningCardNumber || split)
+            ? `<strong class="card-link" onclick="viewWinningCard(${Number(game.gameId)})">${split ? 'View Winning Cards' : '#' + Number(game.winningCardNumber)}</strong>`
             : `<strong>—</strong>`;
+
         return `<div class="history-card ${outcomeClass}">
             <div class="history-top">
                 <span class="history-outcome">${outcomeLabel}</span>
                 <span class="history-date">${dateStr}</span>
             </div>
             <div class="info-grid" style="margin:10px 0 0;">
-                <div class="info-box"><span>PLAYERS</span><strong>${game.players}</strong></div>
-                <div class="info-box"><span>WINNER</span><strong>${game.winner || 'None'}</strong></div>
-                <div class="info-box"><span>PRIZE</span><strong>${game.prizePool.toFixed(2)} Birr</strong></div>
-                <div class="info-box"><span>STAKE</span><strong>${game.stake.toFixed(0)} Birr</strong></div>
-                <div class="info-box"><span>WINNING CARD</span>${cardCell}</div>
+                <div class="info-box"><span>PLAYERS</span><strong>${Number(game.players) || 0}</strong></div>
+                <div class="info-box"><span>WINNER${split ? 'S' : ''}</span><strong>${split ? 'Split × ' + Number(game.winnerCount) : winnerNames}</strong>
+                    ${split ? `<div class="small" style="margin-top:5px;line-height:1.45;">${winnerNames}</div>` : ''}
+                </div>
+                <div class="info-box"><span>PRIZE</span><strong>${Number(game.prizePool || 0).toFixed(2)} Birr</strong></div>
+                <div class="info-box"><span>STAKE</span><strong>${Number(game.stake || 0).toFixed(0)} Birr</strong></div>
+                <div class="info-box"><span>WINNING CARD${split ? 'S' : ''}</span>${cardCell}</div>
             </div>
         </div>`;
     }).join('');
@@ -788,18 +1002,45 @@ async function viewWinningCard(gameId) {
             return;
         }
 
-        const g = data.game;
-        const winSet = new Set((g.winningCells || []).map(c => c.join(',')));
-        const gridHtml = g.grid.map((row, r) => row.map((v, c) => {
-            const isFree = v === 'FREE' || (r === 2 && c === 2);
-            const isWin = winSet.has(`${r},${c}`);
-            return `<span class="${isWin ? 'win' : ''}">${isFree ? 'FREE' : v}</span>`;
-        }).join('')).join('');
+                const g = data.game;
+        const winners = g.winners || [];
 
-        body.innerHTML = `
-            <h3 style="margin:0 0 4px">Card #${g.cardNumber}</h3>
-            <p class="small" style="margin:0 0 12px">${g.patternName} · Won by ${g.winner} · ${Number(g.prizePool).toFixed(2)} Birr</p>
-            <div class="winner-grid">${gridHtml}</div>`;
+        if (winners.length === 1) {
+            const w = winners[0];
+            if (!Array.isArray(w.grid) || !w.grid.length) {
+                body.innerHTML = `<p class="small">The winning card (#${Number(w.cardNumber) || 'unknown'}) was recorded, but its grid is unavailable in the card database.</p>`;
+                return;
+            }
+            const winSet = new Set((w.winningCells || []).map(c => Array.isArray(c) ? c.join(',') : String(c)));
+            const gridHtml = w.grid.map((row, r) => row.map((v, c) => {
+                const isFree = v === 'FREE' || (r === 2 && c === 2);
+                const isWin = winSet.has(`${r},${c}`);
+                return `<span class="${isWin ? 'win' : ''}">${isFree ? 'FREE' : v}</span>`;
+            }).join('')).join('');
+            body.innerHTML = `
+                <h3 style="margin:0 0 4px">Card #${w.cardNumber}</h3>
+                <p class="small" style="margin:0 0 12px">${g.patternName} · Won by ${w.winnerDisplay} · ${Number(w.prize).toFixed(2)} Birr</p>
+                <div class="winner-grid">${gridHtml}</div>`;
+        } else {
+            const cardsHtml = winners.map(w => {
+                const winSet = new Set((w.winningCells || []).map(c => c.join(',')));
+                const cells = (w.grid || []).flatMap((row, r) => row.map((v, c) => {
+                    const isFree = v === 'FREE' || (r === 2 && c === 2);
+                    const isWin = winSet.has(`${r},${c}`);
+                    return `<span style="display:flex;align-items:center;justify-content:center;aspect-ratio:1;font-size:9px;border-radius:3px;background:${isWin ? '#00d26a' : 'rgba(255,255,255,0.08)'};color:${isWin ? '#04210f' : '#fff'};font-weight:${isWin ? '700' : '400'};">${isFree ? '★' : v}</span>`;
+                }).join('')).join('');
+                return `<div style="width:110px;text-align:center;">
+                    <div style="font-size:11px;font-weight:600;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${w.winnerDisplay}</div>
+                    <div style="font-size:10px;opacity:.8;margin-bottom:4px;">${Number(w.prize).toFixed(2)} Birr</div>
+                    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:2px;">${cells}</div>
+                    <div style="font-size:9px;opacity:.6;margin-top:3px;">Card #${w.cardNumber}</div>
+                </div>`;
+            }).join('');
+            body.innerHTML = `
+                <h3 style="margin:0 0 4px">Split ${winners.length} ways</h3>
+                <p class="small" style="margin:0 0 12px">${g.patternName} · ${Number(g.prizePool).toFixed(2)} Birr total</p>
+                <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:8px;">${cardsHtml}</div>`;
+        }
     } catch (err) {
         console.error('History card fetch error:', err);
         body.innerHTML = '<p class="small">Could not load this card.</p>';
@@ -881,9 +1122,191 @@ function formatTxType(type) {
         GAME_REFUND_UNREADY: 'Refund (Not Ready)',
         GAME_REFUND_NOT_ENOUGH_PLAYERS: 'Refund (Not Enough Players)',
         GAME_REFUND_LEFT_ROOM: 'Refund (Left Room)',
-        GAME_REFUND_START_ERROR: 'Refund (Start Error)'
+        GAME_REFUND_START_ERROR: 'Refund (Start Error)',
+        DEPOSIT_APPROVED: 'Deposit',
+        WITHDRAWAL_APPROVED: 'Withdrawal',
+        WITHDRAWAL_REJECTED_REFUND: 'Withdrawal Refund',
+        TRANSFER_SENT: 'Transfer Sent',
+        TRANSFER_RECEIVED: 'Transfer Received',
+        TRANSFER_REJECTED_REFUND: 'Transfer Refund',
+        REFERRAL_BONUS: 'Referral Bonus',
+        ADMIN_BONUS_ADJUSTMENT: 'Bonus Adjustment'
     };
     return labels[type] || type;
+}
+
+// ---------------- WALLET: DEPOSIT / WITHDRAW / TRANSFER ----------------
+let cachedPaymentMethods = null;
+let selectedDepositMethod = 'telebirr';
+let selectedWithdrawMethod = 'telebirr';
+
+function closeModal(id) { hide(id); }
+
+function renderMethodInfo(container, method) {
+    const list = (cachedPaymentMethods?.[method] || []);
+    const rows = list.map(acc => `
+        <div class="pay-account-row">
+            <span>${acc.number} — ${acc.name}</span>
+            <button class="pay-copy-btn" onclick="copyText('${acc.number}')">📋</button>
+        </div>
+    `).join('') || '<p class="small">No accounts configured yet.</p>';
+
+    const steps = method === 'telebirr'
+        ? `How to deposit via telebirr\n\nTo deposit via telebirr, please follow these steps:\n\nphone number    name`
+        : `How to deposit via Commercial Bank\n\nTo deposit via bank transfer, please follow these steps:\n\naccount number    name`;
+
+    container.innerHTML = `<div>${steps}</div>${rows}<div style="margin-top:10px;">1. Send the desired amount to one of the numbers above.\n2. After sending, forward the confirmation SMS below.\n\nImportant: make sure to forward the correct confirmation SMS.</div>`;
+}
+
+async function loadPaymentMethods() {
+    if (cachedPaymentMethods) return cachedPaymentMethods;
+    try {
+        const res = await fetch('/api/payment-methods', { cache: 'no-store' });
+        const data = await res.json();
+        if (data.success) cachedPaymentMethods = data.methods;
+    } catch (err) { console.error('Payment methods fetch error:', err); }
+    return cachedPaymentMethods || { telebirr: [], cbe: [] };
+}
+
+async function openDepositModal() {
+    await loadPaymentMethods();
+    selectDepositMethod('telebirr');
+    show('depositModal');
+}
+
+function selectDepositMethod(method) {
+    selectedDepositMethod = method;
+    document.getElementById('depositMethodTelebirr').classList.toggle('active', method === 'telebirr');
+    document.getElementById('depositMethodCbe').classList.toggle('active', method === 'cbe');
+    renderMethodInfo(document.getElementById('depositMethodInfo'), method);
+}
+
+function copyText(text) {
+    navigator.clipboard?.writeText(text).then(
+        () => showNotification('Copied: ' + text),
+        () => {}
+    );
+}
+
+async function submitDepositRequest() {
+    const amount = Number(document.getElementById('depositAmount').value);
+    const transactionId = document.getElementById('depositTransactionId').value.trim();
+    const submittedText = document.getElementById('depositSubmittedText').value.trim();
+
+    if (!Number.isFinite(amount) || amount <= 0) return alertUser('Enter the amount you sent.');
+    if (!transactionId) return alertUser('Enter the transaction ID from your confirmation SMS.');
+
+    try {
+        const res = await fetch('/api/deposit-request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: currentUsername, method: selectedDepositMethod, amount, transactionId, submittedText })
+        });
+                const data = await res.json();
+        if (!data.success) return showNotification(data.message || 'Could not submit deposit.');
+        document.getElementById('depositAmount').value = '';
+        document.getElementById('depositTransactionId').value = '';
+        document.getElementById('depositSubmittedText').value = '';
+        closeModal('depositModal');
+        showNotification(data.autoVerified ? (data.message || 'Deposit verified and credited!') : 'Submitted — your deposit is pending review.');
+        if (data.autoVerified) await loadUserData(currentUsername);
+        fetchPendingRequests(currentUsername);
+    } catch { alertUser('Could not submit deposit.'); }
+}
+
+function openWithdrawModal() {
+    const balance = document.getElementById('balanceDisplay')?.innerText || '0.00';
+    document.getElementById('withdrawBalanceDisplay').innerText = balance;
+    selectWithdrawMethod('telebirr');
+    show('withdrawModal');
+}
+
+function selectWithdrawMethod(method) {
+    selectedWithdrawMethod = method;
+    document.getElementById('withdrawMethodTelebirr').classList.toggle('active', method === 'telebirr');
+    document.getElementById('withdrawMethodCbe').classList.toggle('active', method === 'cbe');
+    const extra = document.getElementById('withdrawCbeExtra');
+    const lbl = document.getElementById('withdrawDestLabel');
+    if (extra) extra.classList.toggle('hidden', method !== 'cbe');
+    if (lbl) lbl.innerText = method === 'cbe' ? 'CBE account number' : 'Destination number';
+}
+
+async function submitWithdrawRequest() {
+    const amount = Number(document.getElementById('withdrawAmount').value);
+    const destination = document.getElementById('withdrawDestination').value.trim();
+    const accountOwnerName = document.getElementById('withdrawOwnerName')?.value.trim() || '';
+    if (!destination) return alertUser('Enter the destination number.');
+    if (selectedWithdrawMethod === 'cbe' && !accountOwnerName) return alertUser('Enter account owner name for CBE.');
+    if (!Number.isFinite(amount) || amount < 21) return alertUser('Minimum withdrawal is 21 Birr.');
+
+    try {
+        const res = await fetch('/api/withdraw-request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: currentUsername, amount, method: selectedWithdrawMethod, destination, accountOwnerName: selectedWithdrawMethod === 'cbe' ? accountOwnerName : undefined })
+        });
+                const data = await res.json();
+        if (!data.success) return showNotification(data.message || "You don't have enough balance to withdraw that amount.");
+        document.getElementById('withdrawAmount').value = '';
+        document.getElementById('withdrawDestination').value = '';
+        if (document.getElementById('withdrawOwnerName')) document.getElementById('withdrawOwnerName').value = '';
+        closeModal('withdrawModal');
+        showNotification('Withdrawal submitted — pending review.');
+        await loadUserData(currentUsername);
+        fetchPendingRequests(currentUsername);
+    } catch { alertUser('Could not submit withdrawal.'); }
+}
+
+function openTransferModal() {
+    const balance = document.getElementById('balanceDisplay')?.innerText || '0.00';
+    document.getElementById('transferBalanceDisplay').innerText = balance;
+    show('transferModal');
+}
+
+async function submitTransferRequest() {
+    const amount = Number(document.getElementById('transferAmount').value);
+    const recipientPhone = document.getElementById('transferRecipient').value.trim();
+    if (!recipientPhone) return alertUser('Enter the recipient phone number.');
+    if (!Number.isFinite(amount) || amount <= 20) return alertUser('Transfers must be more than 20 Birr.');
+    const ok = await confirmAction(`Confirm transfer of ${amount} Birr to ${recipientPhone}?`);
+    if (!ok) return;
+
+    try {
+        const res = await fetch('/api/transfer-request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: currentUsername, amount, recipientPhone })
+        });
+                const data = await res.json();
+        if (!data.success) return showNotification(data.message || 'Could not submit transfer.');
+        document.getElementById('transferAmount').value = '';
+        document.getElementById('transferRecipient').value = '';
+        closeModal('transferModal');
+        showNotification('Transfer submitted — pending review.');
+        await loadUserData(currentUsername);
+        fetchPendingRequests(currentUsername);
+    } catch { alertUser('Could not submit transfer.'); }
+}
+
+async function fetchPendingRequests(username) {
+    const card = document.getElementById('pendingRequestsCard');
+    const list = document.getElementById('pendingRequestsList');
+    if (!card || !list || !username) return;
+
+    try {
+        const res = await fetch(`/api/my-pending-requests?username=${encodeURIComponent(username)}`, { cache: 'no-store' });
+        const data = await res.json();
+        if (!data.success || !data.pending.length) { hide('pendingRequestsCard'); return; }
+
+        show('pendingRequestsCard');
+                list.innerHTML = data.pending.map(p => {
+            const label = p.type === 'deposit' ? `Deposit ${Number(p.amount).toFixed(2)} Birr (${p.method})`
+                : p.type === 'withdraw' ? `Withdraw ${Number(p.amount).toFixed(2)} Birr`
+                : `Transfer ${Number(p.amount).toFixed(2)} Birr`;
+            const when = new Date(p.created_at).toLocaleString();
+            return `<div class="pending-row"><span>${label}<br><small>${when}</small></span><span class="pending-pill">Pending</span></div>`;
+        }).join('');
+    } catch (err) { console.error('Pending requests fetch error:', err); }
 }
 
 // ---------------- PROFILE ----------------
@@ -914,7 +1337,7 @@ const translations = {
         readyTitle: 'Ready to Play? 🎲', readyBody: 'Choose a stake, join a room, select your cards and play.', playBtn: 'Play Bingo 🚀',
         walletTitle: '💰 My Wallet', walletSub: 'Your current balance', walletTxTitle: 'Recent Transactions',
         historyTitle: '🏆 Game History',
-        accountTitle: 'Account Settings ⚙️', accountBody: 'Set a password for standard web login.', accountSaveBtn: 'Save Web Password 🔒',
+        accountTitle: 'Account Settings ⚙️', accountBody: 'Set a password for website login (min 6 characters). Confirm password below.', accountSaveBtn: 'Save username & password 🔒', accountUsernameLabel: 'Username', accountUsernameHint: 'Keep this username or change it. Used for web login.', accountWebPasswordNote: 'Password can only be set or changed inside the Telegram Mini App for security.',
         profileTitle: '👤 Profile', profileUsernameLbl: 'USERNAME', profilePhoneLbl: 'PHONE', profileLangLbl: 'Language',
         announcementsTitle: '📢 Announcements'
     },
@@ -923,12 +1346,35 @@ const translations = {
         readyTitle: 'ለመጫወት ተዘጋጅተዋል? 🎲', readyBody: 'ውርርድ ይምረጡ፣ ክፍል ይቀላቀሉ፣ ካርድዎን ይምረጡ እና ይጫወቱ።', playBtn: 'ቢንጎ ይጫወቱ 🚀',
         walletTitle: '💰 የኔ ዋሌት', walletSub: 'የአሁኑ ቀሪ ሂሳብዎ', walletTxTitle: 'የቅርብ ጊዜ ግብይቶች',
         historyTitle: '🏆 የጨዋታ ታሪክ',
-        accountTitle: 'የመለያ ቅንብሮች ⚙️', accountBody: 'መደበኛ የድር መግቢያ የይለፍ ቃል ያዘጋጁ።', accountSaveBtn: 'የድር የይለፍ ቃል ያስቀምጡ 🔒',
+        accountTitle: 'የመለያ ቅንብሮች ⚙️', accountBody: 'ለድር መግቢያ የይለፍ ቃል ያዘጋጁ (ቢያንስ 6 ቁምፊ)። ከታች ያረጋግጡ።', accountSaveBtn: 'መጠቀሚያ ስም እና የይለፍ ቃል አስቀምጥ 🔒', accountUsernameLabel: 'መጠቀሚያ ስም', accountUsernameHint: 'ይህን መጠቀሚያ ስም ይጠብቁ ወይም ይቀይሩ። ለድር መግቢያ ያገለግላል።', accountWebPasswordNote: 'የይለፍ ቃል ማስተካከል የሚቻለው በቴሌግራም Mini App ውስጥ ብቻ ነው።',
         profileTitle: '👤 መገለጫ', profileUsernameLbl: 'የተጠቃሚ ስም', profilePhoneLbl: 'ስልክ', profileLangLbl: 'ቋንቋ',
         announcementsTitle: '📢 ማስታወቂያዎች'
     }
 };
 
+function applyTheme(theme) {
+    const t = theme === 'light' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', t);
+    localStorage.setItem('bingoTheme', t);
+}
+async function changeTheme(theme) {
+    applyTheme(theme);
+    if (!currentUsername) return;
+    try {
+        await fetch('/api/user/theme', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: currentUsername, theme }) });
+    } catch {}
+}
+async function saveDisplayName() {
+    const val = document.getElementById('displayNameInput')?.value.trim();
+    if (!val || val.length < 2) return alertUser('Display name must be 2-50 chars.');
+    try {
+        const res = await fetch('/api/user/display-name', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: currentUsername, displayName: val }) });
+        const data = await res.json();
+        if (!data.success) return alertUser(data.message || 'Failed');
+        showNotification('Display name updated');
+        await loadUserData(currentUsername);
+    } catch { alertUser('Failed to save'); }
+}
 function applyLanguage(language, persistLocally = true) {
     const lang = translations[language] ? language : 'en';
     const t = translations[lang];
@@ -948,7 +1394,8 @@ function switchTab(tabId, navElement) {
     navElement?.classList.add('active');
 
     if (tabId === 'tabHistory') fetchHistory(currentUsername);
-    if (tabId === 'tabWallet') fetchWallet(currentUsername);
+    if (tabId === 'tabWallet') { fetchWallet(currentUsername); fetchPendingRequests(currentUsername); }
+    if (tabId === 'tabAccount') applyAccountTabForClient();
 }
 
 function logoutUser() {
@@ -960,7 +1407,7 @@ function logoutUser() {
     if (currentStake && currentRoom?.status !== 'PLAYING') {
         socket.emit('leave_room', { stake: currentStake, username: currentUsername });
     }
-    localStorage.removeItem('bingoUser');
+    clearWebSession();
     currentUsername = '';
     currentStake = null;
     currentRoom = null;
@@ -968,13 +1415,100 @@ function logoutUser() {
 }
 
 async function setWebPassword() {
-    const newPassword = document.getElementById('webPasswordInput').value.trim();
-    if (!newPassword) return alert('Please enter a password.');
-    const res = await fetch('/api/set-password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:currentUsername,newPassword})});
-    const data = await res.json();
-    alert(data.message || (data.success ? 'Saved.' : 'Failed.'));
-    if (data.success) document.getElementById('webPasswordInput').value = '';
+    if (!isTelegramClient()) {
+        return alertUser('Password can only be set or changed inside the Telegram Mini App.');
+    }
+    const initData = window.Telegram?.WebApp?.initData;
+    if (!initData) {
+        return alertUser('Telegram session missing. Close and reopen the Mini App, then try again.');
+    }
+    if (!currentUsername) return alertUser('Please log in first.');
+
+    const usernameInput = document.getElementById('accountUsernameInput');
+    const desiredUsername = (usernameInput?.value || currentUsername).trim();
+    const newPassword = document.getElementById('webPasswordInput')?.value || '';
+    const confirmPassword = document.getElementById('webPasswordConfirmInput')?.value || '';
+
+    if (desiredUsername.length < 3 || desiredUsername.length > 30) {
+        return alertUser('Username must be 3–30 characters.');
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(desiredUsername)) {
+        return alertUser('Username may only contain letters, numbers, and underscores.');
+    }
+    if (newPassword.length < 6) {
+        return alertUser('Password must be at least 6 characters.');
+    }
+    if (newPassword !== confirmPassword) {
+        return alertUser('Passwords do not match. Please confirm your password.');
+    }
+
+    // Username change is bound to this Telegram account via initData (not the old username string).
+    if (desiredUsername.toLowerCase() !== String(currentUsername).toLowerCase()) {
+        try {
+            const ur = await fetch('/api/user/username', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ newUsername: desiredUsername, initData })
+            });
+            const ud = await ur.json();
+            if (!ud.success) return alertUser(ud.message || 'Could not update username.');
+            currentUsername = ud.username;
+            localStorage.setItem('bingoUser', currentUsername);
+            touchWebSession();
+            const pd = document.getElementById('playerDisplay');
+            if (pd) pd.innerText = currentUsername;
+            if (usernameInput) usernameInput.value = currentUsername;
+        } catch {
+            return alertUser('Could not update username.');
+        }
+    }
+
+    try {
+        const res = await fetch('/api/set-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ newPassword, initData })
+        });
+        const data = await res.json();
+        alertUser(data.message || (data.success ? 'Password saved. You can log in on the website.' : 'Failed.'));
+        if (data.success) {
+            if (data.username) {
+                currentUsername = data.username;
+                localStorage.setItem('bingoUser', currentUsername);
+                touchWebSession();
+            }
+            const a = document.getElementById('webPasswordInput');
+            const b = document.getElementById('webPasswordConfirmInput');
+            if (a) a.value = '';
+            if (b) b.value = '';
+        }
+    } catch {
+        alertUser('Failed to save password.');
+    }
 }
+
+
+function applyAccountTabForClient() {
+    const pwSection = document.getElementById('webPasswordSection');
+    const webNote = document.getElementById('webPasswordWebOnlyNote');
+    const userInput = document.getElementById('accountUsernameInput');
+    if (userInput && currentUsername) userInput.value = currentUsername;
+
+    if (isTelegramClient()) {
+        if (pwSection) pwSection.classList.remove('hidden');
+        if (webNote) webNote.classList.add('hidden');
+        if (userInput) userInput.disabled = false;
+    } else {
+        if (pwSection) pwSection.classList.add('hidden');
+        if (webNote) webNote.classList.remove('hidden');
+        // On web, username is view-only (change only in Telegram)
+        if (userInput) {
+            userInput.disabled = true;
+            userInput.title = 'Change username in the Telegram Mini App';
+        }
+    }
+}
+
 
 // ---------------- TELEGRAM PHONE ----------------
 function shareTelegramContact() {
@@ -1028,24 +1562,22 @@ async function fetchNotifications(username) {
         console.error('Notification error:', err);
     }
 }
-
 function renderNotificationsList(posts) {
     const container = document.getElementById('notifListContainer');
     if (!container) return;
 
     container.innerHTML = posts.length
         ? posts.map(post => `
-            <div style="background:#252525;border:1px solid #333;border-radius:10px;padding:12px;margin-bottom:10px;">
+            <div class="notif-card">
                 ${post.image_url
-                    ? `<img src="${post.image_url}" style="width:100%;border-radius:8px;margin-bottom:10px;" onerror="this.remove()">`
+                    ? `<img src="${post.image_url}" style="width:100%;border-radius:8px;margin-bottom:10px;display:block;" onerror="this.remove()">`
                     : ''}
-                <div style="line-height:1.5">${String(post.message || '').replace(/\n/g, '<br>')}</div>
-                <div class="small" style="margin-top:8px">${new Date(post.created_at).toLocaleString()}</div>
+                <div class="notif-body">${String(post.message || '').replace(/\n/g, '<br>')}</div>
+                <div class="notif-date">${new Date(post.created_at).toLocaleString()}</div>
             </div>
         `).join('')
         : '<p class="small">No announcements yet.</p>';
 }
-
 async function markNotificationsAsRead() {
     if (!currentUsername) return;
 
@@ -1082,13 +1614,212 @@ async function toggleNotificationModal() {
     }
 }
 
+// ==================== INSTANT BINGO (isolated from classic) ====================
+let instantStake = null;
+let instantSelected = new Set();
+let instantMaxCards = 4;
+let instantSocket = null;
 
+async function openInstantBingo() {
+    if (!currentUsername) {
+        alertUser('Please log in first.');
+        return;
+    }
+    hide('homeBox');
+    hide('roomsBox');
+    hide('selectionBox');
+    show('instantBox');
+    instantSelected.clear();
+    await loadInstantUI();
+    connectInstantSocket();
+    loadInstantHistory();
+}
 
+async function loadInstantUI() {
+    const msg = document.getElementById('instantMsg');
+    try {
+        const res = await fetch('/api/instant/status', { cache: 'no-store' });
+        const data = await res.json();
+        if (!data.success || data.enabled === false) {
+            if (msg) msg.textContent = data.message || 'Instant Bingo is currently disabled.';
+            return;
+        }
+        instantMaxCards = data.maxCardsPerPlayer || 4;
+        const sel = document.getElementById('instantStake');
+        if (sel) {
+            const stakes = data.stakes || [10, 20, 50, 100, 200, 500];
+            sel.innerHTML = stakes.map(s => `<option value="${s}">${s} Birr / card</option>`).join('');
+            if (!instantStake) instantStake = stakes[0];
+            sel.value = String(instantStake);
+            sel.onchange = () => {
+                instantStake = Number(sel.value);
+                instantSelected.clear();
+                updateInstantCost();
+                renderInstantCards();
+                if (instantSocket) instantSocket.emit('instant_subscribe', instantStake);
+                refreshInstantRoundMeta(data);
+            };
+        }
+        refreshInstantRoundMeta(data);
+        await renderInstantCards();
+        updateInstantCost();
+    } catch (e) {
+        if (msg) msg.textContent = 'Could not load Instant Bingo.';
+        console.error(e);
+    }
+}
 
+function refreshInstantRoundMeta(data) {
+    const meta = document.getElementById('instantRoundMeta');
+    if (!meta) return;
+    const stake = instantStake || (data.stakes && data.stakes[0]);
+    const round = (data.rounds || []).find(r => Number(r.stake) === Number(stake));
+    if (!round) {
+        meta.textContent = 'Round info unavailable.';
+        return;
+    }
+    meta.innerHTML = `Round #${round.id} · <strong>${round.secondsLeft}s</strong> left · ${round.entryCount || 0} card entries · draw ${data.numbersDrawn || 20} numbers`;
+}
 
+async function renderInstantCards() {
+    const grid = document.getElementById('instantCardGrid');
+    if (!grid) return;
+    grid.innerHTML = '<p class="small">Loading cards…</p>';
+    try {
+        const res = await fetch('/api/instant/cards', { cache: 'no-store' });
+        const data = await res.json();
+        if (!data.success) {
+            grid.innerHTML = `<p class="small">${data.message || 'No cards'}</p>`;
+            return;
+        }
+        const cards = data.cards || [];
+        grid.innerHTML = cards.map(n => {
+            const selected = instantSelected.has(n) ? 'selected' : '';
+            return `<div class="card-item ${selected}" data-card="${n}" onclick="toggleInstantCard(${n})">${n}</div>`;
+        }).join('');
+    } catch (e) {
+        grid.innerHTML = '<p class="small">Failed to load cards.</p>';
+    }
+}
 
+function toggleInstantCard(n) {
+    n = Number(n);
+    if (instantSelected.has(n)) instantSelected.delete(n);
+    else {
+        if (instantSelected.size >= instantMaxCards) {
+            alertUser(`You can select at most ${instantMaxCards} cards.`);
+            return;
+        }
+        instantSelected.add(n);
+    }
+    document.querySelectorAll('#instantCardGrid .card-item').forEach(el => {
+        const num = Number(el.getAttribute('data-card'));
+        el.classList.toggle('selected', instantSelected.has(num));
+    });
+    updateInstantCost();
+}
 
+function updateInstantCost() {
+    const stake = Number(document.getElementById('instantStake')?.value || instantStake || 0);
+    instantStake = stake;
+    const count = instantSelected.size;
+    const cost = stake * count;
+    const costEl = document.getElementById('instantCost');
+    const countEl = document.getElementById('instantSelectedCount');
+    if (costEl) costEl.textContent = cost.toFixed(2) + ' Birr';
+    if (countEl) countEl.textContent = `${count} / ${instantMaxCards}`;
+}
 
+async function joinInstantRound() {
+    const msg = document.getElementById('instantMsg');
+    if (!currentUsername) return alertUser('Log in first.');
+    if (!instantSelected.size) return alertUser('Select at least one card.');
+    const stake = Number(document.getElementById('instantStake')?.value || 0);
+    const btn = document.getElementById('instantJoinBtn');
+    if (btn) btn.disabled = true;
+    try {
+        const res = await fetch('/api/instant/join', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username: currentUsername,
+                stake,
+                cardNumbers: [...instantSelected]
+            })
+        });
+        const data = await res.json();
+        if (!data.success) {
+            if (msg) msg.textContent = data.message || 'Join failed.';
+            alertUser(data.message || 'Join failed.');
+            return;
+        }
+        if (msg) msg.textContent = `Joined! Paid ${Number(data.paid).toFixed(2)} Birr. Waiting for the shared draw…`;
+        instantSelected.clear();
+        updateInstantCost();
+        await renderInstantCards();
+        if (typeof fetchUserDetails === 'function') {
+            try { await fetchUserDetails(currentUsername); } catch (_) {}
+        }
+        // refresh balance display if present
+        const bal = document.getElementById('userBalance');
+        if (bal && data.balance != null) bal.textContent = Number(data.balance).toFixed(2);
+        loadInstantHistory();
+    } catch (e) {
+        if (msg) msg.textContent = 'Network error.';
+        console.error(e);
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
 
+function connectInstantSocket() {
+    if (typeof io === 'undefined') return;
+    if (!instantSocket) {
+        instantSocket = io('/instant');
+        instantSocket.on('instant_round_update', (round) => {
+            const meta = document.getElementById('instantRoundMeta');
+            if (!meta || !round) return;
+            if (Number(round.stake) !== Number(instantStake)) return;
+            meta.innerHTML = `Round #${round.id} · <strong>${round.secondsLeft}s</strong> left · ${round.entryCount || 0} entries`;
+        });
+        instantSocket.on('instant_round_result', (payload) => {
+            if (Number(payload.stake) !== Number(instantStake)) return;
+            const msg = document.getElementById('instantMsg');
+            const mine = (payload.results || []).filter(r => r.username && r.username.toLowerCase() === (currentUsername || '').toLowerCase());
+            const wins = mine.filter(r => r.hit);
+            if (msg) {
+                msg.textContent = wins.length
+                    ? `Draw done! You won on ${wins.length} card(s): ` + wins.map(w => `#${w.cardNumber} ${w.pattern} +${w.prize}`).join(', ')
+                    : `Draw done (${(payload.drawnNumbers || []).length} numbers). No win on your cards this round.`;
+            }
+            loadInstantHistory();
+            if (typeof fetchUserDetails === 'function') {
+                try { fetchUserDetails(currentUsername); } catch (_) {}
+            }
+        });
+    }
+    if (instantStake) instantSocket.emit('instant_subscribe', instantStake);
+}
 
-
+async function loadInstantHistory() {
+    const box = document.getElementById('instantHistory');
+    if (!box || !currentUsername) return;
+    try {
+        const res = await fetch('/api/instant/history?username=' + encodeURIComponent(currentUsername), { cache: 'no-store' });
+        const data = await res.json();
+        if (!data.success || !data.history?.length) {
+            box.innerHTML = '<p class="small">No Instant Bingo plays yet.</p>';
+            return;
+        }
+        box.innerHTML = data.history.map(h => {
+            const won = Number(h.prize) > 0;
+            return `<div style="padding:8px 0;border-bottom:1px solid var(--card-border, #333);">
+              <strong>#${h.cardNumber}</strong> · ${Number(h.stake)} Birr
+              · ${won ? `🏆 ${h.pattern} ×${h.multiplier} → <span style="color:var(--green)">+${Number(h.prize).toFixed(2)}</span>` : '— no hit'}
+              <div class="small">${h.date ? new Date(h.date).toLocaleString() : ''}</div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        box.innerHTML = '<p class="small">Could not load history.</p>';
+    }
+}
