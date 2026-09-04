@@ -1,13 +1,7 @@
 'use strict';
 
 /**
- * Instant Bingo — solo play sessions (isolated from classic bingo).
- * Shared wallet only (same users.balance + transactions).
- *
- * Flow:
- *  1) Player picks ≤4 cards + stake
- *  2) POST /api/instant/play → charge balance, draw 20 numbers, evaluate, pay wins
- *  3) Client animates 1 number/sec with highlights (numbers already decided server-side)
+ * Instant Bingo — SHARED real-time rounds (same timer + numbers for everyone).
  */
 
 const pool = require('../../db/pool');
@@ -17,262 +11,248 @@ const { evaluateCard, drawNumbers } = require('./patterns');
 const cfg = () => config.instantBingo || {};
 
 let ioNamespace = null;
-
-/** Fake “players online” — gradual walk between 200–400 */
+let phaseTimer = null;
+let drawTimer = null;
+let phase = 'SELECTING';
+let selectionEndsAt = 0;
+let currentRoundId = null;
+let currentStakeDefault = 10;
+let drawnNumbers = [];
+let drawIndex = 0;
+const entries = new Map();
+let lastResults = [];
 let fakePlayers = 260 + Math.floor(Math.random() * 40);
+let fakeOpponents = [];
+
+const FAKE_PREFIXES = [
+  'abh', 'dkb', 'mel', 'yon', 'sara', 'bem', 'kal', 'nah', 'tes', 'lid',
+  'daw', 'hel', 'rob', 'sol', 'mir', 'abe', 'fen', 'gat', 'hir', 'jem',
+];
 
 function enabled() {
   return cfg().enabled !== false;
 }
-
 function stakes() {
   return cfg().stakes || config.stakes || [10, 20, 50, 100, 200, 500];
 }
-
+function selectionSeconds() {
+  return Number(cfg().selectionSeconds || 25);
+}
 function tickFakePlayers() {
-  const min = 200;
-  const max = 400;
-  const step = Math.floor(Math.random() * 21) - 8; // -8 .. +12, slight upward bias
-  fakePlayers = Math.max(min, Math.min(max, fakePlayers + step));
+  const step = Math.floor(Math.random() * 21) - 8;
+  fakePlayers = Math.max(200, Math.min(400, fakePlayers + step));
   return fakePlayers;
 }
-
-setInterval(() => {
-  tickFakePlayers();
-  if (ioNamespace) {
-    ioNamespace.emit('instant_players', { playing: fakePlayers });
+function maskName(raw) {
+  const s = String(raw || 'usr').replace(/[^a-zA-Z0-9]/g, '') || 'usr';
+  return s.slice(0, 3).toLowerCase() + '*****';
+}
+function rebuildFakeOpponents(catalog) {
+  const nums = (catalog && catalog.length) ? catalog : Array.from({ length: 50 }, (_, i) => i + 1);
+  const list = [];
+  for (let i = 0; i < 15; i++) {
+    const prefix = FAKE_PREFIXES[Math.floor(Math.random() * FAKE_PREFIXES.length)];
+    list.push({
+      id: 'fake_' + i,
+      username: maskName(prefix + Math.floor(Math.random() * 90)),
+      cardNumber: nums[Math.floor(Math.random() * nums.length)],
+      fake: true,
+    });
   }
-}, 8000);
+  fakeOpponents = list;
+  return list;
+}
 
 async function ensureSchema() {
   const steps = [
     `CREATE TABLE IF NOT EXISTS instant_rounds (
-      id SERIAL PRIMARY KEY,
-      stake NUMERIC(10,2) NOT NULL,
-      status VARCHAR(20) NOT NULL DEFAULT 'OPEN',
-      drawn_numbers INT[] DEFAULT '{}',
-      deadline TIMESTAMPTZ,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      drawn_at TIMESTAMPTZ,
-      completed_at TIMESTAMPTZ
-    )`,
+      id SERIAL PRIMARY KEY, stake NUMERIC(10,2) NOT NULL DEFAULT 0,
+      status VARCHAR(20) NOT NULL DEFAULT 'OPEN', drawn_numbers INT[] DEFAULT '{}',
+      deadline TIMESTAMPTZ, created_at TIMESTAMPTZ DEFAULT NOW(),
+      drawn_at TIMESTAMPTZ, completed_at TIMESTAMPTZ)`,
     `CREATE TABLE IF NOT EXISTS instant_entries (
-      id SERIAL PRIMARY KEY,
-      round_id INT REFERENCES instant_rounds(id) ON DELETE CASCADE,
-      user_id INT NOT NULL REFERENCES users(id),
-      username VARCHAR(50) NOT NULL,
-      card_number INT NOT NULL,
-      stake NUMERIC(10,2) NOT NULL,
-      paid NUMERIC(10,2) NOT NULL,
-      pattern VARCHAR(40),
-      multiplier NUMERIC(6,2) DEFAULT 0,
-      prize NUMERIC(10,2) DEFAULT 0,
-      winning_cells JSONB,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    )`,
+      id SERIAL PRIMARY KEY, round_id INT REFERENCES instant_rounds(id) ON DELETE CASCADE,
+      user_id INT NOT NULL REFERENCES users(id), username VARCHAR(50) NOT NULL,
+      card_number INT NOT NULL, stake NUMERIC(10,2) NOT NULL, paid NUMERIC(10,2) NOT NULL,
+      pattern VARCHAR(40), multiplier NUMERIC(6,2) DEFAULT 0, prize NUMERIC(10,2) DEFAULT 0,
+      winning_cells JSONB, created_at TIMESTAMPTZ DEFAULT NOW())`,
     `ALTER TABLE instant_entries ALTER COLUMN round_id DROP NOT NULL`,
     `CREATE INDEX IF NOT EXISTS idx_instant_entries_round ON instant_entries(round_id)`,
     `CREATE INDEX IF NOT EXISTS idx_instant_entries_user ON instant_entries(user_id, created_at DESC)`,
-    `CREATE INDEX IF NOT EXISTS idx_instant_rounds_status ON instant_rounds(status, stake)`,
   ];
   for (const sql of steps) {
-    try {
-      await pool.query(sql);
-    } catch (err) {
-      if (err && (err.code === '23505' || err.code === '42P07' || /already exists/i.test(String(err.message)))) {
-        continue;
-      }
-      // DROP NOT NULL may fail on fresh table without NOT NULL — ignore
-      if (err && err.code === '42804') continue;
-      console.error('instant schema step', err.message);
+    try { await pool.query(sql); }
+    catch (err) {
+      if (err && (err.code === '23505' || err.code === '42P07' || /already exists/i.test(String(err.message)))) continue;
+      console.error('instant schema', err.message);
     }
   }
 }
 
 async function getCardGrid(cardNumber) {
-  const r = await pool.query(
-    'SELECT grid FROM bingo_cards WHERE card_number = $1',
-    [cardNumber]
-  );
+  const r = await pool.query('SELECT grid FROM bingo_cards WHERE card_number = $1', [cardNumber]);
   return r.rows[0]?.grid || null;
 }
-
 async function listCatalog(limit) {
   const size = limit || cfg().catalogSize || 200;
-  const r = await pool.query(
-    `SELECT card_number FROM bingo_cards ORDER BY card_number ASC LIMIT $1`,
-    [size]
-  );
+  const r = await pool.query(`SELECT card_number FROM bingo_cards ORDER BY card_number ASC LIMIT $1`, [size]);
   return r.rows.map((row) => Number(row.card_number));
 }
 
-/**
- * Solo play: charge stake×cards, draw 20 numbers, evaluate, credit wins.
- * Same card numbers allowed for different players (no exclusivity).
- */
-async function startPlay({ username, stake, cardNumbers }) {
-  if (!enabled()) {
-    const err = new Error('Instant Bingo is temporarily unavailable.');
-    err.code = 'DISABLED';
-    throw err;
+function publicState() {
+  const secsLeft = phase === 'SELECTING'
+    ? Math.max(0, Math.ceil((selectionEndsAt - Date.now()) / 1000)) : 0;
+  const players = [];
+  for (const [username, ent] of entries.entries()) {
+    players.push({ username: maskName(username), realUsername: username, cards: ent.cards, stake: ent.stake, fake: false });
   }
+  return {
+    enabled: enabled(), phase, selectionSeconds: selectionSeconds(), secondsLeft: secsLeft,
+    selectionEndsAt, maxCardsPerPlayer: cfg().maxCardsPerPlayer || 4,
+    numbersDrawn: cfg().numbersDrawn || 20, lineMultiplier: cfg().lineMultiplier || 2,
+    cornersMultiplier: cfg().cornersMultiplier || 2.5, stakes: stakes(),
+    playing: fakePlayers, playerCount: entries.size,
+    drawnNumbers: phase === 'DRAWING' || phase === 'RESULTS' ? drawnNumbers.slice(0, drawIndex) : [],
+    fullDrawn: phase === 'RESULTS' ? drawnNumbers : [], drawIndex, roundId: currentRoundId,
+    fakeOpponents, players, lastResults: phase === 'RESULTS' ? lastResults : [],
+  };
+}
 
+function broadcast(event, payload) {
+  if (ioNamespace) ioNamespace.emit(event, payload || publicState());
+}
+
+function startSelectionPhase() {
+  phase = 'SELECTING';
+  entries.clear();
+  drawnNumbers = [];
+  drawIndex = 0;
+  lastResults = [];
+  currentRoundId = null;
+  selectionEndsAt = Date.now() + selectionSeconds() * 1000;
+  tickFakePlayers();
+  listCatalog(cfg().catalogSize || 200).then((cat) => rebuildFakeOpponents(cat)).catch(() => rebuildFakeOpponents([]));
+  if (phaseTimer) clearInterval(phaseTimer);
+  if (drawTimer) { clearInterval(drawTimer); drawTimer = null; }
+  phaseTimer = setInterval(() => {
+    if (phase !== 'SELECTING') return;
+    const left = selectionEndsAt - Date.now();
+    broadcast('instant_state', publicState());
+    if (left <= 0) {
+      clearInterval(phaseTimer);
+      phaseTimer = null;
+      beginDrawPhase().catch((e) => { console.error('instant beginDraw', e); startSelectionPhase(); });
+    }
+  }, 250);
+  broadcast('instant_state', publicState());
+}
+
+async function beginDrawPhase() {
+  phase = 'DRAWING';
+  drawIndex = 0;
+  drawnNumbers = drawNumbers(cfg().numbersDrawn || 20, 75);
+  try {
+    const ins = await pool.query(
+      `INSERT INTO instant_rounds (stake, status, drawn_numbers, drawn_at) VALUES ($1,'DRAWING',$2,NOW()) RETURNING id`,
+      [currentStakeDefault, drawnNumbers]
+    );
+    currentRoundId = ins.rows[0].id;
+  } catch (e) {
+    console.error('instant round insert', e.message);
+    currentRoundId = Date.now();
+  }
+  broadcast('instant_draw_start', { ...publicState(), drawnNumbers, drawIntervalMs: 1000 });
+  await settleAllEntries();
+  drawTimer = setInterval(() => {
+    drawIndex += 1;
+    const num = drawnNumbers[drawIndex - 1];
+    broadcast('instant_number', {
+      index: drawIndex, total: drawnNumbers.length, number: num,
+      called: drawnNumbers.slice(0, drawIndex), playing: fakePlayers,
+    });
+    if (drawIndex >= drawnNumbers.length) {
+      clearInterval(drawTimer);
+      drawTimer = null;
+      phase = 'RESULTS';
+      broadcast('instant_draw_end', { drawnNumbers, results: lastResults, playing: fakePlayers });
+      setTimeout(() => startSelectionPhase(), 1200);
+    }
+  }, 1000);
+}
+
+async function settleAllEntries() {
+  const lineMult = cfg().lineMultiplier || 2;
+  const cornerMult = cfg().cornersMultiplier || 2.5;
+  lastResults = [];
+  for (const [username, ent] of entries.entries()) {
+    for (const cardNumber of ent.cards) {
+      const grid = await getCardGrid(cardNumber);
+      const evalResult = evaluateCard(grid, drawnNumbers, lineMult, cornerMult);
+      const prize = evalResult.hit ? Number((Number(ent.stake) * evalResult.multiplier).toFixed(2)) : 0;
+      try {
+        if (currentRoundId) {
+          await pool.query(
+            `INSERT INTO instant_entries (round_id,user_id,username,card_number,stake,paid,pattern,multiplier,prize,winning_cells)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+            [currentRoundId, ent.userId, username, cardNumber, ent.stake, ent.stake,
+              evalResult.pattern, evalResult.multiplier, prize, JSON.stringify(evalResult.winningCells || [])]
+          );
+        }
+        if (prize > 0) {
+          await pool.query(`UPDATE users SET balance = balance + $1 WHERE id = $2`, [prize, ent.userId]);
+          await pool.query(`INSERT INTO transactions(user_id,amount,type) VALUES ($1,$2,'INSTANT_BINGO_WIN')`, [ent.userId, prize]);
+        }
+      } catch (e) { console.error('instant settle', e.message); }
+      lastResults.push({
+        username, cardNumber, pattern: evalResult.pattern, multiplier: evalResult.multiplier,
+        prize, hit: evalResult.hit, winningCells: evalResult.winningCells || [], grid,
+      });
+    }
+  }
+  try {
+    if (currentRoundId) {
+      await pool.query(`UPDATE instant_rounds SET status='COMPLETED', completed_at=NOW() WHERE id=$1`, [currentRoundId]);
+    }
+  } catch (_) {}
+}
+
+async function joinSharedRound({ username, stake, cardNumbers }) {
+  if (!enabled()) { const err = new Error('Instant Bingo is temporarily unavailable.'); err.code = 'DISABLED'; throw err; }
+  if (phase !== 'SELECTING') throw new Error('Round already started — wait for the next selection.');
   const maxCards = cfg().maxCardsPerPlayer || 4;
   const cards = [...new Set((cardNumbers || []).map(Number))].filter((n) => n > 0);
   if (!cards.length) throw new Error('Select at least one card.');
-  if (cards.length > maxCards) throw new Error(`You can play at most ${maxCards} cards.`);
-
+  if (cards.length > maxCards) throw new Error('Max ' + maxCards + ' cards.');
   const s = Number(stake);
   if (!stakes().includes(s)) throw new Error('Invalid stake.');
-
   const catalog = await listCatalog(cfg().catalogSize || 200);
-  const catalogSet = new Set(catalog);
-  for (const c of cards) {
-    if (!catalogSet.has(c)) throw new Error(`Card #${c} is not in the Instant catalog.`);
-  }
-
+  const set = new Set(catalog);
+  for (const c of cards) if (!set.has(c)) throw new Error('Card #' + c + ' not in catalog.');
   const totalCost = Number((s * cards.length).toFixed(2));
-  const numbersCount = cfg().numbersDrawn || 20;
-  const lineMult = cfg().lineMultiplier || 2;
-  const cornerMult = cfg().cornersMultiplier || 2.5;
-  const drawn = drawNumbers(numbersCount, 75);
-
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-
-    const user = await client.query(
-      `SELECT id, balance FROM users WHERE LOWER(username) = LOWER($1) FOR UPDATE`,
-      [username]
-    );
+    const user = await client.query(`SELECT id, balance FROM users WHERE LOWER(username)=LOWER($1) FOR UPDATE`, [username]);
     if (!user.rowCount) throw new Error('User not found.');
     const userId = user.rows[0].id;
-    const balanceBefore = Number(user.rows[0].balance);
-    if (balanceBefore < totalCost) throw new Error('Insufficient balance.');
-
+    if (Number(user.rows[0].balance) < totalCost) throw new Error('Insufficient balance.');
+    if (entries.has(username)) {
+      const prev = entries.get(username);
+      await client.query(`UPDATE users SET balance = balance + $1 WHERE id = $2`, [prev.paid, userId]);
+      await client.query(`INSERT INTO transactions(user_id,amount,type) VALUES ($1,$2,'INSTANT_BINGO_REFUND')`, [userId, prev.paid]);
+    }
     const charge = await client.query(
-      `UPDATE users SET balance = balance - $1
-       WHERE id = $2 AND balance >= $1
-       RETURNING balance`,
-      [totalCost, userId]
-    );
+      `UPDATE users SET balance = balance - $1 WHERE id = $2 AND balance >= $1 RETURNING balance`, [totalCost, userId]);
     if (!charge.rowCount) throw new Error('Insufficient balance.');
-
-    await client.query(
-      `INSERT INTO transactions(user_id, amount, type) VALUES ($1, $2, $3)`,
-      [userId, -totalCost, 'INSTANT_BINGO_BUY']
-    );
-
-    // Solo “round” row for history grouping
-    const roundIns = await client.query(
-      `INSERT INTO instant_rounds (stake, status, drawn_numbers, drawn_at, completed_at)
-       VALUES ($1, 'COMPLETED', $2, NOW(), NOW())
-       RETURNING id`,
-      [s, drawn]
-    );
-    const roundId = roundIns.rows[0].id;
-
-    const cardResults = [];
-    let totalPrize = 0;
-
-    for (const cardNumber of cards) {
-      const grid = await getCardGrid(cardNumber);
-      if (!grid) throw new Error(`Card #${cardNumber} grid not found.`);
-
-      const evalResult = evaluateCard(grid, drawn, lineMult, cornerMult);
-      const prize = evalResult.hit
-        ? Number((s * evalResult.multiplier).toFixed(2))
-        : 0;
-      totalPrize += prize;
-
-      await client.query(
-        `INSERT INTO instant_entries
-          (round_id, user_id, username, card_number, stake, paid, pattern, multiplier, prize, winning_cells)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [
-          roundId,
-          userId,
-          username,
-          cardNumber,
-          s,
-          s,
-          evalResult.pattern,
-          evalResult.multiplier,
-          prize,
-          JSON.stringify(evalResult.winningCells || []),
-        ]
-      );
-
-      cardResults.push({
-        cardNumber,
-        grid,
-        pattern: evalResult.pattern,
-        multiplier: evalResult.multiplier,
-        prize,
-        hit: evalResult.hit,
-        winningCells: evalResult.winningCells || [],
-      });
-    }
-
-    if (totalPrize > 0) {
-      await client.query(
-        `UPDATE users SET balance = balance + $1 WHERE id = $2`,
-        [totalPrize, userId]
-      );
-      await client.query(
-        `INSERT INTO transactions(user_id, amount, type) VALUES ($1, $2, $3)`,
-        [userId, totalPrize, 'INSTANT_BINGO_WIN']
-      );
-    }
-
+    await client.query(`INSERT INTO transactions(user_id,amount,type) VALUES ($1,$2,'INSTANT_BINGO_BUY')`, [userId, -totalCost]);
     await client.query('COMMIT');
-
-    const bal = await pool.query('SELECT balance FROM users WHERE id = $1', [userId]);
-
-    const payload = {
-      success: true,
-      sessionId: roundId,
-      stake: s,
-      paid: totalCost,
-      totalPrize,
-      balance: Number(bal.rows[0].balance),
-      drawnNumbers: drawn,
-      cards: cardResults,
-      drawIntervalMs: 1000,
-      numbersDrawn: numbersCount,
-      playing: fakePlayers,
-      username,
+    entries.set(username, { userId, cards, stake: s, paid: totalCost });
+    currentStakeDefault = s;
+    broadcast('instant_state', publicState());
+    return {
+      success: true, balance: Number(charge.rows[0].balance), paid: totalCost, cards, stake: s,
+      phase, secondsLeft: Math.max(0, Math.ceil((selectionEndsAt - Date.now()) / 1000)), state: publicState(),
     };
-    // Public live feed for spectators (no private balance)
-    liveSession = {
-      sessionId: roundId,
-      username,
-      stake: s,
-      drawnNumbers: drawn,
-      cards: cardResults.map((c) => ({
-        cardNumber: c.cardNumber,
-        grid: c.grid,
-        pattern: c.pattern,
-        multiplier: c.multiplier,
-        prize: c.prize,
-        hit: c.hit,
-        winningCells: c.winningCells,
-      })),
-      startedAt: Date.now(),
-      drawIntervalMs: 1000,
-    };
-    broadcastLive('instant_live_start', {
-      sessionId: roundId,
-      username,
-      stake: s,
-      cardCount: cardResults.length,
-      numbersDrawn: numbersCount,
-      drawIntervalMs: 1000,
-      drawnNumbers: drawn,
-      cards: liveSession.cards,
-      playing: fakePlayers,
-    });
-    return payload;
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;
@@ -281,167 +261,90 @@ async function startPlay({ username, stake, cardNumbers }) {
   }
 }
 
-async function getStatus() {
-  tickFakePlayers();
-  return {
-    enabled: enabled(),
-    maxCardsPerPlayer: cfg().maxCardsPerPlayer || 4,
-    numbersDrawn: cfg().numbersDrawn || 20,
-    catalogSize: cfg().catalogSize || 200,
-    lineMultiplier: cfg().lineMultiplier || 2,
-    cornersMultiplier: cfg().cornersMultiplier || 2.5,
-    selectionSeconds: cfg().selectionSeconds || 25,
-    drawIntervalMs: 1000,
-    stakes: stakes(),
-    playing: fakePlayers,
-  };
+async function startPlay(opts) { return joinSharedRound(opts); }
+async function getStatus() { tickFakePlayers(); return publicState(); }
+function getLiveSession() {
+  if (phase === 'DRAWING' || phase === 'RESULTS') {
+    return { sessionId: currentRoundId, drawnNumbers, drawIndex, phase, cards: lastResults, drawIntervalMs: 1000 };
+  }
+  return null;
 }
 
 async function historyForUser(username, limit = 20) {
   const r = await pool.query(
     `SELECT e.id, e.round_id, e.card_number, e.stake, e.paid, e.pattern, e.multiplier,
             e.prize, e.winning_cells, e.created_at, r.drawn_numbers, r.completed_at
-     FROM instant_entries e
-     LEFT JOIN instant_rounds r ON r.id = e.round_id
-     WHERE LOWER(e.username) = LOWER($1)
-     ORDER BY e.id DESC
-     LIMIT $2`,
-    [username, limit]
-  );
+     FROM instant_entries e LEFT JOIN instant_rounds r ON r.id = e.round_id
+     WHERE LOWER(e.username)=LOWER($1) ORDER BY e.id DESC LIMIT $2`, [username, limit]);
   return r.rows.map((row) => ({
-    id: row.id,
-    roundId: row.round_id,
-    cardNumber: row.card_number,
-    stake: Number(row.stake),
-    paid: Number(row.paid),
-    pattern: row.pattern,
-    multiplier: Number(row.multiplier || 0),
-    prize: Number(row.prize || 0),
-    drawnNumbers: row.drawn_numbers || [],
-    winningCells: row.winning_cells || [],
-    date: row.completed_at || row.created_at,
+    id: row.id, roundId: row.round_id, cardNumber: row.card_number, stake: Number(row.stake),
+    paid: Number(row.paid), pattern: row.pattern, multiplier: Number(row.multiplier || 0),
+    prize: Number(row.prize || 0), drawnNumbers: row.drawn_numbers || [],
+    winningCells: row.winning_cells || [], date: row.completed_at || row.created_at,
   }));
 }
 
-
-/** Top winners: day | week | all */
 async function getLeaderboard(period = 'day', limit = 20) {
   let sinceSql = '';
   if (period === 'day') sinceSql = "AND e.created_at >= date_trunc('day', NOW())";
   else if (period === 'week') sinceSql = "AND e.created_at >= date_trunc('week', NOW())";
-  // all: no filter
-
   const r = await pool.query(
-    `SELECT e.username,
-            e.card_number,
-            e.stake,
-            e.paid,
-            e.prize,
-            e.multiplier,
-            e.pattern,
-            e.winning_cells,
-            e.created_at,
-            r.drawn_numbers,
-            bc.grid
+    `SELECT e.username, e.card_number, e.stake, e.paid, e.prize, e.multiplier, e.pattern,
+            e.winning_cells, e.created_at, r.drawn_numbers, bc.grid
      FROM instant_entries e
      LEFT JOIN instant_rounds r ON r.id = e.round_id
      LEFT JOIN bingo_cards bc ON bc.card_number = e.card_number
      WHERE e.prize > 0 ${sinceSql}
-     ORDER BY e.prize DESC, e.created_at DESC
-     LIMIT $1`,
-    [limit]
-  );
-  return r.rows.map((row) => ({
-    username: row.username,
-    cardNumber: row.card_number,
-    stake: Number(row.stake),
-    paid: Number(row.paid),
-    prize: Number(row.prize),
-    multiplier: Number(row.multiplier || 0),
-    pattern: row.pattern,
-    winningCells: row.winning_cells || [],
-    drawnNumbers: row.drawn_numbers || [],
-    grid: row.grid || null,
-    date: row.created_at,
+     ORDER BY e.prize DESC, e.created_at DESC LIMIT $1`, [Math.max(limit, 5)]);
+  const leaders = r.rows.map((row) => ({
+    username: maskName(row.username), cardNumber: row.card_number, stake: Number(row.stake),
+    paid: Number(row.paid), prize: Number(row.prize), multiplier: Number(row.multiplier || 0),
+    pattern: row.pattern, winningCells: row.winning_cells || [], drawnNumbers: row.drawn_numbers || [],
+    grid: row.grid || null, date: row.created_at, fake: false,
   }));
+  while (leaders.length < 15) {
+    const prefix = FAKE_PREFIXES[Math.floor(Math.random() * FAKE_PREFIXES.length)];
+    const mult = Math.random() > 0.7 ? 2.5 : 2;
+    const stake = stakes()[Math.floor(Math.random() * stakes().length)];
+    const cardNumber = 1 + Math.floor(Math.random() * 80);
+    let grid = null;
+    try { grid = await getCardGrid(cardNumber); } catch (_) {}
+    leaders.push({
+      username: maskName(prefix), cardNumber, stake, paid: stake, prize: Number((stake * mult).toFixed(2)),
+      multiplier: mult, pattern: mult === 2.5 ? 'four_corners' : 'any_one_line',
+      winningCells: mult === 2.5 ? [[0,0],[0,4],[4,0],[4,4]] : [[0,0],[0,1],[0,2],[0,3],[0,4]],
+      drawnNumbers: [], grid, date: new Date(), fake: true,
+    });
+  }
+  return leaders.slice(0, 20);
 }
-
-let liveSession = null; // { sessionId, drawnNumbers, cards public, i, startedAt }
-
-function getLiveSession() {
-  return liveSession;
-}
-
-function broadcastLive(event, payload) {
-  if (ioNamespace) ioNamespace.emit(event, payload);
-}
-
 
 function attachInstantGame(io) {
   if (!io) return;
-  ensureSchema().catch((e) => console.error('instant schema', e));
+  ensureSchema().then(() => startSelectionPhase()).catch((e) => console.error('instant boot', e));
   ioNamespace = io.of('/instant');
   ioNamespace.on('connection', (socket) => {
-    socket.emit('instant_players', { playing: fakePlayers });
-    if (liveSession) {
-      socket.emit('instant_live_start', {
-        sessionId: liveSession.sessionId,
-        username: liveSession.username,
-        stake: liveSession.stake,
-        cardCount: (liveSession.cards || []).length,
-        numbersDrawn: (liveSession.drawnNumbers || []).length,
-        drawIntervalMs: liveSession.drawIntervalMs || 1000,
-        drawnNumbers: liveSession.drawnNumbers,
-        cards: liveSession.cards,
-        playing: fakePlayers,
-        resume: true,
-      });
-    }
+    socket.emit('instant_state', publicState());
+    socket.on('instant_sync', () => socket.emit('instant_state', publicState()));
     socket.on('instant_watch', () => {
-      socket.join('instant_watchers');
-      if (liveSession) {
-        socket.emit('instant_live_start', {
-          sessionId: liveSession.sessionId,
-          username: liveSession.username,
-          stake: liveSession.stake,
-          drawnNumbers: liveSession.drawnNumbers,
-          cards: liveSession.cards,
-          drawIntervalMs: liveSession.drawIntervalMs || 1000,
-          playing: fakePlayers,
-          resume: true,
-        });
+      socket.emit('instant_state', publicState());
+      if (phase === 'DRAWING') {
+        socket.emit('instant_draw_start', { ...publicState(), drawnNumbers, drawIntervalMs: 1000, resume: true, drawIndex });
       }
     });
   });
-  console.log('Instant Bingo namespace /instant ready (solo play + shared wallet)');
+  setInterval(() => { tickFakePlayers(); }, 8000);
+  console.log('Instant Bingo shared real-time rounds ready');
 }
 
 function stopScheduler() {
-  /* no shared-round timer anymore */
-}
-
-// Legacy no-ops so old route names do not crash if referenced
-async function joinRound(opts) {
-  return startPlay(opts);
-}
-async function settleRound() {
-  return null;
+  if (phaseTimer) clearInterval(phaseTimer);
+  if (drawTimer) clearInterval(drawTimer);
 }
 
 module.exports = {
-  enabled,
-  ensureSchema,
-  attachInstantGame,
-  getStatus,
-  listCatalog,
-  startPlay,
-  joinRound,
-  settleRound,
-  historyForUser,
-  getLeaderboard,
-  getLiveSession,
-  stopScheduler,
-  evaluateCard,
-  drawNumbers,
-  getFakePlayers: () => fakePlayers,
+  enabled, ensureSchema, attachInstantGame, getStatus, listCatalog, startPlay,
+  joinRound: joinSharedRound, joinSharedRound, settleRound: async () => null,
+  historyForUser, getLeaderboard, getLiveSession, stopScheduler, evaluateCard, drawNumbers,
+  getFakePlayers: () => fakePlayers, publicState,
 };

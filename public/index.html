@@ -699,7 +699,15 @@ body.instant-immersive #headerBar,
 body.instant-immersive #bottomNav{display:none !important;}
 body.instant-immersive #tabGames{padding-bottom:12px;}
 
-</style>
+
+.instant-shoot{
+  position:fixed;z-index:9999;pointer-events:none;font-weight:900;color:var(--gold);
+  text-shadow:0 0 18px rgba(250,204,21,.85);will-change:transform,opacity;
+  transition:transform .55s cubic-bezier(.15,.85,.25,1), opacity .55s ease;
+}
+.instant-opponents{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;max-height:180px;overflow:auto;}
+.instant-opp{font-size:10px;padding:4px;border:1px solid var(--card-border,#333);border-radius:8px;background:rgba(0,0,0,.2);}
+
 </head>
 <body>
 
@@ -814,7 +822,11 @@ body.instant-immersive #tabGames{padding-bottom:12px;}
    <div class="card" style="text-align:left;padding:12px;">
      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
        <span class="status-pill" id="instantPlayingPill" style="font-size:12px;font-weight:700;">🟢 LIVE · Playing | —</span>
-       <span id="instantSelectTimer" class="instant-timer-big">25</span>
+       <div style="display:flex;align-items:center;gap:8px;">
+         <button type="button" id="instantHelpBtn" onclick="showInstantHelp()" title="How to play"
+           style="width:32px;height:32px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--text);font-weight:800;cursor:pointer;">?</button>
+         <span id="instantSelectTimer" class="instant-timer-big">25</span>
+       </div>
      </div>
      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
        <button type="button" class="btn-secondary" style="width:auto;padding:8px 12px;font-size:12px;" onclick="startInstantWatch()">👁 Watch live</button>
@@ -852,7 +864,22 @@ body.instant-immersive #tabGames{padding-bottom:12px;}
    </div>
  </div>
 
- <div id="instantPlayBox" class="hidden">
+ <div id="instantHelpModal" class="modal hidden" onclick="if(event.target===this)hide('instantHelpModal')">
+  <div class="modal-card" style="text-align:left;max-width:420px;">
+    <h3 style="margin:0 0 10px;">How Instant Bingo works</h3>
+    <p class="small"><strong>Shared live round</strong> — everyone sees the same countdown and the same 20 numbers (like classic rooms).</p>
+    <p class="small"><strong>1. Select</strong> up to 4 cards and a stake during the timer. Same card numbers are allowed for different players.</p>
+    <p class="small"><strong>2. Play</strong> locks your cards and charges <em>stake × number of cards</em> from your balance (same wallet as Classic Bingo).</p>
+    <p class="small"><strong>3. Draw</strong> — when the timer hits 0, 20 numbers are called (1 second each). Matching cells highlight on your cards.</p>
+    <p class="small"><strong>Winning</strong><br>
+      • Any full row, column, or diagonal → <strong>×2</strong> that card’s stake<br>
+      • Four corners → <strong>×2.5</strong> that card’s stake<br>
+      Best pattern per card is paid. Wins go to your balance automatically.</p>
+    <p class="small"><strong>Watch</strong> — you can watch the live draw without paying. After the draw, everyone returns to selection for the next round.</p>
+    <button class="btn-play" onclick="hide('instantHelpModal')">Got it</button>
+  </div>
+</div>
+<div id="instantPlayBox" class="hidden">
    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">
      <span class="status-pill" id="instantPlayPlaying" style="font-size:11px;font-weight:700;">🟢 LIVE · Playing | —</span>
      <span id="instantDrawProgress" style="font-size:11px;opacity:.8;">0/20</span>
@@ -1004,6 +1031,6 @@ body.instant-immersive #tabGames{padding-bottom:12px;}
   <div class="nav-item" onclick="switchTab('tabWallet',this)">💰<br><span data-i18n="navWallet">Wallet</span></div>
   <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
 </div>
-<script src="app.js?v=20260904-instant-v4"></script>
+<script src="app.js?v=20260905-instant-shared-v5"></script>
 </body>
 </html>

@@ -4,25 +4,13 @@ const { moneyLimiter } = require('../middleware/rateLimiters');
 const { requireAdmin } = require('../middleware/adminAuth');
 const instant = require('../game/instant/engine');
 const config = require('../config');
+const pool = require('../db/pool');
 
 function registerInstantRoutes(app) {
   app.get('/api/instant/status', async (req, res) => {
     try {
       const status = await instant.getStatus();
-      const live = instant.getLiveSession && instant.getLiveSession();
-      res.json({
-        success: true,
-        ...status,
-        live: live
-          ? {
-              sessionId: live.sessionId,
-              username: live.username,
-              stake: live.stake,
-              cardCount: (live.cards || []).length,
-              startedAt: live.startedAt,
-            }
-          : null,
-      });
+      res.json({ success: true, ...status });
     } catch (err) {
       console.error('instant status', err);
       res.status(500).json({ success: false, message: 'Server error.' });
@@ -37,7 +25,6 @@ function registerInstantRoutes(app) {
       const cards = await instant.listCatalog(config.instantBingo?.catalogSize || 200);
       res.json({ success: true, cards });
     } catch (err) {
-      console.error('instant cards', err);
       res.status(500).json({ success: false, message: 'Server error.' });
     }
   });
@@ -45,7 +32,6 @@ function registerInstantRoutes(app) {
   app.get('/api/instant/card/:num', async (req, res) => {
     try {
       const num = Number(req.params.num);
-      const pool = require('../db/pool');
       const r = await pool.query('SELECT card_number, grid FROM bingo_cards WHERE card_number = $1', [num]);
       if (!r.rowCount) return res.status(404).json({ success: false, message: 'Card not found.' });
       res.json({ success: true, cardNumber: r.rows[0].card_number, grid: r.rows[0].grid });
@@ -57,10 +43,8 @@ function registerInstantRoutes(app) {
   app.post('/api/instant/play', moneyLimiter, async (req, res) => {
     try {
       const { username, stake, cardNumbers } = req.body || {};
-      if (!username) {
-        return res.status(400).json({ success: false, message: 'Username required.' });
-      }
-      const result = await instant.startPlay({
+      if (!username) return res.status(400).json({ success: false, message: 'Username required.' });
+      const result = await instant.joinSharedRound({
         username: String(username),
         stake: Number(stake),
         cardNumbers: cardNumbers || [],
@@ -68,18 +52,15 @@ function registerInstantRoutes(app) {
       res.json(result);
     } catch (err) {
       const status = err.code === 'DISABLED' ? 503 : 400;
-      console.error('instant play', err.message);
-      res.status(status).json({ success: false, message: err.message || 'Could not start play.' });
+      res.status(status).json({ success: false, message: err.message || 'Could not join.' });
     }
   });
 
   app.post('/api/instant/join', moneyLimiter, async (req, res) => {
     try {
       const { username, stake, cardNumbers } = req.body || {};
-      if (!username) {
-        return res.status(400).json({ success: false, message: 'Username required.' });
-      }
-      const result = await instant.startPlay({
+      if (!username) return res.status(400).json({ success: false, message: 'Username required.' });
+      const result = await instant.joinSharedRound({
         username: String(username),
         stake: Number(stake),
         cardNumbers: cardNumbers || [],
@@ -94,12 +75,8 @@ function registerInstantRoutes(app) {
   app.get('/api/instant/history', async (req, res) => {
     try {
       const username = String(req.query.username || '');
-      if (!username) {
-        return res.status(400).json({ success: false, message: 'Username required.' });
-      }
+      if (!username) return res.status(400).json({ success: false, message: 'Username required.' });
       const history = await instant.historyForUser(username, 30);
-      // attach grids for display
-      const pool = require('../db/pool');
       for (const h of history) {
         try {
           const g = await pool.query('SELECT grid FROM bingo_cards WHERE card_number = $1', [h.cardNumber]);
@@ -110,7 +87,6 @@ function registerInstantRoutes(app) {
       }
       res.json({ success: true, history });
     } catch (err) {
-      console.error('instant history', err);
       res.status(500).json({ success: false, message: 'Server error.' });
     }
   });
@@ -131,8 +107,7 @@ function registerInstantRoutes(app) {
 
   app.get('/api/instant/live', async (req, res) => {
     try {
-      const live = instant.getLiveSession && instant.getLiveSession();
-      res.json({ success: true, live: live || null });
+      res.json({ success: true, state: instant.publicState(), live: instant.getLiveSession() });
     } catch (err) {
       res.status(500).json({ success: false, message: 'Server error.' });
     }
@@ -142,7 +117,7 @@ function registerInstantRoutes(app) {
     if (!requireAdmin(req, res)) return;
     try {
       const status = await instant.getStatus();
-      res.json({ success: true, ...status, configEnabled: config.instantBingo?.enabled });
+      res.json({ success: true, ...status });
     } catch (err) {
       res.status(500).json({ success: false, message: 'Server error.' });
     }
