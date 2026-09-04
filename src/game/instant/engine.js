@@ -259,7 +259,7 @@ async function getStatus() {
     catalogSize: cfg().catalogSize || 200,
     lineMultiplier: cfg().lineMultiplier || 2,
     cornersMultiplier: cfg().cornersMultiplier || 2.5,
-    selectionSeconds: cfg().selectionSeconds || 40,
+    selectionSeconds: cfg().selectionSeconds || 25,
     drawIntervalMs: 1000,
     stakes: stakes(),
     playing: fakePlayers,

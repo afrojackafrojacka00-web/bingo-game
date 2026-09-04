@@ -474,8 +474,17 @@ function showHome() {
     hide('gamePlayBox');
     hide('instantBox');
     hide('instantPlayBox');
+    hide('instantWaitOverlay');
     if (typeof stopInstantSelectTimer === 'function') stopInstantSelectTimer();
     if (typeof stopInstantDraw === 'function') stopInstantDraw();
+    try {
+        instantPendingPlay = null;
+        instantLocked = false;
+        const btn = document.getElementById('instantJoinBtn');
+        if (btn) btn.disabled = false;
+        const sel = document.getElementById('instantStake');
+        if (sel) sel.disabled = false;
+    } catch (_) {}
     show('homeBox');
 }
 
@@ -1661,16 +1670,19 @@ async function toggleNotificationModal() {
 
 
 // ==================== INSTANT BINGO (solo play + live draw) ====================
-let instantStake = null;
+// Exported on window so Telegram WebView onclick handlers always find them.
+let instantStake = 10;
 let instantSelected = new Set();
 let instantMaxCards = 4;
 let instantSocket = null;
-let instantSelectSeconds = 40;
+let instantSelectSeconds = 25;
 let instantSelectTimerId = null;
 let instantSelectDeadline = 0;
 let instantDrawTimerId = null;
 let instantFakePlaying = 260;
 let instantAudioCtx = null;
+let instantPendingPlay = null; // { stake, cardNumbers } when user clicked Play before timer ends
+let instantLocked = false;
 
 function instantBeep() {
     try {
@@ -1678,54 +1690,86 @@ function instantBeep() {
         if (!Ctx) return;
         if (!instantAudioCtx) instantAudioCtx = new Ctx();
         const ctx = instantAudioCtx;
-        if (ctx.state === 'suspended') ctx.resume();
+        if (ctx.state === 'suspended') ctx.resume().catch(() => {});
         const o = ctx.createOscillator();
         const g = ctx.createGain();
         o.type = 'sine';
-        o.frequency.value = 880;
-        g.gain.value = 0.0001;
+        o.frequency.value = 920;
+        g.gain.setValueAtTime(0.0001, ctx.currentTime);
         o.connect(g);
         g.connect(ctx.destination);
         const now = ctx.currentTime;
-        g.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
-        g.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+        g.gain.exponentialRampToValueAtTime(0.15, now + 0.015);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + 0.11);
         o.start(now);
-        o.stop(now + 0.14);
+        o.stop(now + 0.12);
     } catch (_) {}
 }
 
 function leaveInstantSelection() {
     stopInstantSelectTimer();
     stopInstantDraw();
+    instantPendingPlay = null;
+    instantLocked = false;
+    hide('instantWaitOverlay');
     hide('instantBox');
     hide('instantPlayBox');
     show('homeBox');
 }
+window.leaveInstantSelection = leaveInstantSelection;
 
 function leaveInstantPlay() {
     stopInstantDraw();
     hide('instantPlayBox');
     show('instantBox');
+    const backBtn = document.getElementById('instantPlayBackBtn');
+    if (backBtn) backBtn.disabled = true;
+    instantPendingPlay = null;
+    instantLocked = false;
+    hide('instantWaitOverlay');
+    const btn = document.getElementById('instantJoinBtn');
+    if (btn) btn.disabled = false;
     loadInstantHistory();
     startInstantSelectTimer();
 }
+window.leaveInstantPlay = leaveInstantPlay;
 
 async function openInstantBingo() {
     if (!currentUsername) {
         alertUser('Please log in first.');
         return;
     }
+    // Ensure Games tab is visible (Telegram + web)
+    const tab = document.getElementById('tabGames');
+    if (tab) tab.classList.remove('hidden');
+    document.querySelectorAll('.tab-content').forEach(el => {
+        if (el.id !== 'tabGames') el.classList.add('hidden');
+    });
+
     hide('homeBox');
     hide('roomsBox');
     hide('selectionBox');
+    hide('gamePlayBox');
     hide('instantPlayBox');
     show('instantBox');
     instantSelected.clear();
-    await loadInstantUI();
+    instantPendingPlay = null;
+    instantLocked = false;
+    hide('instantWaitOverlay');
+    const btn = document.getElementById('instantJoinBtn');
+    if (btn) btn.disabled = false;
+    try {
+        await loadInstantUI();
+    } catch (e) {
+        console.error(e);
+        const msg = document.getElementById('instantMsg');
+        if (msg) msg.textContent = 'Failed to load Instant Bingo.';
+    }
     connectInstantSocket();
     loadInstantHistory();
     startInstantSelectTimer();
 }
+window.openInstantBingo = openInstantBingo;
 
 function stopInstantSelectTimer() {
     if (instantSelectTimerId) {
@@ -1736,60 +1780,77 @@ function stopInstantSelectTimer() {
 
 function startInstantSelectTimer() {
     stopInstantSelectTimer();
+    instantSelectSeconds = Number(instantSelectSeconds) || 25;
     instantSelectDeadline = Date.now() + instantSelectSeconds * 1000;
     const el = document.getElementById('instantSelectTimer');
     const tick = () => {
-        const left = Math.max(0, Math.ceil((instantSelectDeadline - Date.now()) / 1000));
-        if (el) el.textContent = left + 's';
+        const leftMs = instantSelectDeadline - Date.now();
+        const left = Math.max(0, Math.ceil(leftMs / 1000));
+        if (el) {
+            el.textContent = left + 's';
+            el.style.fontWeight = '800';
+            el.style.color = left <= 5 ? 'var(--red)' : '';
+        }
+        if (instantPendingPlay) {
+            const waitText = document.getElementById('instantWaitText');
+            if (waitText) waitText.textContent = left > 0
+                ? ('Draw starts in ' + left + 's…')
+                : 'Starting draw…';
+        }
         if (left <= 0) {
             stopInstantSelectTimer();
-            // soft reset selection window — keep cards, refresh timer
-            instantSelectDeadline = Date.now() + instantSelectSeconds * 1000;
-            startInstantSelectTimer();
+            if (instantPendingPlay) {
+                const pending = instantPendingPlay;
+                instantPendingPlay = null;
+                executeInstantPlay(pending.stake, pending.cardNumbers);
+            } else {
+                // new selection window
+                startInstantSelectTimer();
+            }
         }
     };
     tick();
-    instantSelectTimerId = setInterval(tick, 250);
+    instantSelectTimerId = setInterval(tick, 200);
 }
 
 function setInstantPlayingDisplay(n) {
+    n = Math.max(200, Math.min(400, Number(n) || 260));
     instantFakePlaying = n;
+    const text = '🟢 LIVE · Playing | ' + n;
     const a = document.getElementById('instantPlayingPill');
     const b = document.getElementById('instantPlayPlaying');
-    const text = 'Playing | ' + n;
     if (a) a.textContent = text;
     if (b) b.textContent = text;
 }
 
 async function loadInstantUI() {
     const msg = document.getElementById('instantMsg');
-    try {
-        const res = await fetch('/api/instant/status', { cache: 'no-store' });
-        const data = await res.json();
-        if (!data.success || data.enabled === false) {
-            if (msg) msg.textContent = data.message || 'Instant Bingo is currently disabled.';
-            return;
-        }
-        instantMaxCards = data.maxCardsPerPlayer || 4;
-        instantSelectSeconds = data.selectionSeconds || 40;
-        if (data.playing) setInstantPlayingDisplay(data.playing);
-        const sel = document.getElementById('instantStake');
-        if (sel) {
-            const stakes = data.stakes || [10, 20, 50, 100, 200, 500];
-            sel.innerHTML = stakes.map(s => `<option value="${s}">${s} Birr / card</option>`).join('');
-            if (!instantStake) instantStake = stakes[0];
-            sel.value = String(instantStake);
-            sel.onchange = () => {
-                instantStake = Number(sel.value);
-                updateInstantCost();
-            };
-        }
-        await renderInstantCards();
-        updateInstantCost();
-    } catch (e) {
-        if (msg) msg.textContent = 'Could not load Instant Bingo.';
-        console.error(e);
+    const res = await fetch('/api/instant/status', { cache: 'no-store' });
+    const data = await res.json();
+    if (!data.success || data.enabled === false) {
+        if (msg) msg.textContent = data.message || 'Instant Bingo is currently disabled.';
+        return;
     }
+    instantMaxCards = data.maxCardsPerPlayer || 4;
+    instantSelectSeconds = data.selectionSeconds || 25;
+    if (data.playing) setInstantPlayingDisplay(data.playing);
+    else setInstantPlayingDisplay(instantFakePlaying);
+
+    const sel = document.getElementById('instantStake');
+    if (sel) {
+        const stakes = data.stakes || [10, 20, 50, 100, 200, 500];
+        sel.innerHTML = stakes.map(s => '<option value="' + s + '">' + s + ' Birr / card</option>').join('');
+        if (!instantStake || !stakes.includes(Number(instantStake))) instantStake = stakes[0];
+        sel.value = String(instantStake);
+        sel.onchange = function () {
+            if (instantLocked) return;
+            instantStake = Number(sel.value);
+            updateInstantCost();
+        };
+    }
+    await renderInstantCards();
+    updateInstantCost();
+    if (msg) msg.textContent = '';
 }
 
 async function renderInstantCards() {
@@ -1800,13 +1861,13 @@ async function renderInstantCards() {
         const res = await fetch('/api/instant/cards', { cache: 'no-store' });
         const data = await res.json();
         if (!data.success) {
-            grid.innerHTML = `<p class="small">${data.message || 'No cards'}</p>`;
+            grid.innerHTML = '<p class="small">' + (data.message || 'No cards') + '</p>';
             return;
         }
         const cards = data.cards || [];
-        grid.innerHTML = cards.map(n => {
-            const selected = instantSelected.has(n) ? 'selected' : '';
-            return `<div class="card-item ${selected}" data-card="${n}" onclick="toggleInstantCard(${n})">${n}</div>`;
+        grid.innerHTML = cards.map(function (n) {
+            const selected = instantSelected.has(n) ? ' selected' : '';
+            return '<div class="card-item' + selected + '" data-card="' + n + '" onclick="toggleInstantCard(' + n + ')">' + n + '</div>';
         }).join('');
     } catch (e) {
         grid.innerHTML = '<p class="small">Failed to load cards.</p>';
@@ -1814,78 +1875,138 @@ async function renderInstantCards() {
 }
 
 function toggleInstantCard(n) {
+    if (instantLocked) return;
     n = Number(n);
     if (instantSelected.has(n)) instantSelected.delete(n);
     else {
         if (instantSelected.size >= instantMaxCards) {
-            alertUser(`You can select at most ${instantMaxCards} cards.`);
+            alertUser('You can select at most ' + instantMaxCards + ' cards.');
             return;
         }
         instantSelected.add(n);
     }
-    document.querySelectorAll('#instantCardGrid .card-item').forEach(el => {
+    document.querySelectorAll('#instantCardGrid .card-item').forEach(function (el) {
         const num = Number(el.getAttribute('data-card'));
         el.classList.toggle('selected', instantSelected.has(num));
     });
     updateInstantCost();
 }
+window.toggleInstantCard = toggleInstantCard;
 
 function updateInstantCost() {
-    const stake = Number(document.getElementById('instantStake')?.value || instantStake || 0);
+    const stake = Number(document.getElementById('instantStake') && document.getElementById('instantStake').value || instantStake || 0);
     instantStake = stake;
     const count = instantSelected.size;
     const cost = stake * count;
     const costEl = document.getElementById('instantCost');
     const countEl = document.getElementById('instantSelectedCount');
     if (costEl) costEl.textContent = cost.toFixed(2) + ' Birr';
-    if (countEl) countEl.textContent = `${count} / ${instantMaxCards}`;
+    if (countEl) countEl.textContent = count + ' / ' + instantMaxCards;
 }
 
+/**
+ * User clicks Play: lock selection and wait for countdown to hit 0, then charge + draw.
+ */
 async function startInstantPlay() {
     const msg = document.getElementById('instantMsg');
+    try {
+        if (instantAudioCtx && instantAudioCtx.state === 'suspended') {
+            instantAudioCtx.resume().catch(function () {});
+        } else {
+            instantBeep(); // unlock audio on user gesture (needed in Telegram)
+        }
+    } catch (_) {}
+
     if (!currentUsername) return alertUser('Log in first.');
+    if (instantLocked) return;
     if (!instantSelected.size) return alertUser('Select at least one card.');
-    const stake = Number(document.getElementById('instantStake')?.value || 0);
+
+    const stake = Number(document.getElementById('instantStake') && document.getElementById('instantStake').value || 0);
+    const cardNumbers = Array.from(instantSelected);
+
+    instantLocked = true;
+    instantPendingPlay = { stake: stake, cardNumbers: cardNumbers };
     const btn = document.getElementById('instantJoinBtn');
     if (btn) btn.disabled = true;
-    if (msg) msg.textContent = 'Charging balance & starting draw…';
+    const sel = document.getElementById('instantStake');
+    if (sel) sel.disabled = true;
+
+    const left = Math.max(0, Math.ceil((instantSelectDeadline - Date.now()) / 1000));
+    show('instantWaitOverlay');
+    const title = document.getElementById('instantWaitTitle');
+    const waitText = document.getElementById('instantWaitText');
+    if (title) title.textContent = 'Cards locked · ' + cardNumbers.length + ' card(s)';
+    if (waitText) waitText.textContent = left > 0
+        ? ('Draw starts in ' + left + 's…')
+        : 'Starting draw…';
+    if (msg) msg.textContent = 'Waiting for timer…';
+
+    // If timer already finished or almost done, run immediately
+    if (left <= 0) {
+        const pending = instantPendingPlay;
+        instantPendingPlay = null;
+        await executeInstantPlay(pending.stake, pending.cardNumbers);
+    }
+}
+window.startInstantPlay = startInstantPlay;
+window.joinInstantRound = startInstantPlay;
+
+async function executeInstantPlay(stake, cardNumbers) {
+    const msg = document.getElementById('instantMsg');
+    hide('instantWaitOverlay');
+    if (msg) msg.textContent = 'Charging balance…';
     try {
         const res = await fetch('/api/instant/play', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 username: currentUsername,
-                stake,
-                cardNumbers: [...instantSelected]
+                stake: stake,
+                cardNumbers: cardNumbers
             })
         });
         const data = await res.json();
         if (!data.success) {
+            instantLocked = false;
+            const btn = document.getElementById('instantJoinBtn');
+            if (btn) btn.disabled = false;
+            const sel = document.getElementById('instantStake');
+            if (sel) sel.disabled = false;
             if (msg) msg.textContent = data.message || 'Play failed.';
             alertUser(data.message || 'Play failed.');
+            startInstantSelectTimer();
             return;
         }
-        // Update displayed balance if present
-        const balEls = document.querySelectorAll('#userBalance, #walletBalance, #headerBalance');
-        balEls.forEach(el => {
+
+        // refresh balance displays
+        document.querySelectorAll('#userBalance, #walletBalance, #headerBalance, #playerBalance').forEach(function (el) {
             if (el && data.balance != null) el.textContent = Number(data.balance).toFixed(2);
         });
         if (typeof loadUserData === 'function') {
             try { await loadUserData(currentUsername); } catch (_) {}
         }
+
         instantSelected.clear();
         updateInstantCost();
-        await renderInstantCards();
         stopInstantSelectTimer();
+
+        // Show live draw screen
+        const tab = document.getElementById('tabGames');
+        if (tab) tab.classList.remove('hidden');
         hide('instantBox');
         show('instantPlayBox');
         if (data.playing) setInstantPlayingDisplay(data.playing);
         runInstantDrawAnimation(data);
     } catch (e) {
-        if (msg) msg.textContent = 'Network error.';
         console.error(e);
-    } finally {
+        instantLocked = false;
+        const btn = document.getElementById('instantJoinBtn');
         if (btn) btn.disabled = false;
+        const sel = document.getElementById('instantStake');
+        if (sel) sel.disabled = false;
+        if (msg) msg.textContent = 'Network error — try again.';
+        alertUser('Network error — try again.');
+        startInstantSelectTimer();
     }
 }
 
@@ -1911,14 +2032,13 @@ function runInstantDrawAnimation(session) {
 
     const live = document.getElementById('instantLiveCards');
     if (live) {
-        live.innerHTML = cards.map((c, idx) => {
-            return `<div class="instant-card-wrap" id="instantCardLive${idx}">
-              <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
-                <strong>Card #${c.cardNumber}</strong>
-                <span class="small" id="instantCardStatus${idx}">Playing…</span>
-              </div>
-              ${renderInstantGridHtml(c.grid, [], [], `ig${idx}`)}
-            </div>`;
+        live.innerHTML = cards.map(function (c, idx) {
+            return '<div class="instant-card-wrap" id="instantCardLive' + idx + '">' +
+                '<div style="display:flex;justify-content:space-between;margin-bottom:6px;">' +
+                '<strong>Card #' + c.cardNumber + '</strong>' +
+                '<span class="small" id="instantCardStatus' + idx + '">Playing…</span></div>' +
+                renderInstantGridHtml(c.grid, [], [], 'ig' + idx) +
+                '</div>';
         }).join('');
     }
 
@@ -1928,10 +2048,13 @@ function runInstantDrawAnimation(session) {
     const status = document.getElementById('instantPlayStatus');
     if (balls) balls.innerHTML = '';
     if (lastEl) lastEl.textContent = '—';
+    if (prog) prog.textContent = '0 / ' + drawn.length;
+    if (status) status.textContent = 'Starting draw…';
+
     let i = 0;
     const called = [];
 
-    const step = () => {
+    function step() {
         if (i >= drawn.length) {
             stopInstantDraw();
             finishInstantAnimation(session);
@@ -1940,32 +2063,54 @@ function runInstantDrawAnimation(session) {
         const num = drawn[i];
         called.push(num);
         instantBeep();
-        if (lastEl) lastEl.textContent = String(num);
-        if (prog) prog.textContent = `${i + 1} / ${drawn.length}`;
-        if (status) status.textContent = `Calling ${num}…`;
+        if (lastEl) {
+            lastEl.textContent = String(num);
+            lastEl.style.transform = 'scale(1.15)';
+            setTimeout(function () { lastEl.style.transform = 'scale(1)'; }, 150);
+        }
+        if (prog) prog.textContent = (i + 1) + ' / ' + drawn.length;
+        if (status) status.textContent = 'Calling ' + num + '…';
         if (balls) {
             const span = document.createElement('span');
             span.className = 'ball';
             span.textContent = String(num);
+            span.style.background = 'var(--green)';
+            span.style.color = '#052e16';
             balls.appendChild(span);
+            // reset previous ball style
+            const all = balls.querySelectorAll('.ball');
+            if (all.length > 1) {
+                const prev = all[all.length - 2];
+                prev.style.background = '';
+                prev.style.color = '';
+            }
+            try { balls.scrollLeft = balls.scrollWidth; } catch (_) {}
         }
-        // highlight cards
-        cards.forEach((c, idx) => {
-            updateInstantGridMarks(c.grid, called, `ig${idx}`, []);
+        cards.forEach(function (c, idx) {
+            updateInstantGridMarks(c.grid, called, 'ig' + idx, []);
         });
         i += 1;
-    };
+    }
 
-    step();
-    instantDrawTimerId = setInterval(step, gap);
+    // slight delay so the play screen is visible first
+    setTimeout(function () {
+        step();
+        if (drawn.length > 1) {
+            instantDrawTimerId = setInterval(step, gap);
+        } else if (drawn.length === 1) {
+            setTimeout(function () { finishInstantAnimation(session); }, gap);
+        } else {
+            finishInstantAnimation(session);
+        }
+    }, 400);
 }
 
 function renderInstantGridHtml(grid, called, winCells, idPrefix) {
     const headers = ['B', 'I', 'N', 'G', 'O'];
-    const winSet = new Set((winCells || []).map(c => Array.isArray(c) ? c.join(',') : String(c)));
+    const winSet = new Set((winCells || []).map(function (c) { return Array.isArray(c) ? c.join(',') : String(c); }));
     const calledSet = new Set((called || []).map(Number));
-    let html = `<table class="instant-bingo-table" id="${idPrefix}"><thead><tr>`;
-    headers.forEach(h => { html += `<th>${h}</th>`; });
+    let html = '<table class="instant-bingo-table" id="' + idPrefix + '"><thead><tr>';
+    headers.forEach(function (h) { html += '<th>' + h + '</th>'; });
     html += '</tr></thead><tbody>';
     for (let r = 0; r < 5; r++) {
         html += '<tr>';
@@ -1978,7 +2123,7 @@ function renderInstantGridHtml(grid, called, winCells, idPrefix) {
             let cls = '';
             if (win) cls = 'win-line strike';
             else if (marked) cls = 'marked';
-            html += `<td class="${cls}" data-r="${r}" data-c="${c}">${isFree ? '★' : v}</td>`;
+            html += '<td class="' + cls + '" data-r="' + r + '" data-c="' + c + '">' + (isFree ? '★' : v) + '</td>';
         }
         html += '</tr>';
     }
@@ -1988,10 +2133,10 @@ function renderInstantGridHtml(grid, called, winCells, idPrefix) {
 
 function updateInstantGridMarks(grid, called, tableId, winCells) {
     const table = document.getElementById(tableId);
-    if (!table) return;
+    if (!table || !grid) return;
     const calledSet = new Set((called || []).map(Number));
-    const winSet = new Set((winCells || []).map(c => Array.isArray(c) ? c.join(',') : String(c)));
-    table.querySelectorAll('td').forEach(td => {
+    const winSet = new Set((winCells || []).map(function (c) { return Array.isArray(c) ? c.join(',') : String(c); }));
+    table.querySelectorAll('td').forEach(function (td) {
         const r = Number(td.getAttribute('data-r'));
         const c = Number(td.getAttribute('data-c'));
         const v = grid[r][c];
@@ -2005,11 +2150,11 @@ function updateInstantGridMarks(grid, called, tableId, winCells) {
 function finishInstantAnimation(session) {
     const cards = session.cards || [];
     const drawn = session.drawnNumbers || [];
-    cards.forEach((c, idx) => {
-        updateInstantGridMarks(c.grid, drawn, `ig${idx}`, c.winningCells || []);
+    cards.forEach(function (c, idx) {
+        updateInstantGridMarks(c.grid, drawn, 'ig' + idx, c.winningCells || []);
         const st = document.getElementById('instantCardStatus' + idx);
         if (st) {
-            if (c.hit) st.innerHTML = `🏆 ${c.pattern} ×${c.multiplier} → <strong>+${Number(c.prize).toFixed(2)}</strong>`;
+            if (c.hit) st.innerHTML = '🏆 ' + c.pattern + ' ×' + c.multiplier + ' → <strong>+' + Number(c.prize).toFixed(2) + '</strong>';
             else st.textContent = 'No hit';
         }
     });
@@ -2020,27 +2165,41 @@ function finishInstantAnimation(session) {
         banner.classList.remove('hidden');
         const prize = Number(session.totalPrize || 0);
         if (prize > 0) {
-            banner.innerHTML = `<h3 style="margin:0 0 6px;color:var(--green)">You won ${prize.toFixed(2)} Birr!</h3>
-              <p class="small">Paid ${Number(session.paid).toFixed(2)} · Balance ${Number(session.balance).toFixed(2)}</p>
-              <button class="btn-play" onclick="leaveInstantPlay()">Play again</button>`;
+            banner.innerHTML = '<h3 style="margin:0 0 6px;color:var(--green)">You won ' + prize.toFixed(2) + ' Birr!</h3>' +
+                '<p class="small">Paid ' + Number(session.paid).toFixed(2) + ' · Balance ' + Number(session.balance).toFixed(2) + '</p>' +
+                '<button class="btn-play" onclick="leaveInstantPlay()">Play again</button>';
         } else {
-            banner.innerHTML = `<h3 style="margin:0 0 6px">No winning pattern</h3>
-              <p class="small">Paid ${Number(session.paid).toFixed(2)} · Balance ${Number(session.balance).toFixed(2)}</p>
-              <button class="btn-play" onclick="leaveInstantPlay()">Try again</button>`;
+            banner.innerHTML = '<h3 style="margin:0 0 6px">No winning pattern</h3>' +
+                '<p class="small">Paid ' + Number(session.paid).toFixed(2) + ' · Balance ' + Number(session.balance).toFixed(2) + '</p>' +
+                '<button class="btn-play" onclick="leaveInstantPlay()">Try again</button>';
         }
     }
     const backBtn = document.getElementById('instantPlayBackBtn');
     if (backBtn) backBtn.disabled = false;
+    instantLocked = false;
+    const joinBtn = document.getElementById('instantJoinBtn');
+    if (joinBtn) joinBtn.disabled = false;
+    const stakeSel = document.getElementById('instantStake');
+    if (stakeSel) stakeSel.disabled = false;
     loadInstantHistory();
 }
 
 function connectInstantSocket() {
     if (typeof io === 'undefined') return;
-    if (!instantSocket) {
-        instantSocket = io('/instant');
-        instantSocket.on('instant_players', (p) => {
-            if (p && p.playing != null) setInstantPlayingDisplay(p.playing);
-        });
+    try {
+        if (!instantSocket) {
+            instantSocket = io('/instant', { transports: ['websocket', 'polling'] });
+            instantSocket.on('instant_players', function (p) {
+                if (p && p.playing != null) setInstantPlayingDisplay(p.playing);
+            });
+            instantSocket.on('connect', function () {
+                // request nothing — server pushes players on connect
+            });
+        } else if (!instantSocket.connected) {
+            instantSocket.connect();
+        }
+    } catch (e) {
+        console.error('instant socket', e);
     }
 }
 
@@ -2050,22 +2209,21 @@ async function loadInstantHistory() {
     try {
         const res = await fetch('/api/instant/history?username=' + encodeURIComponent(currentUsername), { cache: 'no-store' });
         const data = await res.json();
-        if (!data.success || !data.history?.length) {
+        if (!data.success || !data.history || !data.history.length) {
             box.innerHTML = '<p class="small">No Instant Bingo plays yet.</p>';
             return;
         }
-        box.innerHTML = data.history.map(h => {
+        box.innerHTML = data.history.map(function (h) {
             const won = Number(h.prize) > 0;
-            return `<div style="padding:8px 0;border-bottom:1px solid var(--card-border, #333);">
-              <strong>#${h.cardNumber}</strong> · ${Number(h.stake)} Birr
-              · ${won ? `🏆 ${h.pattern} ×${h.multiplier} → <span style="color:var(--green)">+${Number(h.prize).toFixed(2)}</span>` : '— no hit'}
-              <div class="small">${h.date ? new Date(h.date).toLocaleString() : ''}</div>
-            </div>`;
+            return '<div style="padding:8px 0;border-bottom:1px solid var(--card-border, #333);">' +
+                '<strong>#' + h.cardNumber + '</strong> · ' + Number(h.stake) + ' Birr · ' +
+                (won
+                    ? ('🏆 ' + h.pattern + ' ×' + h.multiplier + ' → <span style="color:var(--green)">+' + Number(h.prize).toFixed(2) + '</span>')
+                    : '— no hit') +
+                '<div class="small">' + (h.date ? new Date(h.date).toLocaleString() : '') + '</div></div>';
         }).join('');
     } catch (e) {
         box.innerHTML = '<p class="small">Could not load history.</p>';
     }
 }
 
-// legacy name used by older button markup
-async function joinInstantRound() { return startInstantPlay(); }

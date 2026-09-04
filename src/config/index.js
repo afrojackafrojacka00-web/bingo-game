@@ -37,7 +37,7 @@ const config = {
     numbersDrawn: Number(process.env.INSTANT_NUMBERS_DRAWN || 20),
     catalogSize: Number(process.env.INSTANT_CATALOG_SIZE || 200),
     roundSeconds: Number(process.env.INSTANT_ROUND_SECONDS || 45),
-    selectionSeconds: Number(process.env.INSTANT_SELECTION_SECONDS || 40),
+    selectionSeconds: Number(process.env.INSTANT_SELECTION_SECONDS || 25),
     stakes: [10, 20, 50, 100, 200, 500],
     // multipliers on the stake paid for that card
     lineMultiplier: 2,

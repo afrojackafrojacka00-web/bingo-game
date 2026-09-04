@@ -778,7 +778,7 @@ button:disabled { opacity:.55; cursor:not-allowed; }
    <div class="card" style="text-align:left;">
      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
        <span class="status-pill" id="instantPlayingPill">Playing | —</span>
-       <span class="status-pill" id="instantSelectTimer">40s</span>
+       <span class="status-pill" id="instantSelectTimer">25s</span>
      </div>
      <p class="small" style="margin-top:10px;">Pick up to <strong>4 cards</strong> (same numbers OK for other players). Line ×2 · Corners ×2.5. Cost = stake × cards. Shared wallet with Classic Bingo.</p>
      <label class="small">Stake</label>
@@ -790,6 +790,10 @@ button:disabled { opacity:.55; cursor:not-allowed; }
      <div id="instantCardGrid" class="grid-container" style="max-height:280px;overflow:auto;"></div>
      <button class="btn-play" id="instantJoinBtn" onclick="startInstantPlay()" style="margin-top:12px;">Play — draw 20 numbers</button>
      <p id="instantMsg" class="small" style="margin-top:8px;"></p>
+     <div id="instantWaitOverlay" class="hidden" style="margin-top:12px;padding:12px;border-radius:10px;background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.35);text-align:center;">
+       <strong id="instantWaitTitle">Locked in</strong>
+       <p class="small" id="instantWaitText" style="margin:6px 0 0;">Draw starts when the timer hits 0…</p>
+     </div>
    </div>
    <div class="card" style="text-align:left;margin-top:12px;">
      <h3 style="margin:0 0 8px;font-size:15px;">Recent Instant plays</h3>
@@ -799,19 +803,20 @@ button:disabled { opacity:.55; cursor:not-allowed; }
 
  <div id="instantPlayBox" class="hidden">
    <div class="page-title">
-     <h2 style="margin:0">⚡ Live draw</h2>
+     <h2 style="margin:0">⚡ Instant Draw</h2>
      <button class="back-btn" id="instantPlayBackBtn" onclick="leaveInstantPlay()" disabled>← Back</button>
    </div>
-   <div class="card" style="text-align:center;">
-     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-       <span class="status-pill" id="instantPlayPlaying">Playing | —</span>
-       <span class="small" id="instantDrawProgress">0 / 20</span>
+   <div class="card" style="text-align:center;padding:14px;">
+     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+       <span class="status-pill" id="instantPlayPlaying" style="font-weight:700;">🟢 LIVE · Playing | —</span>
+       <span class="status-pill" id="instantDrawProgress">0 / 20</span>
      </div>
-     <div class="stat-block" style="margin:8px 0;">
-       <strong id="instantLastNumber" style="font-size:42px;color:var(--gold);">—</strong>
+     <div style="margin:12px 0 6px;">
+       <div class="small" style="letter-spacing:.12em;opacity:.7;">LAST NUMBER</div>
+       <strong id="instantLastNumber" style="font-size:52px;line-height:1.1;color:var(--gold);display:inline-block;min-width:1.4em;">—</strong>
      </div>
-     <div id="instantCalledBalls" class="called-numbers" style="min-height:40px;"></div>
-     <p id="instantPlayStatus" class="small">Drawing numbers…</p>
+     <div id="instantCalledBalls" class="called-numbers" style="min-height:44px;justify-content:center;"></div>
+     <p id="instantPlayStatus" class="small" style="margin-top:10px;">Waiting…</p>
    </div>
    <div id="instantLiveCards" style="display:flex;flex-direction:column;gap:12px;margin-top:12px;"></div>
    <div id="instantResultBanner" class="card hidden" style="margin-top:12px;text-align:center;"></div>
@@ -953,6 +958,6 @@ button:disabled { opacity:.55; cursor:not-allowed; }
   <div class="nav-item" onclick="switchTab('tabWallet',this)">💰<br><span data-i18n="navWallet">Wallet</span></div>
   <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
 </div>
-<script src="app.js?v=20260903-history-fix"></script>
+<script src="app.js?v=20260904-instant-v3"></script>
 </body>
 </html>
