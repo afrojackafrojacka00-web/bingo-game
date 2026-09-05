@@ -2257,7 +2257,7 @@ function openSharedDrawScreen(payload) {
     show('instantPlayBox');
     setInstantImmersive(true);
     instantCalled = [];
-    instantBestWins = {};
+    instantBestWins = {}; // reset per round for live upgrades
     // 20 fixed ball slots
     const balls = document.getElementById('instantCalledBalls');
     if (balls) {
@@ -2283,8 +2283,8 @@ function openSharedDrawScreen(payload) {
         for (let i = 0; i < instantMyCards.length; i++) {
             const n = instantMyCards[i];
             const g = await fetchInstantGrid(n);
-            myBlocks.push('<div class="instant-card-wrap"><div style="font-size:10px;margin-bottom:4px;"><b>You · #' + n + '</b></div>' +
-                renderInstantGridHtml(g, [], [], 'myc' + i) + '</div>');
+            myBlocks.push('<div class="instant-card-wrap" data-card="' + n + '"><div style="font-size:10px;margin-bottom:4px;"><b>You · #' + n + '</b></div>' +
+                renderInstantGridHtml(g, [], [], 'myc' + i, n) + '</div>');
         }
         // Expand others: real players' cards first, then fakes
         const otherSlots = [];
@@ -2466,38 +2466,71 @@ function evaluateInstantCard(grid, drawnNumbers) {
   return { hit: true, pattern: best.pattern, multiplier: best.multiplier, winningCells: best.winningCells };
 }
 
+
+/** Paint winning pattern on a card table; upgrades replace previous strike. */
+function applyWinStrikeToTable(table, winningCells) {
+  if (!table) return;
+  // Clear previous win-line / strike (keep marked for called numbers)
+  table.querySelectorAll('td.win-line, td.strike').forEach(function (td) {
+    td.classList.remove('win-line', 'strike');
+    // restore marked if number was called
+    const t = (td.textContent || '').trim();
+    if (t === '★') {
+      td.classList.add('marked');
+      return;
+    }
+    const n = Number(t);
+    if (n && Array.isArray(instantCalled) && instantCalled.map(Number).indexOf(n) !== -1) {
+      td.classList.add('marked');
+    }
+  });
+  (winningCells || []).forEach(function (cell) {
+    if (!cell) return;
+    const rr = cell[0];
+    const cc = cell[1];
+    let td = table.querySelector('td[data-r="' + rr + '"][data-c="' + cc + '"]');
+    if (!td) {
+      // fallback by row/col index in tbody
+      const tr = table.querySelectorAll('tbody tr')[rr];
+      if (tr) td = tr.children[cc];
+    }
+    if (td) {
+      td.classList.remove('marked');
+      td.classList.add('win-line', 'strike');
+    }
+  });
+}
+
 async function checkMyInstantWinsLive() {
   if (!instantMyCards || !instantMyCards.length) return;
+  if (!Array.isArray(instantCalled) || !instantCalled.length) return;
   for (let i = 0; i < instantMyCards.length; i++) {
-    const n = instantMyCards[i];
+    const n = Number(instantMyCards[i]);
     const grid = await fetchInstantGrid(n);
     if (!grid) continue;
     const result = evaluateInstantCard(grid, instantCalled);
+    if (!result || !result.hit) continue;
     const prev = instantBestWins[n];
-    if (result.hit && (!prev || result.multiplier > prev.multiplier)) {
-      instantBestWins[n] = { multiplier: result.multiplier, winningCells: result.winningCells, pattern: result.pattern };
-      // find this card's table(s) on play screen
-      document.querySelectorAll('#instantLiveCards table.instant-bingo-table').forEach(function (table) {
-        // match by nearby label containing #n
-        const wrap = table.closest('.instant-card-wrap');
-        if (!wrap) return;
-        const label = wrap.textContent || '';
-        if (label.indexOf('#' + n) !== -1 || table.id.indexOf('myc') === 0) {
-          // prefer exact: tables rendered as myc0, myc1 in order of instantMyCards
-        }
-      });
-      // Prefer ordered my tables: id prefix myc + index
-      const table = document.getElementById('myc' + i) || document.querySelector('#instantLiveCards table#myc' + i);
-      if (table) applyWinStrikeToTable(table, result.winningCells);
-      else {
-        // fallback: any my card wrap with this number
+    // First hit OR better multiplier → update strike (upgrade pattern)
+    if (!prev || Number(result.multiplier) > Number(prev.multiplier)) {
+      instantBestWins[n] = {
+        multiplier: result.multiplier,
+        winningCells: result.winningCells,
+        pattern: result.pattern
+      };
+      let table = document.getElementById('myc' + i);
+      if (!table) {
+        table = document.querySelector('#instantLiveCards table[data-card="' + n + '"]');
+      }
+      if (!table) {
         document.querySelectorAll('#instantLiveCards .instant-card-wrap').forEach(function (wrap) {
-          if ((wrap.textContent || '').indexOf('#' + n) !== -1) {
-            const t = wrap.querySelector('table.instant-bingo-table');
-            if (t) applyWinStrikeToTable(t, result.winningCells);
+          if (table) return;
+          if ((wrap.getAttribute('data-card') === String(n)) || (wrap.textContent || '').indexOf('#' + n) !== -1) {
+            table = wrap.querySelector('table.instant-bingo-table');
           }
         });
       }
+      if (table) applyWinStrikeToTable(table, result.winningCells);
     }
   }
 }
@@ -2648,12 +2681,13 @@ function connectInstantSocket() {
     }
 }
 
-function renderInstantGridHtml(grid, called, winCells, idPrefix) {
+function renderInstantGridHtml(grid, called, winCells, idPrefix, cardNumber) {
     if (!grid || !grid.length) return '<p class="small">—</p>';
     const headers = ['B', 'I', 'N', 'G', 'O'];
     const winSet = new Set((winCells || []).map(function (c) { return Array.isArray(c) ? c.join(',') : String(c); }));
     const calledSet = new Set((called || []).map(Number));
-    let html = '<table class="instant-bingo-table" id="' + idPrefix + '"><thead><tr>';
+    const dataCard = cardNumber != null ? (' data-card="' + cardNumber + '"') : '';
+    let html = '<table class="instant-bingo-table" id="' + idPrefix + '"' + dataCard + '><thead><tr>';
     headers.forEach(function (h) { html += '<th>' + h + '</th>'; });
     html += '</tr></thead><tbody>';
     for (let r = 0; r < 5; r++) {
