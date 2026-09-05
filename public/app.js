@@ -1506,14 +1506,29 @@ function switchTab(tabId, navElement) {
     show(tabId);
     navElement?.classList.add('active');
 
-    // Instant Bingo's shared round only belongs on its own screen — leaving
-    // the Games tab for History/Wallet/Account must not leave it listening
-    // in the background (see disconnectInstantSocket).
-    if (tabId !== 'tabGames' && typeof disconnectInstantSocket === 'function') {
+    if (tabId === 'tabGames') {
+        if (instantActive) {
+            // Returning to Instant context — reconnect and resume live draw if needed
+            connectInstantSocket();
+            if (instantPhase === 'DRAWING' && document.getElementById('instantPlayBox')?.classList.contains('hidden')) {
+                // stay on selection unless user was mid-draw and wants to re-open; openInstant already handles resume on entry
+            }
+        }
+    } else if (!instantWatchOnly && typeof disconnectInstantSocket === 'function') {
         disconnectInstantSocket();
     }
 
-    if (tabId === 'tabHistory') fetchHistory(currentUsername);
+    if (tabId === 'tabHistory') {
+        if (instantActive) {
+            renderInstantHistoryTab();
+        } else {
+            const title = document.querySelector('#tabHistory .page-title h2');
+            if (title) title.textContent = '🏆 Game History';
+            const list = document.getElementById('historyList');
+            if (list) list.innerHTML = '';
+            fetchHistory(currentUsername);
+        }
+    }
     if (tabId === 'tabWallet') { fetchWallet(currentUsername); fetchPendingRequests(currentUsername); }
     if (tabId === 'tabAccount') applyAccountTabForClient();
 }
@@ -1752,10 +1767,14 @@ let instantPhase = 'SELECTING';
 let instantFakeOpponents = [];
 let instantServerPlayers = [];
 let instantGridsCache = {};
+let instantActive = false; // true while Instant UI is the active context
+let instantOppRenderToken = 0;
+let instantWatchOnly = false; // left draw screen but round still running
 
 function setInstantImmersive(on) {
     document.body.classList.toggle('instant-immersive', !!on);
-    if (on) { hide('headerBar'); hide('bottomNav'); }
+    // Keep bottom nav available so users can open History (Instant leaders/history) even during a live draw
+    if (on) { hide('headerBar'); if (currentUsername) show('bottomNav'); }
     else if (currentUsername) { show('headerBar'); show('bottomNav'); }
 }
 
@@ -1781,20 +1800,7 @@ function selectInstantStake(s) {
 window.selectInstantStake = selectInstantStake;
 
 function switchInstantPanel(panel) {
-    document.querySelectorAll('.instant-panel-tab').forEach(function (b) {
-        b.classList.toggle('active', b.getAttribute('data-panel') === panel);
-    });
-    const leaders = document.getElementById('instantLeadersPanel');
-    const history = document.getElementById('instantHistoryPanel');
-    if (panel === 'history') {
-        if (leaders) leaders.classList.add('hidden');
-        if (history) history.classList.remove('hidden');
-        loadInstantHistory();
-    } else {
-        if (history) history.classList.add('hidden');
-        if (leaders) leaders.classList.remove('hidden');
-        loadInstantLeaderboard(window._instantLbPeriod || 'day');
-    }
+    // Panels removed from Instant selection; History tab shows Instant history + leaderboard while Instant is active.
 }
 window.switchInstantPanel = switchInstantPanel;
 
@@ -1822,6 +1828,8 @@ function instantBeep() {
 function leaveInstantSelection() {
     instantLocked = false;
     instantJoined = false;
+    instantActive = false;
+    instantWatchOnly = false;
     hide('instantWaitOverlay');
     hide('instantBox');
     hide('instantPlayBox');
@@ -1832,14 +1840,19 @@ function leaveInstantSelection() {
 window.leaveInstantSelection = leaveInstantSelection;
 
 function leaveInstantPlay() {
+    // Allow leaving even while drawing — user can return later and resume the live view
     hide('instantPlayBox');
     setInstantImmersive(false);
     show('instantBox');
-    instantLocked = false;
-    const btn = document.getElementById('instantJoinBtn');
-    if (btn) btn.disabled = false;
-    loadInstantHistory();
-    loadInstantLeaderboard(window._instantLbPeriod || 'day');
+    if (instantPhase === 'DRAWING') {
+        instantWatchOnly = true;
+        // keep socket connected so we can re-enter the live draw
+    } else {
+        instantLocked = false;
+        instantWatchOnly = false;
+        const btn = document.getElementById('instantJoinBtn');
+        if (btn) btn.disabled = false;
+    }
 }
 window.leaveInstantPlay = leaveInstantPlay;
 
@@ -1853,41 +1866,42 @@ async function openInstantBingo() {
     hide('homeBox'); hide('roomsBox'); hide('selectionBox'); hide('gamePlayBox'); hide('instantPlayBox');
     setInstantImmersive(false);
     show('instantBox');
+    instantActive = true;
     instantSelected.clear();
     instantJoined = false;
     instantLocked = false;
+    instantWatchOnly = false;
+    updateInstantSelectedDisplay();
     hide('instantWaitOverlay');
     const status = await loadInstantUI();
     connectInstantSocket();
-    loadInstantHistory();
-    loadInstantLeaderboard('day');
 
-    // We now disconnect the instant socket whenever you leave this screen
-    // (see disconnectInstantSocket), so a round you already paid into could
-    // still be drawing on the server when you come back. Rejoin the live
-    // view instead of dropping you back at card selection — your entry and
-    // payout are already safely tracked server-side either way.
+    // Rejoin live draw if a shared round is already in progress (paid or watch).
     if (status && status.phase === 'DRAWING') {
         const me = (status.players || []).find(function (p) {
             return String(p.realUsername || '').toLowerCase() === String(currentUsername || '').toLowerCase();
         });
+        instantServerPlayers = status.players || [];
+        instantFakeOpponents = status.fakeOpponents || [];
         if (me) {
             instantJoined = true;
             instantLocked = true;
             instantMyCards = me.cards || [];
-            instantServerPlayers = status.players || [];
-            instantFakeOpponents = status.fakeOpponents || [];
-            const totalNumbers = Number(status.numbersDrawn || 20);
-            const known = status.drawnNumbers || [];
-            const padded = known.concat(new Array(Math.max(0, totalNumbers - known.length)).fill(0));
-            openSharedDrawScreen({ drawnNumbers: padded, resume: true, drawIndex: status.drawIndex || known.length });
+        } else {
+            instantMyCards = [];
+            instantWatchOnly = true;
         }
+        const totalNumbers = Number(status.numbersDrawn || 20);
+        const known = status.drawnNumbers || [];
+        const padded = known.concat(new Array(Math.max(0, totalNumbers - known.length)).fill(0));
+        openSharedDrawScreen({ drawnNumbers: padded, resume: true, drawIndex: status.drawIndex || known.length });
     }
 }
 window.openInstantBingo = openInstantBingo;
 
 function applyInstantState(st) {
     if (!st) return;
+    const prevPhase = instantPhase;
     instantPhase = st.phase || 'SELECTING';
     instantSelectSeconds = st.selectionSeconds || 25;
     instantMaxCards = st.maxCardsPerPlayer || 4;
@@ -1904,9 +1918,21 @@ function applyInstantState(st) {
     }
 
     if (st.phase === 'SELECTING') {
-        // Ensure selection UI visible for everyone
+        // New selection round — clear previous picks once
+        if (prevPhase !== 'SELECTING') {
+            instantSelected.clear();
+            instantMyCards = [];
+            instantJoined = false;
+            instantLocked = false;
+            instantWatchOnly = false;
+            _lastOppSignature = '';
+            updateInstantCost();
+            updateInstantSelectedDisplay();
+            const btn = document.getElementById('instantJoinBtn');
+            if (btn) btn.disabled = false;
+        }
+        // If still on play screen, return to selection
         if (document.getElementById('instantPlayBox') && !document.getElementById('instantPlayBox').classList.contains('hidden')) {
-            // auto return from play
             leaveInstantPlay();
         }
         renderInstantOpponents();
@@ -1994,18 +2020,79 @@ function toggleInstantCard(n) {
     n = Number(n);
     if (instantSelected.has(n)) {
         instantSelected.delete(n);
-        document.getElementById('instantCardPreview')?.classList.add('hidden');
     } else {
         if (instantSelected.size >= instantMaxCards) return alertUser('Max ' + instantMaxCards + ' cards');
         instantSelected.add(n);
-        showInstantCardPreview(n);
     }
     document.querySelectorAll('#instantCardGrid .card-item').forEach(function (el) {
         el.classList.toggle('selected', instantSelected.has(Number(el.getAttribute('data-card'))));
     });
     updateInstantCost();
+    updateInstantSelectedDisplay();
 }
 window.toggleInstantCard = toggleInstantCard;
+
+function removeInstantSelected(n) {
+    if (instantLocked || instantJoined) return;
+    n = Number(n);
+    instantSelected.delete(n);
+    document.querySelectorAll('#instantCardGrid .card-item').forEach(function (el) {
+        el.classList.toggle('selected', instantSelected.has(Number(el.getAttribute('data-card'))));
+    });
+    updateInstantCost();
+    updateInstantSelectedDisplay();
+}
+window.removeInstantSelected = removeInstantSelected;
+
+async function updateInstantSelectedDisplay() {
+    const box = document.getElementById('instantSelectedCards');
+    if (!box) return;
+    const nums = Array.from(instantSelected);
+    if (!nums.length) {
+        box.innerHTML = '';
+        return;
+    }
+    const parts = [];
+    for (let i = 0; i < nums.length; i++) {
+        const n = nums[i];
+        const g = await fetchInstantGrid(n);
+        const gridHtml = g ? renderInstantGridHtml(g, [], [], 'sel' + n) : '';
+        parts.push(
+            '<div class="instant-selected-item">' +
+            '<button type="button" class="sel-remove" onclick="removeInstantSelected(' + n + ')" title="Remove">×</button>' +
+            '<div class="sel-label">#' + n + '</div>' + gridHtml + '</div>'
+        );
+    }
+    box.innerHTML = parts.join('');
+}
+
+function pickRandomInstantCards(count) {
+    if (instantLocked || instantJoined) return;
+    count = Math.min(Number(count) || 2, instantMaxCards);
+    const items = Array.from(document.querySelectorAll('#instantCardGrid .card-item'));
+    const available = items.map(function (el) { return Number(el.getAttribute('data-card')); }).filter(function (n) { return n && !instantSelected.has(n); });
+    // shuffle
+    for (let i = available.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const t = available[i]; available[i] = available[j]; available[j] = t;
+    }
+    const need = Math.max(0, count - instantSelected.size);
+    for (let k = 0; k < need && k < available.length; k++) {
+        instantSelected.add(available[k]);
+    }
+    // if already had some, still ensure we reach `count` by adding more if possible
+    while (instantSelected.size < count && available.length) {
+        const n = available.shift();
+        if (n && !instantSelected.has(n)) instantSelected.add(n);
+        else break;
+    }
+    document.querySelectorAll('#instantCardGrid .card-item').forEach(function (el) {
+        el.classList.toggle('selected', instantSelected.has(Number(el.getAttribute('data-card'))));
+    });
+    updateInstantCost();
+    updateInstantSelectedDisplay();
+}
+window.pickRandomInstantCards = pickRandomInstantCards;
 
 function updateInstantCost() {
     const stake = Number(instantStake || 0);
@@ -2015,27 +2102,52 @@ function updateInstantCost() {
     if (countEl) countEl.textContent = instantSelected.size + '/' + instantMaxCards;
 }
 
+let _lastOppSignature = '';
 async function renderInstantOpponents() {
-    let box = document.getElementById('instantOpponents');
+    const box = document.getElementById('instantOpponents');
     if (!box) return;
-    const list = (instantServerPlayers || []).concat(instantFakeOpponents || []).slice(0, 15);
+    // Expand real players to one slot per card, then fill with fakes
+    const slots = [];
+    (instantServerPlayers || []).forEach(function (p) {
+        const cards = Array.isArray(p.cards) && p.cards.length ? p.cards : (p.cardNumber != null ? [p.cardNumber] : []);
+        cards.forEach(function (cn) {
+            slots.push({ username: p.username, cardNumber: cn, fake: false });
+        });
+    });
+    (instantFakeOpponents || []).forEach(function (p) {
+        slots.push({
+            username: p.username,
+            cardNumber: p.cardNumber != null ? p.cardNumber : (Array.isArray(p.cards) ? p.cards[0] : null),
+            fake: true
+        });
+    });
+    const list = slots.slice(0, 14);
+    const signature = list.map(function (s) { return s.username + ':' + s.cardNumber; }).join('|');
+    // Avoid restarting the staggered animation on every 250ms state tick
+    if (signature === _lastOppSignature && box.children.length > 0) return;
+    _lastOppSignature = signature;
+
     if (!list.length) {
         box.innerHTML = '<p class="small" style="opacity:.6;">Waiting for players…</p>';
         return;
     }
-    const parts = [];
+    const token = ++instantOppRenderToken;
+    box.innerHTML = '';
     for (let i = 0; i < list.length; i++) {
+        if (token !== instantOppRenderToken) return;
         const p = list[i];
-        const cardN = Array.isArray(p.cards) ? p.cards[0] : p.cardNumber;
+        const cardN = p.cardNumber;
         const g = cardN ? await fetchInstantGrid(cardN) : null;
-        const gridHtml = g ? renderInstantGridHtml(g, instantCalled, [], 'opp' + i) : '';
-        parts.push(
-            '<div class="instant-lb-row">' +
-            '<div class="instant-lb-meta"><strong>' + escapeHtmlInstant(p.username) + '</strong><br>#' + (cardN || '—') + '</div>' +
-            '<div class="instant-lb-card">' + gridHtml + '</div></div>'
-        );
+        // Unselected during selection (no called marks)
+        const gridHtml = g ? renderInstantGridHtml(g, [], [], 'opp' + i) : '';
+        const el = document.createElement('div');
+        el.className = 'instant-opp';
+        el.innerHTML = '<div class="opp-name">' + escapeHtmlInstant(p.username) + ' · #' + (cardN || '—') + '</div>' + gridHtml;
+        box.appendChild(el);
+        await new Promise(function (r) { setTimeout(r, i === 0 ? 40 : 1000); });
+        if (token !== instantOppRenderToken) return;
+        el.classList.add('visible');
     }
-    box.innerHTML = parts.join('');
 }
 
 
@@ -2105,16 +2217,22 @@ function openSharedDrawScreen(payload) {
     show('instantPlayBox');
     setInstantImmersive(true);
     instantCalled = [];
+    // 20 fixed ball slots
     const balls = document.getElementById('instantCalledBalls');
-    if (balls) balls.innerHTML = '';
+    if (balls) {
+        let slots = '';
+        for (let i = 0; i < 20; i++) slots += '<div class="ball-slot" data-slot="' + i + '"></div>';
+        balls.innerHTML = slots;
+    }
     const lastEl = document.getElementById('instantLastNumber');
     if (lastEl) lastEl.textContent = '—';
+    const totalN = ((payload && payload.drawnNumbers) || []).length || 20;
     const prog = document.getElementById('instantDrawProgress');
-    if (prog) prog.textContent = '0/' + ((payload && payload.drawnNumbers) || []).length;
+    if (prog) prog.textContent = '0/' + totalN;
     const status = document.getElementById('instantPlayStatus');
     if (status) status.textContent = 'Live draw';
     const backBtn = document.getElementById('instantPlayBackBtn');
-    if (backBtn) backBtn.disabled = true;
+    if (backBtn) backBtn.disabled = false; // always allow leave
 
     const live = document.getElementById('instantLiveCards');
     if (!live) return;
@@ -2127,77 +2245,97 @@ function openSharedDrawScreen(payload) {
             myBlocks.push('<div class="instant-card-wrap"><div style="font-size:10px;margin-bottom:4px;"><b>You · #' + n + '</b></div>' +
                 renderInstantGridHtml(g, [], [], 'myc' + i) + '</div>');
         }
-        const others = (instantServerPlayers || []).filter(function (p) {
-            return !p.realUsername || p.realUsername.toLowerCase() !== String(currentUsername || '').toLowerCase();
-        }).concat(instantFakeOpponents || []).slice(0, 15);
+        // Expand others: real players' cards first, then fakes
+        const otherSlots = [];
+        (instantServerPlayers || []).forEach(function (p) {
+            if (p.realUsername && p.realUsername.toLowerCase() === String(currentUsername || '').toLowerCase()) return;
+            const cards = Array.isArray(p.cards) && p.cards.length ? p.cards : (p.cardNumber != null ? [p.cardNumber] : []);
+            cards.forEach(function (cn) {
+                otherSlots.push({ username: p.username, cardNumber: cn });
+            });
+        });
+        (instantFakeOpponents || []).forEach(function (p) {
+            otherSlots.push({
+                username: p.username,
+                cardNumber: p.cardNumber != null ? p.cardNumber : (Array.isArray(p.cards) ? p.cards[0] : null)
+            });
+        });
+        const others = otherSlots.slice(0, 12);
         const otherRows = [];
         for (let i = 0; i < others.length; i++) {
             const p = others[i];
-            const cn = Array.isArray(p.cards) ? p.cards[0] : p.cardNumber;
+            const cn = p.cardNumber;
             const g = await fetchInstantGrid(cn);
             otherRows.push(
-                '<div class="instant-lb-row">' +
-                '<div class="instant-lb-meta"><strong>' + escapeHtmlInstant(p.username) + '</strong><br>#' + cn + '</div>' +
-                '<div class="instant-lb-card">' + (g ? renderInstantGridHtml(g, [], [], 'otc' + i) : '') + '</div></div>'
+                '<div class="instant-card-wrap" style="padding:4px;">' +
+                '<div style="font-size:9px;margin-bottom:2px;opacity:.85;"><b>' + escapeHtmlInstant(p.username) + '</b> · #' + cn + '</div>' +
+                (g ? renderInstantGridHtml(g, [], [], 'otc' + i) : '') + '</div>'
             );
         }
         live.innerHTML =
-            '<div class="instant-cards-row">' + (myBlocks.join('') || '') + '</div>' +
+            (myBlocks.length
+                ? '<div style="font-size:11px;font-weight:700;margin-bottom:4px;opacity:.85;">Your cards</div><div class="instant-cards-row">' + myBlocks.join('') + '</div>'
+                : '<p class="small" style="opacity:.7;">Watching this round</p>') +
             '<div style="margin-top:10px;font-size:11px;font-weight:700;opacity:.8;">Other players</div>' +
-            '<div class="instant-lb-list">' + otherRows.join('') + '</div>';
+            '<div class="instant-others-grid">' + otherRows.join('') + '</div>';
         if (payload && payload.resume && payload.drawIndex) {
             const called = (payload.drawnNumbers || []).slice(0, payload.drawIndex);
             called.forEach(function (num, idx2) {
-                applyCalledNumber(num, idx2 + 1, (payload.drawnNumbers || []).length, called.slice(0, idx2 + 1));
+                applyCalledNumber(num, idx2 + 1, (payload.drawnNumbers || []).length || 20, called.slice(0, idx2 + 1), true);
             });
         }
     })();
 }
 
 
-function shootNumberToBalls(num) {
+function shootNumberToBalls(num, slotIndex, skipAnim) {
     const balls = document.getElementById('instantCalledBalls');
     const lastEl = document.getElementById('instantLastNumber');
     if (lastEl) lastEl.textContent = String(num);
 
+    const slot = balls ? balls.querySelector('.ball-slot[data-slot="' + slotIndex + '"]') : null;
+    if (!slot) return;
+
+    if (skipAnim) {
+        slot.textContent = String(num);
+        slot.classList.add('filled');
+        return;
+    }
+
+    // Start from the orange last-number display
+    const fromRect = lastEl ? lastEl.getBoundingClientRect() : { left: window.innerWidth / 2, top: 80, width: 40, height: 40 };
+    const toRect = slot.getBoundingClientRect();
+
     const fly = document.createElement('div');
     fly.className = 'instant-shoot';
     fly.textContent = String(num);
-    fly.style.fontSize = '44px';
-    fly.style.left = '50%';
-    fly.style.top = '28%';
-    fly.style.transform = 'translate(-50%,-50%) scale(1.2)';
+    const startX = fromRect.left + fromRect.width / 2 - 24;
+    const startY = fromRect.top + fromRect.height / 2 - 24;
+    fly.style.left = startX + 'px';
+    fly.style.top = startY + 'px';
+    fly.style.transform = 'scale(1.15)';
     document.body.appendChild(fly);
 
-    // target: balls container center-ish
-    let tx = window.innerWidth / 2;
-    let ty = window.innerHeight * 0.42;
-    if (balls) {
-        const r = balls.getBoundingClientRect();
-        tx = r.left + Math.min(r.width - 12, 12 + (balls.children.length % 10) * 28);
-        ty = r.top + r.height / 2;
-    }
+    const endX = toRect.left + toRect.width / 2 - 24;
+    const endY = toRect.top + toRect.height / 2 - 24;
     requestAnimationFrame(function () {
         requestAnimationFrame(function () {
-            fly.style.transform = 'translate(' + (tx - window.innerWidth / 2) + 'px,' + (ty - window.innerHeight * 0.28) + 'px) scale(0.35)';
-            fly.style.opacity = '0.15';
+            fly.style.transform = 'translate(' + (endX - startX) + 'px,' + (endY - startY) + 'px) scale(0.45)';
+            fly.style.opacity = '0.2';
         });
     });
     setTimeout(function () {
         try { fly.remove(); } catch (_) {}
-        if (balls) {
-            const span = document.createElement('span');
-            span.className = 'ball';
-            span.textContent = String(num);
-            balls.appendChild(span);
-        }
-    }, 560);
+        slot.textContent = String(num);
+        slot.classList.add('filled');
+    }, 520);
 }
 
-function applyCalledNumber(num, index, total, calledArr) {
+function applyCalledNumber(num, index, total, calledArr, skipAnim) {
     instantCalled = calledArr || instantCalled.concat([num]);
-    instantBeep();
-    shootNumberToBalls(num);
+    if (!skipAnim) instantBeep();
+    const slotIndex = Math.max(0, (index || instantCalled.length) - 1);
+    shootNumberToBalls(num, slotIndex, !!skipAnim);
     const prog = document.getElementById('instantDrawProgress');
     if (prog) prog.textContent = index + '/' + total;
     const status = document.getElementById('instantPlayStatus');
@@ -2205,8 +2343,6 @@ function applyCalledNumber(num, index, total, calledArr) {
 
     // highlight all tables on play screen
     document.querySelectorAll('#instantLiveCards table.instant-bingo-table').forEach(function (table) {
-        const id = table.id;
-        // find grid from cells content is hard — mark by number match
         table.querySelectorAll('td').forEach(function (td) {
             const t = td.textContent.trim();
             if (t === '★') {
@@ -2256,10 +2392,19 @@ function connectInstantSocket() {
                 openSharedDrawScreen(payload || {});
             });
             instantSocket.on('instant_number', function (p) {
-                if (document.getElementById('instantPlayBox')?.classList.contains('hidden')) {
-                    openSharedDrawScreen({ drawnNumbers: p.called, resume: true, drawIndex: p.index });
+                // If user left the play screen but round is still live, keep selection UI;
+                // when they open Instant again they'll resume. Don't force-pop the draw.
+                const playHidden = document.getElementById('instantPlayBox')?.classList.contains('hidden');
+                if (playHidden && !instantWatchOnly) {
+                    // still on selection / elsewhere — ignore visual
+                } else if (playHidden && instantWatchOnly) {
+                    // user navigated away intentionally; do nothing until they re-open
+                } else {
+                    if (playHidden) {
+                        openSharedDrawScreen({ drawnNumbers: p.called, resume: true, drawIndex: p.index });
+                    }
+                    applyCalledNumber(p.number, p.index, p.total, p.called);
                 }
-                applyCalledNumber(p.number, p.index, p.total, p.called);
                 if (p.playing) setInstantPlayingDisplay(p.playing);
             });
             instantSocket.on('instant_draw_end', function (payload) {
@@ -2267,7 +2412,6 @@ function connectInstantSocket() {
                 const results = (payload && payload.results) || [];
                 results.forEach(function (r) {
                     if (String(r.username).toLowerCase() !== String(currentUsername || '').toLowerCase()) return;
-                    // mark winning cells
                     document.querySelectorAll('#instantLiveCards table').forEach(function (table) {
                         (r.winningCells || []).forEach(function (cell) {
                             const rr = cell[0], cc = cell[1];
@@ -2280,24 +2424,25 @@ function connectInstantSocket() {
                 if (status) status.textContent = 'Round over — next selection…';
                 const backBtn = document.getElementById('instantPlayBackBtn');
                 if (backBtn) backBtn.disabled = false;
-                // balance refresh
                 if (typeof loadUserData === 'function' && currentUsername) {
                     try { loadUserData(currentUsername); } catch (_) {}
                 }
-                // auto return with server selection restart (~1.2s server + buffer)
+                // Clear previous selection for the new round
                 setTimeout(function () {
                     instantJoined = false;
                     instantLocked = false;
+                    instantWatchOnly = false;
                     instantMyCards = [];
                     instantSelected.clear();
                     updateInstantCost();
-                    leaveInstantPlay();
+                    updateInstantSelectedDisplay();
+                    // If still on play screen, go back to selection
+                    if (!document.getElementById('instantPlayBox')?.classList.contains('hidden')) {
+                        leaveInstantPlay();
+                    }
                     const btn = document.getElementById('instantJoinBtn');
                     if (btn) btn.disabled = false;
-                    const sel = document.getElementById('instantStake');
-                    if (sel) sel.disabled = false;
                     renderInstantCards();
-                    loadInstantHistory();
                 }, 1400);
             });
         } else if (!instantSocket.connected) {
@@ -2334,29 +2479,67 @@ function renderInstantGridHtml(grid, called, winCells, idPrefix) {
 }
 
 async function loadInstantHistory() {
-    const box = document.getElementById('instantHistory');
-    if (!box || !currentUsername) return;
+    // History panel removed from Instant selection screen; content lives in History tab when Instant is active.
+    return;
+}
+
+async function renderInstantHistoryTab() {
+    const title = document.querySelector('#tabHistory .page-title h2');
+    if (title) title.textContent = '⚡ Instant · History & Leaders';
+    const list = document.getElementById('historyList');
+    if (!list) return;
+    list.innerHTML = '<p class="small">Loading…</p>';
     try {
-        const res = await fetch('/api/instant/history?username=' + encodeURIComponent(currentUsername) + '&_=' + Date.now(), { cache: 'no-store' });
-        const data = await res.json();
-        if (!data.success || !data.history || !data.history.length) {
-            box.innerHTML = '<p class="small">No plays yet.</p>';
-            return;
+        const period = window._instantLbPeriod || 'day';
+        const [histRes, lbRes] = await Promise.all([
+            fetch('/api/instant/history?username=' + encodeURIComponent(currentUsername || '') + '&_=' + Date.now(), { cache: 'no-store' }),
+            fetch('/api/instant/leaderboard?period=' + encodeURIComponent(period) + '&_=' + Date.now(), { cache: 'no-store' })
+        ]);
+        const histData = await histRes.json();
+        const lbData = await lbRes.json();
+
+        let html = '<div style="display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap;">' +
+            '<button type="button" class="btn-secondary' + (period === 'day' ? ' active' : '') + '" onclick="window._instantLbPeriod=\'day\';renderInstantHistoryTab()" style="width:auto;padding:4px 8px;font-size:10px;">Day</button>' +
+            '<button type="button" class="btn-secondary' + (period === 'week' ? ' active' : '') + '" onclick="window._instantLbPeriod=\'week\';renderInstantHistoryTab()" style="width:auto;padding:4px 8px;font-size:10px;">Week</button>' +
+            '<button type="button" class="btn-secondary' + (period === 'all' ? ' active' : '') + '" onclick="window._instantLbPeriod=\'all\';renderInstantHistoryTab()" style="width:auto;padding:4px 8px;font-size:10px;">All</button>' +
+            '</div>';
+
+        html += '<div style="font-weight:700;font-size:13px;margin:8px 0 6px;">🏆 Leaderboard</div>';
+        if (!lbData.success || !lbData.leaders || !lbData.leaders.length) {
+            html += '<p class="small">No winners yet.</p>';
+        } else {
+            html += lbData.leaders.map(function (row, i) {
+                const mult = Number(row.multiplier) || 0;
+                const multLabel = mult ? mult + 'X' : '—';
+                const gridHtml = row.grid ? renderInstantGridHtml(row.grid, row.drawnNumbers || [], row.winningCells || [], 'lb' + period + i) : '';
+                return '<div class="instant-lb-row"><div class="instant-lb-meta">' +
+                    '<strong>#' + (i + 1) + ' ' + escapeHtmlInstant(row.username) + '</strong><br>' +
+                    'Bet ' + Number(row.paid).toFixed(0) + ' · Won ' + Number(row.prize).toFixed(0) + ' · <b>' + multLabel + '</b>' +
+                    '</div><div class="instant-lb-card">' + gridHtml + '</div></div>';
+            }).join('');
         }
-        box.innerHTML = data.history.map(function (h, i) {
-            const won = Number(h.prize) > 0;
-            const mult = Number(h.multiplier) || 0;
-            const gridHtml = h.grid ? renderInstantGridHtml(h.grid, h.drawnNumbers || [], h.winningCells || [], 'hist' + h.id) : '';
-            return '<div class="instant-lb-row">' +
-                '<div class="instant-lb-meta"><strong>#' + h.cardNumber + '</strong><br>' +
-                (won ? ('Won ' + Number(h.prize).toFixed(0) + ' · <b>' + mult + 'X</b>') : 'LOSE') +
-                '<br><span style="opacity:.65">' + (h.date ? new Date(h.date).toLocaleString() : '') + '</span></div>' +
-                '<div class="instant-lb-card">' + gridHtml + '</div></div>';
-        }).join('');
+
+        html += '<div style="font-weight:700;font-size:13px;margin:14px 0 6px;">📜 My Instant history</div>';
+        if (!histData.success || !histData.history || !histData.history.length) {
+            html += '<p class="small">No plays yet.</p>';
+        } else {
+            html += histData.history.map(function (h) {
+                const won = Number(h.prize) > 0;
+                const mult = Number(h.multiplier) || 0;
+                const gridHtml = h.grid ? renderInstantGridHtml(h.grid, h.drawnNumbers || [], h.winningCells || [], 'hist' + h.id) : '';
+                return '<div class="instant-lb-row">' +
+                    '<div class="instant-lb-meta"><strong>#' + h.cardNumber + '</strong><br>' +
+                    (won ? ('Won ' + Number(h.prize).toFixed(0) + ' · <b>' + mult + 'X</b>') : 'LOSE') +
+                    '<br><span style="opacity:.65">' + (h.date ? new Date(h.date).toLocaleString() : '') + '</span></div>' +
+                    '<div class="instant-lb-card">' + gridHtml + '</div></div>';
+            }).join('');
+        }
+        list.innerHTML = html;
     } catch (_) {
-        box.innerHTML = '<p class="small">History unavailable.</p>';
+        list.innerHTML = '<p class="small">Could not load Instant history.</p>';
     }
 }
+window.renderInstantHistoryTab = renderInstantHistoryTab;
 
 async function loadInstantLeaderboard(period) {
     period = period || 'day';

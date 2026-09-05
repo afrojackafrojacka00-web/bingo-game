@@ -687,30 +687,51 @@ button:disabled { opacity:.55; cursor:not-allowed; }
 .instant-bingo-table td.strike::after{content:"";position:absolute;left:8%;right:8%;top:50%;height:2px;background:#ef4444;border-radius:2px;transform:rotate(-12deg);animation:instantStrike .4s ease-out}
 @keyframes instantStrike{from{transform:scaleX(0) rotate(-12deg)}to{transform:scaleX(1) rotate(-12deg)}}
 .instant-balls-compact .ball{font-size:10px;padding:3px 6px;margin:2px;}
-.instant-fly-num{
-  position:absolute;left:50%;top:20%;transform:translate(-50%,-50%);
-  font-size:48px;font-weight:900;color:var(--gold);z-index:5;pointer-events:none;
-  text-shadow:0 0 24px rgba(250,204,21,.7);
-  transition:transform .55s cubic-bezier(.2,.8,.2,1), opacity .55s ease, top .55s ease, font-size .55s ease;
+.instant-last-num{
+  font-size:40px;line-height:1.1;color:#fbbf24;display:block;min-height:48px;
+  font-weight:900;text-shadow:0 0 22px rgba(245,158,11,.75);
 }
-.instant-fly-num.drop{top:72%;font-size:14px;opacity:0;}
+.instant-balls-fixed{
+  display:grid;grid-template-columns:repeat(10,1fr);gap:4px;margin:8px auto 0;max-width:320px;
+  min-height:64px;
+}
+.instant-balls-fixed .ball-slot{
+  aspect-ratio:1;border-radius:50%;border:1px dashed rgba(255,255,255,.15);
+  display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;
+  background:rgba(0,0,0,.15);color:var(--muted);position:relative;overflow:hidden;
+}
+.instant-balls-fixed .ball-slot.filled{
+  border:none;background:linear-gradient(135deg,#f59e0b,#d97706);color:#111;
+  box-shadow:0 0 8px rgba(245,158,11,.4);
+}
 .instant-card-wrap{background:var(--card);border:1px solid var(--card-border,#243041);border-radius:10px;padding:6px;}
 .instant-lb-row{display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--card-border,#333);}
 .instant-lb-row:last-child{border-bottom:none;}
 .instant-lb-meta{flex:1;min-width:0;font-size:11px;}
 .instant-lb-card{width:42%;max-width:140px;}
-body.instant-immersive #headerBar,
-body.instant-immersive #bottomNav{display:none !important;}
-body.instant-immersive #tabGames{padding-bottom:12px;}
+body.instant-immersive #headerBar{display:none !important;}
+body.instant-immersive #bottomNav{display:flex !important;}
+body.instant-immersive #tabGames{padding-bottom:70px;}
 
 
 .instant-shoot{
-  position:fixed;z-index:9999;pointer-events:none;font-weight:900;color:var(--gold);
-  text-shadow:0 0 18px rgba(250,204,21,.85);will-change:transform,opacity;
-  transition:transform .55s cubic-bezier(.15,.85,.25,1), opacity .55s ease;
+  position:fixed;z-index:9999;pointer-events:none;font-weight:900;color:#111;
+  background:linear-gradient(135deg,#f59e0b,#ef4444);border-radius:50%;
+  width:48px;height:48px;display:flex;align-items:center;justify-content:center;
+  font-size:18px;box-shadow:0 0 18px rgba(245,158,11,.7);will-change:transform,opacity;
+  transition:transform .5s cubic-bezier(.15,.85,.25,1), opacity .5s ease;
 }
-.instant-opponents{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;max-height:180px;overflow:auto;}
-.instant-opp{font-size:10px;padding:4px;border:1px solid var(--card-border,#333);border-radius:8px;background:rgba(0,0,0,.2);}
+.instant-opponents{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;max-height:200px;overflow:auto;}
+.instant-opp{
+  font-size:9px;padding:4px;border:1px solid var(--card-border,#333);border-radius:8px;
+  background:rgba(0,0,0,.2);opacity:0;transform:translateY(6px);
+  transition:opacity .35s ease, transform .35s ease;
+}
+.instant-opp.visible{opacity:1;transform:none;}
+.instant-opp .opp-name{font-weight:700;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.instant-opp table.instant-bingo-table{font-size:8px;}
+.instant-opp table.instant-bingo-table th{font-size:7px;padding:0;}
+.instant-opp table.instant-bingo-table td{font-size:8px;padding:1px;border-radius:2px;}
 
 
 .instant-timer-mid{
@@ -718,10 +739,10 @@ body.instant-immersive #tabGames{padding-bottom:12px;}
   letter-spacing:.04em;
 }
 .instant-timer-big{display:none !important;}
-.instant-stake-row{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;margin:6px 0;}
+.instant-stake-row{display:flex;flex-wrap:nowrap;gap:5px;justify-content:center;margin:8px 0 4px;overflow-x:auto;}
 .instant-stake-pill{
-  border:1px solid var(--line);border-radius:999px;padding:5px 10px;font-size:11px;
-  background:transparent;color:var(--text);cursor:pointer;min-width:52px;
+  border:1px solid var(--line);border-radius:999px;padding:5px 9px;font-size:11px;
+  background:transparent;color:var(--text);cursor:pointer;min-width:44px;flex:0 0 auto;
 }
 .instant-stake-pill.active{border-color:var(--blue);background:rgba(59,130,246,.2);font-weight:700;}
 .instant-pick-grid .card-item{padding:4px 2px;font-size:10px;min-height:28px;border-radius:8px;}
@@ -729,6 +750,27 @@ body.instant-immersive #tabGames{padding-bottom:12px;}
 .instant-lb-list .instant-lb-meta{flex:1;min-width:0;font-size:10px;text-align:left;}
 .instant-lb-list .instant-lb-card{width:48%;max-width:150px;}
 .instant-panel-tab.active{outline:1px solid var(--blue);}
+
+.instant-selected-row{
+  display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0 4px;min-height:0;
+}
+.instant-selected-item{
+  position:relative;background:var(--card);border:1px solid var(--blue);border-radius:8px;padding:4px;
+  text-align:left;
+}
+.instant-selected-item .sel-label{font-size:10px;font-weight:700;margin-bottom:2px;}
+.instant-selected-item .sel-remove{
+  position:absolute;top:2px;right:4px;width:18px;height:18px;border-radius:50%;
+  border:none;background:#ef4444;color:#fff;font-size:11px;font-weight:800;cursor:pointer;
+  line-height:1;padding:0;
+}
+.instant-random-row{display:flex;gap:8px;justify-content:center;margin:6px 0;}
+.instant-random-btn{width:auto;padding:6px 12px;font-size:11px;}
+.instant-live-full{width:100%;margin-top:10px;}
+.instant-live-full .instant-cards-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;}
+.instant-live-full .instant-others-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;width:100%;}
+.instant-live-full .instant-card-wrap{width:100%;}
+.instant-live-full .instant-bingo-table{width:100%;}
 
 </style>
 </head>
@@ -850,13 +892,17 @@ body.instant-immersive #tabGames{padding-bottom:12px;}
    <div class="card" style="text-align:center;padding:10px 12px;">
      <div class="small" id="instantPlayingPill" style="font-size:11px;font-weight:600;opacity:.9;">🟢 LIVE · Playing | —</div>
      <div id="instantSelectTimer" class="instant-timer-mid">25</div>
-     <div class="instant-stake-row" id="instantStakeRow"></div>
-     <div style="display:flex;justify-content:center;gap:16px;margin:8px 0 4px;font-size:11px;">
+     <div style="display:flex;justify-content:center;gap:16px;margin:4px 0 6px;font-size:11px;">
        <span>Cost <strong id="instantCost">0</strong></span>
        <span>Cards <strong id="instantSelectedCount">0/4</strong></span>
      </div>
-     <div id="instantCardPreview" class="hidden" style="margin:6px 0;text-align:left;"></div>
-     <div id="instantCardGrid" class="grid-container instant-pick-grid" style="max-height:160px;overflow:auto;"></div>
+     <div id="instantCardGrid" class="grid-container instant-pick-grid" style="max-height:140px;overflow:auto;"></div>
+     <div id="instantSelectedCards" class="instant-selected-row"></div>
+     <div class="instant-stake-row" id="instantStakeRow"></div>
+     <div class="instant-random-row">
+       <button type="button" class="btn-secondary instant-random-btn" onclick="pickRandomInstantCards(2)">🎲 Pick 2</button>
+       <button type="button" class="btn-secondary instant-random-btn" onclick="pickRandomInstantCards(4)">🎲 Pick 4</button>
+     </div>
      <button class="btn-play" id="instantJoinBtn" onclick="startInstantPlay()" style="margin-top:8px;padding:10px;font-size:14px;">Play</button>
      <p id="instantMsg" class="small" style="margin-top:6px;font-size:11px;"></p>
      <div id="instantWaitOverlay" class="hidden" style="margin-top:8px;padding:10px;border-radius:10px;border:1px solid var(--line);text-align:center;">
@@ -865,25 +911,7 @@ body.instant-immersive #tabGames{padding-bottom:12px;}
      </div>
      <div id="instantSelectOthers" style="margin-top:10px;text-align:left;">
        <div class="small" style="font-weight:700;margin-bottom:6px;opacity:.8;">Other players</div>
-       <div id="instantOpponents" class="instant-lb-list"></div>
-     </div>
-   </div>
-
-   <div class="card" style="text-align:left;margin-top:10px;padding:10px 12px;">
-     <div style="display:flex;gap:6px;margin-bottom:8px;">
-       <button type="button" class="btn-secondary instant-panel-tab active" data-panel="leaders" onclick="switchInstantPanel('leaders')" style="width:auto;padding:6px 10px;font-size:11px;">🏆 Leaders</button>
-       <button type="button" class="btn-secondary instant-panel-tab" data-panel="history" onclick="switchInstantPanel('history')" style="width:auto;padding:6px 10px;font-size:11px;">My history</button>
-     </div>
-     <div id="instantLeadersPanel">
-       <div style="display:flex;gap:4px;margin-bottom:8px;">
-         <button type="button" class="btn-secondary instant-lb-tab active" data-period="day" onclick="loadInstantLeaderboard('day')" style="width:auto;padding:4px 8px;font-size:10px;">Day</button>
-         <button type="button" class="btn-secondary instant-lb-tab" data-period="week" onclick="loadInstantLeaderboard('week')" style="width:auto;padding:4px 8px;font-size:10px;">Week</button>
-         <button type="button" class="btn-secondary instant-lb-tab" data-period="all" onclick="loadInstantLeaderboard('all')" style="width:auto;padding:4px 8px;font-size:10px;">All</button>
-       </div>
-       <div id="instantLeaderboard" class="small">Loading…</div>
-     </div>
-     <div id="instantHistoryPanel" class="hidden">
-       <div id="instantHistory" class="small">—</div>
+       <div id="instantOpponents" class="instant-opponents"></div>
      </div>
    </div>
  </div>
@@ -907,15 +935,14 @@ body.instant-immersive #tabGames{padding-bottom:12px;}
    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">
      <span class="status-pill" id="instantPlayPlaying" style="font-size:11px;font-weight:700;">🟢 LIVE · Playing | —</span>
      <span id="instantDrawProgress" style="font-size:11px;opacity:.8;">0/20</span>
-     <button class="back-btn" id="instantPlayBackBtn" onclick="leaveInstantPlay()" disabled style="margin:0;">←</button>
+     <button class="back-btn" id="instantPlayBackBtn" onclick="leaveInstantPlay()" style="margin:0;">←</button>
    </div>
-   <div class="card" style="text-align:center;padding:10px;position:relative;overflow:hidden;">
-     <div id="instantFlyingNumber" class="instant-fly-num hidden">—</div>
-     <strong id="instantLastNumber" style="font-size:36px;line-height:1.1;color:var(--gold);display:block;min-height:42px;">—</strong>
-     <div id="instantCalledBalls" class="called-numbers instant-balls-compact" style="min-height:52px;max-height:56px;overflow:hidden;justify-content:flex-start;flex-wrap:wrap;"></div>
+   <div class="card" style="text-align:center;padding:10px;position:relative;overflow:visible;">
+     <strong id="instantLastNumber" class="instant-last-num">—</strong>
+     <div id="instantCalledBalls" class="instant-balls-fixed"></div>
      <p id="instantPlayStatus" class="small" style="margin-top:6px;font-size:11px;">…</p>
    </div>
-   <div id="instantLiveCards" class="instant-cards-row"></div>
+   <div id="instantLiveCards" class="instant-live-full"></div>
    <div id="instantResultBanner" class="card hidden" style="margin-top:10px;text-align:center;padding:12px;"></div>
  </div>
 
@@ -1055,6 +1082,6 @@ body.instant-immersive #tabGames{padding-bottom:12px;}
   <div class="nav-item" onclick="switchTab('tabWallet',this)">💰<br><span data-i18n="navWallet">Wallet</span></div>
   <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
 </div>
-<script src="app.js?v=20260905-tg-ui8-fix"></script>
+<script src="app.js?v=20260905-instant-ui-fix"></script>
 </body>
 </html>
