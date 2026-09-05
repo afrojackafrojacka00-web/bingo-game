@@ -2111,13 +2111,14 @@ async function renderInstantOpponents() {
     (instantServerPlayers || []).forEach(function (p) {
         const cards = Array.isArray(p.cards) && p.cards.length ? p.cards : (p.cardNumber != null ? [p.cardNumber] : []);
         cards.forEach(function (cn) {
-            slots.push({ username: p.username, cardNumber: cn, fake: false });
+            slots.push({ username: p.username, cardNumber: cn, stake: p.stake, fake: false });
         });
     });
     (instantFakeOpponents || []).forEach(function (p) {
         slots.push({
             username: p.username,
             cardNumber: p.cardNumber != null ? p.cardNumber : (Array.isArray(p.cards) ? p.cards[0] : null),
+            stake: p.stake,
             fake: true
         });
     });
@@ -2142,9 +2143,10 @@ async function renderInstantOpponents() {
         const gridHtml = g ? renderInstantGridHtml(g, [], [], 'opp' + i) : '';
         const el = document.createElement('div');
         el.className = 'instant-opp';
+        const stakeLabel = (p.stake != null ? p.stake : '');
         el.innerHTML =
             '<div class="opp-meta"><div class="opp-name">' + escapeHtmlInstant(p.username) + '</div>' +
-            '<div style="opacity:.75;">#' + (cardN || '—') + '</div></div>' +
+            '<div style="opacity:.75;">#' + (cardN || '—') + (stakeLabel !== '' ? (' · 💰' + stakeLabel) : '') + '</div></div>' +
             '<div class="opp-card-wrap">' + gridHtml + '</div>';
         box.appendChild(el);
         await new Promise(function (r) { setTimeout(r, i === 0 ? 40 : 1000); });
@@ -2220,6 +2222,7 @@ function openSharedDrawScreen(payload) {
     show('instantPlayBox');
     setInstantImmersive(true);
     instantCalled = [];
+    instantBestWins = {};
     // 20 fixed ball slots
     const balls = document.getElementById('instantCalledBalls');
     if (balls) {
@@ -2254,13 +2257,14 @@ function openSharedDrawScreen(payload) {
             if (p.realUsername && p.realUsername.toLowerCase() === String(currentUsername || '').toLowerCase()) return;
             const cards = Array.isArray(p.cards) && p.cards.length ? p.cards : (p.cardNumber != null ? [p.cardNumber] : []);
             cards.forEach(function (cn) {
-                otherSlots.push({ username: p.username, cardNumber: cn });
+                otherSlots.push({ username: p.username, cardNumber: cn, stake: p.stake });
             });
         });
         (instantFakeOpponents || []).forEach(function (p) {
             otherSlots.push({
                 username: p.username,
-                cardNumber: p.cardNumber != null ? p.cardNumber : (Array.isArray(p.cards) ? p.cards[0] : null)
+                cardNumber: p.cardNumber != null ? p.cardNumber : (Array.isArray(p.cards) ? p.cards[0] : null),
+                stake: p.stake
             });
         });
         const others = otherSlots.slice(0, 12);
@@ -2269,9 +2273,10 @@ function openSharedDrawScreen(payload) {
             const p = others[i];
             const cn = p.cardNumber;
             const g = await fetchInstantGrid(cn);
+            const st = (p.stake != null ? (' · 💰' + p.stake) : '');
             otherRows.push(
                 '<div class="instant-card-wrap" style="padding:6px 8px;">' +
-                '<div style="font-size:10px;text-align:left;"><b>' + escapeHtmlInstant(p.username) + '</b><br><span style="opacity:.75;">#' + cn + '</span></div>' +
+                '<div style="font-size:10px;text-align:left;"><b>' + escapeHtmlInstant(p.username) + '</b><br><span style="opacity:.75;">#' + cn + st + '</span></div>' +
                 (g ? renderInstantGridHtml(g, [], [], 'otc' + i) : '') + '</div>'
             );
         }
@@ -2334,6 +2339,121 @@ function shootNumberToBalls(num, slotIndex, skipAnim) {
     }, 520);
 }
 
+
+// Client-side Instant win rules (mirrors src/game/instant/patterns.js)
+const INSTANT_ROWS = [
+  [[0,0],[0,1],[0,2],[0,3],[0,4]],[[1,0],[1,1],[1,2],[1,3],[1,4]],[[2,0],[2,1],[2,2],[2,3],[2,4]],
+  [[3,0],[3,1],[3,2],[3,3],[3,4]],[[4,0],[4,1],[4,2],[4,3],[4,4]]
+];
+const INSTANT_COLS = [
+  [[0,0],[1,0],[2,0],[3,0],[4,0]],[[0,1],[1,1],[2,1],[3,1],[4,1]],[[0,2],[1,2],[2,2],[3,2],[4,2]],
+  [[0,3],[1,3],[2,3],[3,3],[4,3]],[[0,4],[1,4],[2,4],[3,4],[4,4]]
+];
+const INSTANT_DIAGS = [
+  [[0,0],[1,1],[2,2],[3,3],[4,4]],[[0,4],[1,3],[2,2],[3,1],[4,0]]
+];
+const INSTANT_CORNERS = [[0,0],[0,4],[4,0],[4,4]];
+let instantBestWins = {}; // cardNumber -> { multiplier, winningCells, pattern }
+
+function instantCellMatched(grid, r, c, drawnSet) {
+  const v = grid[r][c];
+  if (v === 'FREE' || v === 0 || (r === 2 && c === 2)) return true;
+  return drawnSet.has(Number(v));
+}
+function instantLineComplete(grid, drawnSet, cells) {
+  return cells.every(function (p) { return instantCellMatched(grid, p[0], p[1], drawnSet); });
+}
+function evaluateInstantCard(grid, drawnNumbers) {
+  const drawnSet = new Set((drawnNumbers || []).map(Number));
+  if (!grid || !grid.length) return { hit: false, pattern: null, multiplier: 0, winningCells: [] };
+  const completedRows = INSTANT_ROWS.filter(function (line) { return instantLineComplete(grid, drawnSet, line); });
+  const completedCols = INSTANT_COLS.filter(function (line) { return instantLineComplete(grid, drawnSet, line); });
+  const completedDiags = INSTANT_DIAGS.filter(function (line) { return instantLineComplete(grid, drawnSet, line); });
+  const rowColCount = completedRows.length + completedCols.length;
+  const hasCorners = instantLineComplete(grid, drawnSet, INSTANT_CORNERS);
+  const hasDiag = completedDiags.length > 0;
+  const hasRowOrCol = rowColCount > 0;
+  const candidates = [];
+  if (hasCorners && (hasRowOrCol || hasDiag)) {
+    const extra = hasRowOrCol ? (completedRows[0] || completedCols[0]) : completedDiags[0];
+    const cells = INSTANT_CORNERS.concat(extra || []);
+    const seen = new Set(); const uniq = [];
+    cells.forEach(function (p) { const k = p[0] + ',' + p[1]; if (!seen.has(k)) { seen.add(k); uniq.push(p); } });
+    candidates.push({ pattern: 'corners_plus_line', multiplier: 4, winningCells: uniq });
+  }
+  if (hasCorners) {
+    candidates.push({ pattern: 'four_corners', multiplier: 2.5, winningCells: INSTANT_CORNERS.map(function (p) { return [p[0], p[1]]; }) });
+  }
+  if (hasDiag) {
+    candidates.push({ pattern: 'diagonal', multiplier: 1.5, winningCells: completedDiags[0].map(function (p) { return [p[0], p[1]]; }) });
+  }
+  if (rowColCount >= 2) {
+    const lines = completedRows.concat(completedCols).slice(0, 2);
+    const cells = []; const seen = new Set();
+    lines.forEach(function (line) {
+      line.forEach(function (p) { const k = p[0] + ',' + p[1]; if (!seen.has(k)) { seen.add(k); cells.push(p); } });
+    });
+    candidates.push({ pattern: 'two_lines', multiplier: 2, winningCells: cells });
+  } else if (rowColCount === 1) {
+    const line = completedRows[0] || completedCols[0];
+    candidates.push({ pattern: 'one_line', multiplier: 1, winningCells: line.map(function (p) { return [p[0], p[1]]; }) });
+  }
+  if (!candidates.length) return { hit: false, pattern: null, multiplier: 0, winningCells: [] };
+  candidates.sort(function (a, b) { return b.multiplier - a.multiplier; });
+  const best = candidates[0];
+  return { hit: true, pattern: best.pattern, multiplier: best.multiplier, winningCells: best.winningCells };
+}
+
+function applyWinStrikeToTable(table, winningCells) {
+  if (!table) return;
+  // clear previous win marks on this table only (keep marked numbers)
+  table.querySelectorAll('td.win-line, td.strike').forEach(function (td) {
+    td.classList.remove('win-line', 'strike');
+    if (!td.classList.contains('marked') && td.textContent.trim() === '★') td.classList.add('marked');
+  });
+  (winningCells || []).forEach(function (cell) {
+    const rr = cell[0], cc = cell[1];
+    const td = table.querySelector('td[data-r="' + rr + '"][data-c="' + cc + '"]');
+    if (td) td.className = 'win-line strike';
+  });
+}
+
+async function checkMyInstantWinsLive() {
+  if (!instantMyCards || !instantMyCards.length) return;
+  for (let i = 0; i < instantMyCards.length; i++) {
+    const n = instantMyCards[i];
+    const grid = await fetchInstantGrid(n);
+    if (!grid) continue;
+    const result = evaluateInstantCard(grid, instantCalled);
+    const prev = instantBestWins[n];
+    if (result.hit && (!prev || result.multiplier > prev.multiplier)) {
+      instantBestWins[n] = { multiplier: result.multiplier, winningCells: result.winningCells, pattern: result.pattern };
+      // find this card's table(s) on play screen
+      document.querySelectorAll('#instantLiveCards table.instant-bingo-table').forEach(function (table) {
+        // match by nearby label containing #n
+        const wrap = table.closest('.instant-card-wrap');
+        if (!wrap) return;
+        const label = wrap.textContent || '';
+        if (label.indexOf('#' + n) !== -1 || table.id.indexOf('myc') === 0) {
+          // prefer exact: tables rendered as myc0, myc1 in order of instantMyCards
+        }
+      });
+      // Prefer ordered my tables: id prefix myc + index
+      const table = document.getElementById('myc' + i) || document.querySelector('#instantLiveCards table#myc' + i);
+      if (table) applyWinStrikeToTable(table, result.winningCells);
+      else {
+        // fallback: any my card wrap with this number
+        document.querySelectorAll('#instantLiveCards .instant-card-wrap').forEach(function (wrap) {
+          if ((wrap.textContent || '').indexOf('#' + n) !== -1) {
+            const t = wrap.querySelector('table.instant-bingo-table');
+            if (t) applyWinStrikeToTable(t, result.winningCells);
+          }
+        });
+      }
+    }
+  }
+}
+
 function applyCalledNumber(num, index, total, calledArr, skipAnim) {
     instantCalled = calledArr || instantCalled.concat([num]);
     if (!skipAnim) instantBeep();
@@ -2357,6 +2477,13 @@ function applyCalledNumber(num, index, total, calledArr, skipAnim) {
             }
         });
     });
+    // Real-time win strike (upgrade if a better pattern appears later)
+    if (!skipAnim) {
+        checkMyInstantWinsLive().catch(function () {});
+    } else {
+        // resume path — still evaluate after batch
+        checkMyInstantWinsLive().catch(function () {});
+    }
 }
 
 // The server runs Instant Bingo as one continuous shared round (a new draw
@@ -2491,16 +2618,17 @@ async function renderInstantHistoryTab() {
     if (title) title.textContent = '⚡ Instant';
     const list = document.getElementById('historyList');
     if (!list) return;
-    const panel = window._instantHistPanel || 'history'; // 'history' | 'leaders'
+    const panel = window._instantHistPanel || 'history';
     const period = window._instantLbPeriod || 'day';
-    list.innerHTML = '<p class="small">Loading…</p>';
-    try {
-        let html = '<div style="display:flex;gap:6px;margin-bottom:10px;">' +
-            '<button type="button" class="btn-secondary' + (panel === 'history' ? ' active' : '') + '" onclick="window._instantHistPanel=\'history\';renderInstantHistoryTab()" style="width:auto;padding:6px 12px;font-size:11px;">📜 My history</button>' +
-            '<button type="button" class="btn-secondary' + (panel === 'leaders' ? ' active' : '') + '" onclick="window._instantHistPanel=\'leaders\';renderInstantHistoryTab()" style="width:auto;padding:6px 12px;font-size:11px;">🏆 Leaderboard</button>' +
-            '</div>';
 
-        if (panel === 'leaders') {
+    // Leaderboard panel (small, no infinite scroll needed)
+    if (panel === 'leaders') {
+        list.innerHTML = '<p class="small">Loading…</p>';
+        try {
+            let html = '<div style="display:flex;gap:6px;margin-bottom:10px;">' +
+                '<button type="button" class="btn-secondary" onclick="window._instantHistPanel=\'history\';renderInstantHistoryTab()" style="width:auto;padding:6px 12px;font-size:11px;">📜 My history</button>' +
+                '<button type="button" class="btn-secondary active" onclick="window._instantHistPanel=\'leaders\';renderInstantHistoryTab()" style="width:auto;padding:6px 12px;font-size:11px;">🏆 Leaderboard</button>' +
+                '</div>';
             html += '<div style="display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap;">' +
                 '<button type="button" class="btn-secondary' + (period === 'day' ? ' active' : '') + '" onclick="window._instantLbPeriod=\'day\';renderInstantHistoryTab()" style="width:auto;padding:4px 8px;font-size:10px;">Day</button>' +
                 '<button type="button" class="btn-secondary' + (period === 'week' ? ' active' : '') + '" onclick="window._instantLbPeriod=\'week\';renderInstantHistoryTab()" style="width:auto;padding:4px 8px;font-size:10px;">Week</button>' +
@@ -2523,34 +2651,94 @@ async function renderInstantHistoryTab() {
                         '</div><div class="instant-lb-card">' + gridHtml + '</div></div>';
                 }).join('');
             }
-        } else {
-            const histRes = await fetch('/api/instant/history?username=' + encodeURIComponent(currentUsername || '') + '&_=' + Date.now(), { cache: 'no-store' });
-            const histData = await histRes.json();
-            if (!histData.success || !histData.history || !histData.history.length) {
-                html += '<p class="small">No plays yet.</p>';
-            } else {
-                html += histData.history.map(function (h) {
-                    const won = Number(h.prize) > 0;
-                    const mult = Number(h.multiplier) || 0;
-                    const bet = Number(h.paid != null ? h.paid : (h.stake || 0));
-                    const prize = Number(h.prize || 0);
-                    const gridHtml = h.grid ? renderInstantGridHtml(h.grid, h.drawnNumbers || [], h.winningCells || [], 'hist' + h.id) : '';
-                    const outcome = won
-                        ? ('Won ' + prize.toFixed(0) + ' · <b>' + mult + 'X</b> on bet ' + bet.toFixed(0))
-                        : ('LOSE · Bet ' + bet.toFixed(0));
-                    return '<div class="instant-lb-row">' +
-                        '<div class="instant-lb-meta"><strong>#' + h.cardNumber + '</strong><br>' +
-                        outcome +
-                        '<br><span style="opacity:.65">' + (h.date ? new Date(h.date).toLocaleString() : '') + '</span></div>' +
-                        '<div class="instant-lb-card">' + gridHtml + '</div></div>';
-                }).join('');
-            }
+            list.innerHTML = html;
+        } catch (_) {
+            list.innerHTML = '<p class="small">Could not load leaderboard.</p>';
         }
-        list.innerHTML = html;
+        return;
+    }
+
+    // My history — first page
+    window._instantHistOffset = 0;
+    window._instantHistHasMore = true;
+    window._instantHistLoading = false;
+    list.innerHTML =
+        '<div style="display:flex;gap:6px;margin-bottom:10px;">' +
+        '<button type="button" class="btn-secondary active" onclick="window._instantHistPanel=\'history\';renderInstantHistoryTab()" style="width:auto;padding:6px 12px;font-size:11px;">📜 My history</button>' +
+        '<button type="button" class="btn-secondary" onclick="window._instantHistPanel=\'leaders\';renderInstantHistoryTab()" style="width:auto;padding:6px 12px;font-size:11px;">🏆 Leaderboard</button>' +
+        '</div>' +
+        '<div id="instantHistItems"></div>' +
+        '<div id="instantHistSentinel" class="small" style="text-align:center;padding:12px;opacity:.7;">Loading…</div>';
+
+    await loadMoreInstantHistory();
+
+    // Infinite scroll on the history list / window
+    if (window._instantHistScrollBound) {
+        try { list.removeEventListener('scroll', window._instantHistScrollBound); } catch (_) {}
+        try { window.removeEventListener('scroll', window._instantHistScrollBound); } catch (_) {}
+    }
+    window._instantHistScrollBound = function () {
+        if (!window._instantHistHasMore || window._instantHistLoading) return;
+        const sentinel = document.getElementById('instantHistSentinel');
+        if (!sentinel) return;
+        const rect = sentinel.getBoundingClientRect();
+        if (rect.top < window.innerHeight + 80) {
+            loadMoreInstantHistory();
+        }
+    };
+    window.addEventListener('scroll', window._instantHistScrollBound, { passive: true });
+}
+
+async function loadMoreInstantHistory() {
+    if (window._instantHistLoading || window._instantHistHasMore === false) return;
+    window._instantHistLoading = true;
+    const items = document.getElementById('instantHistItems');
+    const sentinel = document.getElementById('instantHistSentinel');
+    if (sentinel) sentinel.textContent = 'Loading…';
+    try {
+        const offset = window._instantHistOffset || 0;
+        const limit = 12;
+        const res = await fetch(
+            '/api/instant/history?username=' + encodeURIComponent(currentUsername || '') +
+            '&limit=' + limit + '&offset=' + offset + '&_=' + Date.now(),
+            { cache: 'no-store' }
+        );
+        const data = await res.json();
+        if (!data.success) throw new Error('fail');
+        const batch = data.history || [];
+        if (!items) return;
+        if (offset === 0 && !batch.length) {
+            items.innerHTML = '<p class="small">No plays yet.</p>';
+            if (sentinel) sentinel.textContent = '';
+            window._instantHistHasMore = false;
+            return;
+        }
+        const html = batch.map(function (h) {
+            const won = Number(h.prize) > 0;
+            const mult = Number(h.multiplier) || 0;
+            const bet = Number(h.paid != null ? h.paid : (h.stake || 0));
+            const prize = Number(h.prize || 0);
+            const gridHtml = h.grid ? renderInstantGridHtml(h.grid, h.drawnNumbers || [], h.winningCells || [], 'hist' + h.id) : '';
+            const outcome = won
+                ? ('Won ' + prize.toFixed(0) + ' · <b>' + mult + 'X</b> on bet ' + bet.toFixed(0))
+                : ('LOSE · Bet ' + bet.toFixed(0));
+            return '<div class="instant-lb-row">' +
+                '<div class="instant-lb-meta"><strong>#' + h.cardNumber + '</strong><br>' +
+                outcome +
+                '<br><span style="opacity:.65">' + (h.date ? new Date(h.date).toLocaleString() : '') + '</span></div>' +
+                '<div class="instant-lb-card">' + gridHtml + '</div></div>';
+        }).join('');
+        items.insertAdjacentHTML('beforeend', html);
+        window._instantHistOffset = offset + batch.length;
+        window._instantHistHasMore = data.hasMore !== false && batch.length >= limit;
+        if (sentinel) sentinel.textContent = window._instantHistHasMore ? 'Scroll for more…' : 'End of history';
     } catch (_) {
-        list.innerHTML = '<p class="small">Could not load Instant history.</p>';
+        if (sentinel) sentinel.textContent = 'Could not load more.';
+    } finally {
+        window._instantHistLoading = false;
     }
 }
+
 window.renderInstantHistoryTab = renderInstantHistoryTab;
 
 async function loadInstantLeaderboard(period) {

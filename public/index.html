@@ -801,6 +801,18 @@ body.instant-immersive #tabGames{padding-bottom:70px;}
 .instant-live-full .instant-others-grid .instant-card-wrap > div:first-child{flex:1;min-width:0;}
 .instant-live-full .instant-others-grid .instant-card-wrap table{width:42%;max-width:130px;flex-shrink:0;}
 
+
+.instant-sticky-play{
+  position:fixed;left:0;right:0;bottom:58px;z-index:60;
+  padding:8px 12px;background:linear-gradient(180deg,transparent,rgba(0,0,0,.55) 30%,rgba(0,0,0,.85));
+  pointer-events:none;
+}
+.instant-sticky-play .btn-play{pointer-events:auto;box-shadow:0 4px 18px rgba(0,0,0,.35);}
+.instant-play-spacer{height:64px;}
+body.instant-immersive .instant-sticky-play{display:none;}
+#instantBox:not(.hidden) ~ * .instant-sticky-play,
+#instantBox:not(.hidden) .instant-sticky-play{display:block;}
+
 </style>
 </head>
 <body>
@@ -879,7 +891,7 @@ body.instant-immersive #tabGames{padding-bottom:70px;}
 <div id="tabGames" class="tab-content hidden">
  <div id="homeBox" class="card"><h2 data-i18n="readyTitle">Ready to Play? 🎲</h2><p class="small" data-i18n="readyBody">Choose a stake, join a room, select your cards and play.</p><button class="btn-play" onclick="goToGameScreen()" data-i18n="playBtn">Play Classic Bingo 🚀</button>
   <button class="btn-play" style="margin-top:10px;background:linear-gradient(135deg,#f59e0b,#ef4444);" onclick="openInstantBingo()">⚡ Instant Bingo</button>
-  <p class="small" style="margin-top:8px;">Instant: 20 numbers · up to 4 cards · line ×2 · corners ×2.5 · same wallet</p>
+  <p class="small" style="margin-top:8px;">Instant: 20 numbers · up to 4 cards · 1×–4× patterns · same wallet</p>
 
    <div id="referralBox" class="referral-box">
      <h3 style="margin:0 0 6px;">🎁 Invite Friends, Earn Bonus</h3>
@@ -938,7 +950,7 @@ body.instant-immersive #tabGames{padding-bottom:70px;}
        <button type="button" class="btn-secondary instant-random-btn" onclick="pickRandomInstantCards(2)">🎲 Pick 2</button>
        <button type="button" class="btn-secondary instant-random-btn" onclick="pickRandomInstantCards(4)">🎲 Pick 4</button>
      </div>
-     <button class="btn-play" id="instantJoinBtn" onclick="startInstantPlay()" style="margin-top:8px;padding:10px;font-size:14px;">Play</button>
+     <div class="instant-play-spacer" aria-hidden="true"></div>
      <p id="instantMsg" class="small" style="margin-top:6px;font-size:11px;"></p>
      <div id="instantWaitOverlay" class="hidden" style="margin-top:8px;padding:10px;border-radius:10px;border:1px solid var(--line);text-align:center;">
        <strong id="instantWaitTitle" style="font-size:13px;">Locked in</strong>
@@ -949,6 +961,9 @@ body.instant-immersive #tabGames{padding-bottom:70px;}
        <div id="instantOpponents" class="instant-opponents"></div>
      </div>
    </div>
+   <div id="instantStickyPlay" class="instant-sticky-play">
+     <button class="btn-play" id="instantJoinBtn" onclick="startInstantPlay()" style="margin:0;padding:12px;font-size:15px;width:100%;">Play</button>
+   </div>
  </div>
 
  <div id="instantHelpModal" class="modal hidden" onclick="if(event.target===this)hide('instantHelpModal')">
@@ -958,10 +973,13 @@ body.instant-immersive #tabGames{padding-bottom:70px;}
     <p class="small"><strong>1. Select</strong> up to 4 cards and a stake during the timer. Same card numbers are allowed for different players.</p>
     <p class="small"><strong>2. Play</strong> locks your cards and charges <em>stake × number of cards</em> from your balance (same wallet as Classic Bingo).</p>
     <p class="small"><strong>3. Draw</strong> — when the timer hits 0, 20 numbers are called (1 second each). Matching cells highlight on your cards.</p>
-    <p class="small"><strong>Winning</strong><br>
-      • Any full row, column, or diagonal → <strong>×2</strong> that card’s stake<br>
-      • Four corners → <strong>×2.5</strong> that card’s stake<br>
-      Best pattern per card is paid. Wins go to your balance automatically.</p>
+    <p class="small"><strong>Winning</strong> (best pattern per card)<br>
+      • 1 row or 1 column → <strong>×1</strong> (stake back)<br>
+      • 2 rows/columns → <strong>×2</strong><br>
+      • 1 diagonal → <strong>×1.5</strong><br>
+      • Four corners → <strong>×2.5</strong><br>
+      • Four corners + any line → <strong>×4</strong><br>
+      Wins credit to your balance automatically. Strikes appear live during the draw.</p>
     <p class="small"><strong>Watch</strong> — you can watch the live draw without paying. After the draw, everyone returns to selection for the next round.</p>
     <button class="btn-play" onclick="hide('instantHelpModal')">Got it</button>
   </div>
@@ -1117,6 +1135,6 @@ body.instant-immersive #tabGames{padding-bottom:70px;}
   <div class="nav-item" onclick="switchTab('tabWallet',this)">💰<br><span data-i18n="navWallet">Wallet</span></div>
   <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
 </div>
-<script src="app.js?v=20260905-instant-ui-fix2"></script>
+<script src="app.js?v=20260905-instant-ui-fix3"></script>
 </body>
 </html>

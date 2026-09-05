@@ -76,7 +76,9 @@ function registerInstantRoutes(app) {
     try {
       const username = String(req.query.username || '');
       if (!username) return res.status(400).json({ success: false, message: 'Username required.' });
-      const history = await instant.historyForUser(username, 30);
+      const limit = Math.min(Math.max(Number(req.query.limit) || 12, 1), 30);
+      const offset = Math.max(Number(req.query.offset) || 0, 0);
+      const history = await instant.historyForUser(username, limit, offset);
       for (const h of history) {
         try {
           const g = await pool.query('SELECT grid FROM bingo_cards WHERE card_number = $1', [h.cardNumber]);
@@ -85,7 +87,7 @@ function registerInstantRoutes(app) {
           h.grid = null;
         }
       }
-      res.json({ success: true, history });
+      res.json({ success: true, history, limit, offset, hasMore: history.length >= limit });
     } catch (err) {
       res.status(500).json({ success: false, message: 'Server error.' });
     }

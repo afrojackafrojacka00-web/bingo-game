@@ -47,6 +47,17 @@ function maskName(raw) {
   const s = String(raw || 'usr').replace(/[^a-zA-Z0-9]/g, '') || 'usr';
   return s.slice(0, 3).toLowerCase() + '*****';
 }
+function pickFakeStake() {
+  // Weighted: mostly 10 & 20, some mid, few high
+  const roll = Math.random();
+  if (roll < 0.42) return 10;
+  if (roll < 0.78) return 20;
+  if (roll < 0.88) return 50;
+  if (roll < 0.94) return 100;
+  if (roll < 0.98) return 200;
+  return 500;
+}
+
 function rebuildFakeOpponents(catalog) {
   const nums = (catalog && catalog.length) ? catalog : Array.from({ length: 50 }, (_, i) => i + 1);
   const list = [];
@@ -56,6 +67,7 @@ function rebuildFakeOpponents(catalog) {
       id: 'fake_' + i,
       username: maskName(prefix + Math.floor(Math.random() * 90)),
       cardNumber: nums[Math.floor(Math.random() * nums.length)],
+      stake: pickFakeStake(),
       fake: true,
     });
   }
@@ -181,13 +193,11 @@ async function beginDrawPhase() {
 }
 
 async function settleAllEntries() {
-  const lineMult = cfg().lineMultiplier || 2;
-  const cornerMult = cfg().cornersMultiplier || 2.5;
   lastResults = [];
   for (const [username, ent] of entries.entries()) {
     for (const cardNumber of ent.cards) {
       const grid = await getCardGrid(cardNumber);
-      const evalResult = evaluateCard(grid, drawnNumbers, lineMult, cornerMult);
+      const evalResult = evaluateCard(grid, drawnNumbers);
       const prize = evalResult.hit ? Number((Number(ent.stake) * evalResult.multiplier).toFixed(2)) : 0;
       try {
         if (currentRoundId) {
@@ -270,12 +280,15 @@ function getLiveSession() {
   return null;
 }
 
-async function historyForUser(username, limit = 20) {
+async function historyForUser(username, limit = 15, offset = 0) {
+  const lim = Math.min(Math.max(Number(limit) || 15, 1), 30);
+  const off = Math.max(Number(offset) || 0, 0);
   const r = await pool.query(
     `SELECT e.id, e.round_id, e.card_number, e.stake, e.paid, e.pattern, e.multiplier,
             e.prize, e.winning_cells, e.created_at, r.drawn_numbers, r.completed_at
      FROM instant_entries e LEFT JOIN instant_rounds r ON r.id = e.round_id
-     WHERE LOWER(e.username)=LOWER($1) ORDER BY e.id DESC LIMIT $2`, [username, limit]);
+     WHERE LOWER(e.username)=LOWER($1) ORDER BY e.id DESC LIMIT $2 OFFSET $3`,
+    [username, lim, off]);
   return r.rows.map((row) => ({
     id: row.id, roundId: row.round_id, cardNumber: row.card_number, stake: Number(row.stake),
     paid: Number(row.paid), pattern: row.pattern, multiplier: Number(row.multiplier || 0),
