@@ -396,7 +396,32 @@ table.data tr:hover td { background: var(--card-hover); }
   .secret-wrap input { width: 120px; }
   .detail-grid { grid-template-columns: 1fr; }
 }
-    </style>
+    
+/* Instant admin polish */
+.inst-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-bottom:16px;}
+.inst-card{background:var(--card);border:1px solid var(--border,var(--line,#333));border-radius:14px;padding:16px 18px;box-shadow:0 1px 0 rgba(255,255,255,.03);}
+.inst-card h3{margin:0 0 6px;font-size:14px;font-weight:700;letter-spacing:.02em;}
+.inst-card .hint{font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.45;}
+.inst-card .row-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px;}
+.inst-kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;}
+@media(max-width:900px){.inst-kpi{grid-template-columns:repeat(2,1fr);}}
+.inst-kpi .stat{background:var(--bg-elevated,rgba(0,0,0,.2));border-radius:12px;padding:12px 14px;border:1px solid var(--border,var(--line,#333));}
+.inst-kpi .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+.inst-kpi .value{font-size:20px;font-weight:800;margin-top:4px;}
+.inst-table-wrap{overflow:auto;border:1px solid var(--border,var(--line,#333));border-radius:12px;}
+.inst-table{width:100%;border-collapse:collapse;font-size:13px;}
+.inst-table th{text-align:left;padding:10px 12px;background:rgba(0,0,0,.25);font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);position:sticky;top:0;}
+.inst-table td{padding:10px 12px;border-top:1px solid var(--border,var(--line,#2a2a2a));}
+.inst-table tr:hover td{background:rgba(59,130,246,.06);}
+.inst-badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;}
+.inst-badge.ok{background:rgba(34,197,94,.15);color:var(--green,#22c55e);}
+.inst-badge.bad{background:rgba(239,68,68,.15);color:var(--red,#ef4444);}
+.inst-badge.muted{background:rgba(148,163,184,.15);color:var(--muted);}
+.inst-diff-btns{display:flex;flex-wrap:wrap;gap:8px;}
+.inst-diff-btns button{border:1px solid var(--border,var(--line,#444));background:transparent;color:var(--text);border-radius:10px;padding:8px 12px;cursor:pointer;font-size:12px;font-weight:600;}
+.inst-diff-btns button.active{border-color:var(--blue);background:rgba(59,130,246,.18);color:var(--blue);}
+
+</style>
 </head>
 <body>
 <aside class="sidebar" id="sidebar">
@@ -813,64 +838,95 @@ table.data tr:hover td { background: var(--card-hover); }
 
     
     <!-- ===== INSTANT BINGO (isolated from classic) ===== -->
+    
     <section class="panel" id="panel-instantcontrol">
       <div class="card">
-        <div class="card-header"><h2><span class="emoji">⚡</span> Instant Bingo control</h2>
-          <span class="muted" style="font-size:12px;">Does not affect Classic Bingo rooms</span>
+        <div class="card-header">
+          <h2><span class="emoji">⚡</span> Instant Bingo control</h2>
+          <span class="muted" style="font-size:12px;">Isolated from Classic Bingo</span>
         </div>
-        <div class="stat-grid" id="instantStatGrid" style="margin-bottom:16px;">
-          <div class="stat"><div class="label">Status</div><div class="value" id="instStatEnabled">—</div></div>
+
+        <div class="inst-kpi">
+          <div class="stat"><div class="label">Master</div><div class="value" id="instStatEnabled">—</div></div>
+          <div class="stat"><div class="label">Loop</div><div class="value" id="instStatLoop">—</div></div>
           <div class="stat"><div class="label">Phase</div><div class="value" id="instStatPhase">—</div></div>
           <div class="stat"><div class="label">Real players</div><div class="value" id="instStatPlayers">0</div></div>
-          <div class="stat"><div class="label">Countdown</div><div class="value" id="instStatSeconds">—</div></div>
         </div>
-        <div class="switch-row" style="margin-bottom:16px;">
-          <div>
-            <div class="switch-label">Game loop (24/7)</div>
-            <div class="muted" style="font-size:12px;margin-top:2px;">Off only when no real players are in a round. A real player joining turns it back on automatically.</div>
+
+        <div class="inst-grid">
+          <div class="inst-card">
+            <h3>1 · Master power</h3>
+            <p class="hint">HARD off: Instant is fully blocked. Players see “turned off by admin” and <b>cannot</b> start a game.</p>
+            <div class="switch-row" style="margin:0;">
+              <div class="switch-label">Allow Instant Bingo</div>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span class="switch-state off" id="instantEnabledState">OFF</span>
+                <label class="switch" title="Master on/off">
+                  <input type="checkbox" id="instantEnabledToggle" onchange="toggleInstantEnabled(this)">
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+            </div>
           </div>
-          <div style="display:flex;align-items:center;gap:10px;">
-            <span class="switch-state off" id="instantEnabledState">OFF</span>
-            <label class="switch" title="Instant on/off">
-              <input type="checkbox" id="instantEnabledToggle" onchange="toggleInstantEnabled(this)">
-              <span class="switch-slider"></span>
-            </label>
+
+          <div class="inst-card">
+            <h3>2 · Eco / 24·7</h3>
+            <p class="hint">Eco ON: loop sleeps when empty; a real player’s Play wakes it, then it sleeps again when empty. Eco OFF: runs 24/7 while Master is on.</p>
+            <div class="switch-row" style="margin:0;">
+              <div class="switch-label">Eco mode (pause when empty)</div>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span class="switch-state off" id="instantEcoState">OFF</span>
+                <label class="switch" title="Eco mode">
+                  <input type="checkbox" id="instantEcoToggle" onchange="toggleInstantEco(this)">
+                  <span class="switch-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="inst-card">
+            <h3>3 · Difficulty</h3>
+            <p class="hint">Always 20 numbers (unless you override below). Difficulty only shapes how often real cards are helped to win. Save separately.</p>
+            <div class="inst-diff-btns" id="instantDiffBtns">
+              <button type="button" data-diff="easy" onclick="selectInstantDiff(this)">Easy ~55%</button>
+              <button type="button" data-diff="medium" onclick="selectInstantDiff(this)">Medium ~28%</button>
+              <button type="button" data-diff="hard" onclick="selectInstantDiff(this)">Hard ~12%</button>
+              <button type="button" data-diff="super_hard" onclick="selectInstantDiff(this)">Super hard ~4%</button>
+            </div>
+            <input type="hidden" id="instantDifficulty" value="medium">
+            <div class="row-actions">
+              <button class="btn btn-primary btn-sm" onclick="saveInstantDifficulty()">Save difficulty only</button>
+            </div>
+          </div>
+
+          <div class="inst-card">
+            <h3>4 · Timing &amp; limits</h3>
+            <p class="hint">Countdown, max cards, numbers drawn. Does not change difficulty.</p>
+            <div class="toolbar" style="flex-wrap:wrap;gap:10px;padding:0;margin:0;">
+              <label class="muted" style="font-size:12px;">Countdown (sec)
+                <input type="number" id="instantSelSec" min="5" max="120" step="1" style="width:90px;margin-left:6px;" value="25">
+              </label>
+              <label class="muted" style="font-size:12px;">Max cards
+                <input type="number" id="instantMaxCards" min="1" max="8" step="1" style="width:70px;margin-left:6px;" value="4">
+              </label>
+              <label class="muted" style="font-size:12px;">Numbers drawn
+                <input type="number" id="instantNumsDrawn" min="5" max="40" step="1" style="width:70px;margin-left:6px;" value="20">
+              </label>
+            </div>
+            <div class="row-actions">
+              <button class="btn btn-primary btn-sm" onclick="saveInstantSettings()">Save timing / limits</button>
+              <button class="btn btn-ghost btn-sm" onclick="loadInstantControl()">Refresh</button>
+            </div>
           </div>
         </div>
-        <div class="toolbar" style="flex-wrap:wrap;gap:10px;align-items:flex-end;">
-          <label class="muted" style="font-size:12px;display:block;">Difficulty (fixed 20 numbers — controls win help)
-            <select id="instantDifficulty" style="display:block;margin-top:4px;min-width:220px;">
-              <option value="easy">Easy — try ~55% of real cards win</option>
-              <option value="medium">Medium — try ~28% of real cards win</option>
-              <option value="hard">Hard — try ~12% of real cards win</option>
-              <option value="super_hard">Super hard — try ~4% (almost pure random)</option>
-            </select>
-          </label>
-          <label class="muted" style="font-size:12px;">Selection countdown (sec)
-            <input type="number" id="instantSelSec" min="5" max="120" step="1" style="width:90px;margin-left:6px;" value="25">
-          </label>
-          <label class="muted" style="font-size:12px;">Max cards / player
-            <input type="number" id="instantMaxCards" min="1" max="8" step="1" style="width:70px;margin-left:6px;" value="4">
-          </label>
-          <label class="muted" style="font-size:12px;">Numbers drawn (override)
-            <input type="number" id="instantNumsDrawn" min="5" max="40" step="1" style="width:70px;margin-left:6px;" value="20">
-          </label>
-          <button class="btn btn-primary btn-sm" onclick="saveInstantSettings()">Save settings</button>
-          <button class="btn btn-ghost btn-sm" onclick="loadInstantControl()">Refresh</button>
-        </div>
-        <p class="muted" style="font-size:12px;margin:8px 0 0;">
-          Numbers called stay at the value below (default <b>20</b>). Difficulty does <b>not</b> change that count.
-          It looks at real players’ cards and shapes the shared 20-number draw so a target share of those cards can complete a pattern.
-          With many players, not everyone can win in one round (only 20 numbers) — winners are rotated fairly over time.
-          Classic Bingo is not affected.
-        </p>
-        <div id="instantControlMsg" class="muted" style="margin-top:10px;font-size:12px;"></div>
-        <div style="margin-top:18px;">
-          <h3 style="margin:0 0 8px;font-size:14px;">Today / all-time</h3>
+
+        <div id="instantControlMsg" class="muted" style="margin:8px 0 14px;font-size:12px;"></div>
+        <div class="inst-card">
+          <h3>Performance snapshot</h3>
           <div id="instantStatsBox" class="muted" style="font-size:13px;">—</div>
         </div>
-        <div style="margin-top:18px;">
-          <h3 style="margin:0 0 8px;font-size:14px;">Players in current round</h3>
+        <div class="inst-card" style="margin-top:16px;">
+          <h3>Players in current round</h3>
           <div id="instantLivePlayers" class="empty">None</div>
         </div>
       </div>
@@ -878,13 +934,14 @@ table.data tr:hover td { background: var(--card-hover); }
 
     <section class="panel" id="panel-instanthistory">
       <div class="card">
-        <div class="card-header"><h2><span class="emoji">📋</span> Instant player history</h2>
-          <span class="muted" style="font-size:12px;">Search by username, phone, or display name</span>
+        <div class="card-header">
+          <h2><span class="emoji">📋</span> Instant player history</h2>
+          <span class="muted" style="font-size:12px;">Username · phone · display name</span>
         </div>
         <div class="toolbar">
-          <input id="instantHistQ" placeholder="Username, phone, or name…" style="min-width:220px;">
+          <input id="instantHistQ" placeholder="Search username, phone, or name…" style="min-width:240px;">
           <button class="btn btn-primary btn-sm" onclick="loadInstantHistory(true)">Search</button>
-          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('instantHistQ').value='';loadInstantHistory(true)">Clear</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('instantHistQ').value='';loadInstantHistory(true)">Reset</button>
         </div>
         <div id="instantHistList" class="empty">Enter admin key and search.</div>
         <div class="pagination" id="instantHistPager"></div>
@@ -893,7 +950,10 @@ table.data tr:hover td { background: var(--card-hover); }
 
     <section class="panel" id="panel-instantrounds">
       <div class="card">
-        <div class="card-header"><h2><span class="emoji">🔁</span> Instant rounds</h2></div>
+        <div class="card-header">
+          <h2><span class="emoji">🔁</span> Instant rounds</h2>
+          <span class="muted" style="font-size:12px;">Volume · payouts · house</span>
+        </div>
         <div class="toolbar">
           <button class="btn btn-ghost btn-sm" onclick="loadInstantRounds(true)">Refresh</button>
         </div>
@@ -2170,42 +2230,67 @@ let instantHistOffset = 0;
 let instantRoundsOffset = 0;
 let instantControlTimer = null;
 
+
 async function loadInstantControl() {
   if (!getSecret()) return;
   try {
     const r = await fetch('/api/admin/instant/status', { headers: adminSecretHeader() });
     const d = await r.json();
     if (!d.success) { document.getElementById('instantControlMsg').textContent = d.message || 'Failed'; return; }
-    const on = !!d.enabled;
+    const masterOn = d.masterEnabled !== false && d.enabled !== false;
+    const ecoOn = d.ecoMode !== false;
+    const loopOn = !!d.loopRunning;
     const toggle = document.getElementById('instantEnabledToggle');
-    if (toggle) toggle.checked = on;
+    if (toggle) toggle.checked = masterOn;
     syncSwitchLabel(toggle, 'instantEnabledState');
-    document.getElementById('instStatEnabled').textContent = on ? 'ON' : 'OFF';
-    document.getElementById('instStatEnabled').style.color = on ? 'var(--green)' : 'var(--red)';
+    const ecoT = document.getElementById('instantEcoToggle');
+    if (ecoT) ecoT.checked = ecoOn;
+    syncSwitchLabel(ecoT, 'instantEcoState');
+    document.getElementById('instStatEnabled').textContent = masterOn ? 'ON' : 'OFF';
+    document.getElementById('instStatEnabled').style.color = masterOn ? 'var(--green)' : 'var(--red)';
+    const loopEl = document.getElementById('instStatLoop');
+    if (loopEl) {
+      loopEl.textContent = !masterOn ? 'Blocked' : (loopOn ? 'Running' : 'Sleeping');
+      loopEl.style.color = !masterOn ? 'var(--red)' : (loopOn ? 'var(--green)' : 'var(--muted)');
+    }
     document.getElementById('instStatPhase').textContent = d.phase || '—';
     document.getElementById('instStatPlayers').textContent = String(d.realPlayers != null ? d.realPlayers : 0);
-    document.getElementById('instStatSeconds').textContent = d.phase === 'SELECTING' ? (d.secondsLeft + 's') : '—';
     if (document.getElementById('instantSelSec')) document.getElementById('instantSelSec').value = d.selectionSeconds || 25;
     if (document.getElementById('instantMaxCards')) document.getElementById('instantMaxCards').value = d.maxCardsPerPlayer || 4;
-    if (document.getElementById('instantNumsDrawn')) document.getElementById('instantNumsDrawn').value = d.numbersDrawn || 24;
-    if (document.getElementById('instantDifficulty') && d.difficulty) document.getElementById('instantDifficulty').value = d.difficulty;
+    if (document.getElementById('instantNumsDrawn')) document.getElementById('instantNumsDrawn').value = d.numbersDrawn || 20;
+    if (document.getElementById('instantDifficulty') && d.difficulty) {
+      document.getElementById('instantDifficulty').value = d.difficulty;
+      document.querySelectorAll('#instantDiffBtns button').forEach(function(b) {
+        b.classList.toggle('active', b.getAttribute('data-diff') === d.difficulty);
+      });
+    }
     const st = d.stats || {};
     const today = st.today || {};
     const all = st.allTime || {};
     document.getElementById('instantStatsBox').innerHTML =
-      '<div>Today: <b>' + (today.plays||0) + '</b> plays · volume <b>' + fmtMoney(today.volume) + '</b> · paid out <b>' + fmtMoney(today.paidOut) + '</b> · house <b>' + fmtMoney(today.house) + '</b></div>' +
-      '<div style="margin-top:4px;">All-time: <b>' + (all.plays||0) + '</b> plays · volume <b>' + fmtMoney(all.volume) + '</b> · house <b>' + fmtMoney(all.house) + '</b></div>';
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;">' +
+      '<div><span class="muted">Today plays</span><br><b>' + (today.plays||0) + '</b></div>' +
+      '<div><span class="muted">Today volume</span><br><b>' + fmtMoney(today.volume) + '</b></div>' +
+      '<div><span class="muted">Today paid out</span><br><b>' + fmtMoney(today.paidOut) + '</b></div>' +
+      '<div><span class="muted">Today house</span><br><b>' + fmtMoney(today.house) + '</b></div>' +
+      '<div><span class="muted">All-time plays</span><br><b>' + (all.plays||0) + '</b></div>' +
+      '<div><span class="muted">All-time house</span><br><b>' + fmtMoney(all.house) + '</b></div></div>';
     const players = d.players || [];
     const box = document.getElementById('instantLivePlayers');
     if (!players.length) box.innerHTML = '<div class="empty">No real players in this round</div>';
     else {
-      box.innerHTML = '<table class="data-table"><thead><tr><th>User</th><th>Cards</th><th>Stake</th></tr></thead><tbody>' +
+      box.innerHTML = '<div class="inst-table-wrap"><table class="inst-table"><thead><tr><th>User</th><th>Cards</th><th>Stake</th></tr></thead><tbody>' +
         players.map(function(p) {
           const cards = Array.isArray(p.cards) ? p.cards.join(', ') : (p.cardNumber || '—');
           return '<tr><td>' + esc(p.realUsername || p.username) + '</td><td>' + esc(String(cards)) + '</td><td>' + fmtMoney(p.stake) + '</td></tr>';
-        }).join('') + '</tbody></table>';
+        }).join('') + '</tbody></table></div>';
     }
-    document.getElementById('instantControlMsg').textContent = on ? 'Loop running.' : ('Stopped' + (d.adminDisabledAt ? ' since ' + fmtDate(d.adminDisabledAt) : '') + '. Auto-starts when a player joins.');
+    let msg = '';
+    if (!masterOn) msg = 'Master HARD OFF — players cannot start Instant.';
+    else if (ecoOn && !loopOn) msg = 'Eco ON · loop sleeping — a real player Play will wake it.';
+    else if (ecoOn) msg = 'Eco ON · loop active — will sleep when a selection ends with 0 players.';
+    else msg = '24/7 mode · loop runs continuously.';
+    document.getElementById('instantControlMsg').textContent = msg;
     if (instantControlTimer) clearInterval(instantControlTimer);
     if (document.getElementById('panel-instantcontrol')?.classList.contains('active')) {
       instantControlTimer = setInterval(loadInstantControl, 5000);
@@ -2215,10 +2300,35 @@ async function loadInstantControl() {
   }
 }
 
+function selectInstantDiff(btn) {
+  document.querySelectorAll('#instantDiffBtns button').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  document.getElementById('instantDifficulty').value = btn.getAttribute('data-diff');
+}
+
+async function saveInstantDifficulty() {
+  if (!requireSecret()) return;
+  const difficulty = document.getElementById('instantDifficulty').value;
+  if (!confirm('Save difficulty only to “' + difficulty + '”?\\n(This does not change numbers drawn or countdown.)')) return;
+  try {
+    const r = await fetch('/api/admin/instant/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminSecretHeader() },
+      body: JSON.stringify({ adminSecret: getSecret(), difficulty })
+    });
+    const d = await r.json();
+    if (!d.success) { alert(d.message || 'Failed'); return; }
+    document.getElementById('instantControlMsg').textContent = 'Difficulty saved: ' + difficulty;
+    loadInstantControl();
+  } catch (e) { alert('Network error'); }
+}
+
 async function toggleInstantEnabled(el) {
   if (!requireSecret()) { el.checked = !el.checked; return; }
   const want = !!el.checked;
-  const label = want ? 'turn ON Instant Bingo?' : 'turn OFF Instant Bingo? (only allowed if no real players are in a round)';
+  const label = want
+    ? 'Turn MASTER ON? Instant will be allowed (Eco still controls 24/7 vs sleep).'
+    : 'HARD OFF Instant Bingo? Players will NOT be able to force it on.';
   if (!confirm(label)) { el.checked = !want; return; }
   try {
     const r = await fetch('/api/admin/instant/enabled', {
@@ -2227,39 +2337,49 @@ async function toggleInstantEnabled(el) {
       body: JSON.stringify({ adminSecret: getSecret(), enabled: want })
     });
     const d = await r.json();
-    if (!d.success) {
-      alert(d.message || 'Failed');
-      el.checked = !want;
-      return;
-    }
+    if (!d.success) { alert(d.message || 'Failed'); el.checked = !want; return; }
     syncSwitchLabel(el, 'instantEnabledState');
     loadInstantControl();
-  } catch (e) {
-    alert('Network error');
-    el.checked = !want;
-  }
+  } catch (e) { alert('Network error'); el.checked = !want; }
+}
+
+async function toggleInstantEco(el) {
+  if (!requireSecret()) { el.checked = !el.checked; return; }
+  const want = !!el.checked;
+  const label = want
+    ? 'Enable Eco mode? Loop sleeps when empty; real players can wake it with Play.'
+    : 'Disable Eco (24/7)? Loop runs continuously while Master is ON.';
+  if (!confirm(label)) { el.checked = !want; return; }
+  try {
+    const r = await fetch('/api/admin/instant/eco', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminSecretHeader() },
+      body: JSON.stringify({ adminSecret: getSecret(), ecoMode: want })
+    });
+    const d = await r.json();
+    if (!d.success) { alert(d.message || 'Failed'); el.checked = !want; return; }
+    syncSwitchLabel(el, 'instantEcoState');
+    loadInstantControl();
+  } catch (e) { alert('Network error'); el.checked = !want; }
 }
 
 async function saveInstantSettings() {
   if (!requireSecret()) return;
-  const difficulty = document.getElementById('instantDifficulty').value;
   const selectionSeconds = Number(document.getElementById('instantSelSec').value);
   const maxCardsPerPlayer = Number(document.getElementById('instantMaxCards').value);
   const numbersDrawn = Number(document.getElementById('instantNumsDrawn').value);
-  if (!confirm('Save Instant settings?\nDifficulty: ' + difficulty + '\nCountdown: ' + selectionSeconds + 's\nMax cards: ' + maxCardsPerPlayer + '\nNumbers: ' + numbersDrawn)) return;
+  if (!confirm('Save timing / limits only?\\nCountdown: ' + selectionSeconds + 's\\nMax cards: ' + maxCardsPerPlayer + '\\nNumbers: ' + numbersDrawn)) return;
   try {
     const r = await fetch('/api/admin/instant/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...adminSecretHeader() },
-      body: JSON.stringify({ adminSecret: getSecret(), difficulty, selectionSeconds, maxCardsPerPlayer, numbersDrawn })
+      body: JSON.stringify({ adminSecret: getSecret(), selectionSeconds, maxCardsPerPlayer, numbersDrawn })
     });
     const d = await r.json();
     if (!d.success) { alert(d.message || 'Failed'); return; }
-    document.getElementById('instantControlMsg').textContent = 'Settings saved.';
+    document.getElementById('instantControlMsg').textContent = 'Timing / limits saved.';
     loadInstantControl();
-  } catch (e) {
-    alert('Network error');
-  }
+  } catch (e) { alert('Network error'); }
 }
 
 async function loadInstantHistory(reset) {
@@ -2275,7 +2395,7 @@ async function loadInstantHistory(reset) {
     if (!d.success) { list.innerHTML = '<div class="empty">' + esc(d.message || 'Failed') + '</div>'; return; }
     const rows = d.rows || [];
     if (reset && !rows.length) { list.innerHTML = '<div class="empty">No plays found.</div>'; document.getElementById('instantHistPager').innerHTML = ''; return; }
-    const html = (reset ? '<table class="data-table"><thead><tr><th>User</th><th>Phone</th><th>Card</th><th>Bet</th><th>Prize</th><th>Mult</th><th>Pattern</th><th>Date</th></tr></thead><tbody id="instantHistBody">' : '');
+    const html = (reset ? '<div class="inst-table-wrap"><table class="inst-table"><thead><tr><th>User</th><th>Phone</th><th>Card</th><th>Bet</th><th>Prize</th><th>Mult</th><th>Pattern</th><th>Date</th></tr></thead><tbody id="instantHistBody">' : '');
     const body = rows.map(function(h) {
       return '<tr><td>' + esc(h.username) + (h.displayName ? '<br><span class="muted">' + esc(h.displayName) + '</span>' : '') +
         '</td><td>' + esc(h.phone || '—') + '</td><td>#' + h.cardNumber + '</td><td>' + fmtMoney(h.paid || h.stake) +
@@ -2283,7 +2403,7 @@ async function loadInstantHistory(reset) {
         '</td><td>' + fmtDate(h.date) + '</td></tr>';
     }).join('');
     if (reset) {
-      list.innerHTML = html + body + '</tbody></table>';
+      list.innerHTML = html + body + '</tbody></table></div>';
     } else {
       const tb = document.getElementById('instantHistBody');
       if (tb) tb.insertAdjacentHTML('beforeend', body);
@@ -2310,13 +2430,13 @@ async function loadInstantRounds(reset) {
     if (!d.success) { list.innerHTML = '<div class="empty">' + esc(d.message || 'Failed') + '</div>'; return; }
     const rows = d.rows || [];
     if (reset && !rows.length) { list.innerHTML = '<div class="empty">No rounds yet.</div>'; document.getElementById('instantRoundsPager').innerHTML = ''; return; }
-    const head = reset ? '<table class="data-table"><thead><tr><th>ID</th><th>Status</th><th>Entries</th><th>Volume</th><th>Paid out</th><th>House</th><th>Completed</th></tr></thead><tbody id="instantRoundsBody">' : '';
+    const head = reset ? '<div class="inst-table-wrap"><table class="inst-table"><thead><tr><th>ID</th><th>Status</th><th>Entries</th><th>Volume</th><th>Paid out</th><th>House</th><th>Completed</th></tr></thead><tbody id="instantRoundsBody">' : '';
     const body = rows.map(function(row) {
       return '<tr><td>#' + row.id + '</td><td>' + esc(row.status) + '</td><td>' + row.entryCount +
         '</td><td>' + fmtMoney(row.totalPaid) + '</td><td>' + fmtMoney(row.totalPrize) +
         '</td><td>' + fmtMoney(row.house) + '</td><td>' + fmtDate(row.completedAt || row.createdAt) + '</td></tr>';
     }).join('');
-    if (reset) list.innerHTML = head + body + '</tbody></table>';
+    if (reset) list.innerHTML = head + body + '</tbody></table></div>';
     else {
       const tb = document.getElementById('instantRoundsBody');
       if (tb) tb.insertAdjacentHTML('beforeend', body);

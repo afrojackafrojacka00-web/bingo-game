@@ -131,11 +131,26 @@ function registerInstantRoutes(app) {
     if (!requireAdmin(req, res)) return;
     try {
       const on = !!(req.body && (req.body.enabled === true || req.body.enabled === 'true' || req.body.enabled === 1));
-      const result = instant.adminSetEnabled(on);
+      const result = instant.adminSetMasterEnabled(on);
       res.json({ success: true, ...result });
     } catch (err) {
       const status = err.code === 'BUSY' ? 409 : 400;
       res.status(status).json({ success: false, message: err.message || 'Failed.' });
+    }
+  });
+
+  app.post('/api/admin/instant/eco', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const on = !!(req.body && (req.body.ecoMode === true || req.body.ecoMode === 'true' || req.body.ecoMode === 1 || req.body.enabled === true));
+      // body.ecoMode preferred; also accept enabled as alias for eco
+      const eco = req.body && req.body.ecoMode != null
+        ? !!(req.body.ecoMode === true || req.body.ecoMode === 'true' || req.body.ecoMode === 1)
+        : on;
+      const result = instant.adminSetEcoMode(eco);
+      res.json({ success: true, ...result, control: instant.adminGetControlState() });
+    } catch (err) {
+      res.status(400).json({ success: false, message: err.message || 'Failed.' });
     }
   });
 

@@ -30,12 +30,14 @@ const FAKE_PREFIXES = [
 ];
 
 // Runtime admin overrides (not mixed with classic bingo config)
-let runtimeEnabled = cfg().enabled !== false;
+let runtimeMasterEnabled = cfg().enabled !== false; // HARD lock — players cannot force on
+let runtimeEcoMode = true; // when true: pause loop when empty; real player join wakes it
+let runtimeLoopRunning = cfg().enabled !== false; // is the selection/draw loop active
 let runtimeSelectionSeconds = Number(cfg().selectionSeconds || 25);
 let runtimeMaxCards = Number(cfg().maxCardsPerPlayer || 4);
 let runtimeNumbersDrawn = Number(cfg().numbersDrawn || 20);
 let runtimeDifficulty = String(cfg().difficulty || 'medium'); // easy|medium|hard|super_hard
-let adminDisabledAt = null; // when admin turned off while idle
+let adminDisabledAt = null;
 
 /**
  * Difficulty with FIXED numbers drawn (default 20).
@@ -52,7 +54,11 @@ const DIFFICULTY_PRESETS = {
 };
 
 function enabled() {
-  return runtimeEnabled !== false;
+  // Master switch: game allowed at all
+  return runtimeMasterEnabled !== false;
+}
+function isLoopRunning() {
+  return !!runtimeLoopRunning && enabled();
 }
 function stakes() {
   return cfg().stakes || config.stakes || [10, 20, 50, 100, 200, 500];
@@ -73,6 +79,8 @@ function hasActiveRealPlayers() {
   return entries.size > 0;
 }
 function tickFakePlayers() {
+  // Only fluctuate while waiting for cards — freeze during live draw
+  if (phase !== 'SELECTING') return fakePlayers;
   const step = Math.floor(Math.random() * 21) - 8;
   fakePlayers = Math.max(200, Math.min(400, fakePlayers + step));
   return fakePlayers;
@@ -153,7 +161,8 @@ function publicState() {
     players.push({ username: maskName(username), realUsername: username, cards: ent.cards, stake: ent.stake, fake: false });
   }
   return {
-    enabled: enabled(), phase, selectionSeconds: selectionSeconds(), secondsLeft: secsLeft,
+    enabled: enabled(), masterEnabled: enabled(), ecoMode: !!runtimeEcoMode, loopRunning: isLoopRunning(),
+    phase, selectionSeconds: selectionSeconds(), secondsLeft: secsLeft,
     selectionEndsAt, maxCardsPerPlayer: maxCardsPerPlayer(),
     numbersDrawn: numbersDrawnCount(), difficulty: runtimeDifficulty || 'medium', lineMultiplier: cfg().lineMultiplier || 2,
     cornersMultiplier: cfg().cornersMultiplier || 2.5, stakes: stakes(),
@@ -170,8 +179,9 @@ function broadcast(event, payload) {
 }
 
 function startSelectionPhase() {
-  if (!enabled()) {
+  if (!enabled() || !runtimeLoopRunning) {
     phase = 'IDLE';
+    runtimeLoopRunning = false;
     if (phaseTimer) { clearInterval(phaseTimer); phaseTimer = null; }
     if (drawTimer) { clearInterval(drawTimer); drawTimer = null; }
     broadcast('instant_state', publicState());
@@ -195,6 +205,13 @@ function startSelectionPhase() {
     if (left <= 0) {
       clearInterval(phaseTimer);
       phaseTimer = null;
+      // Eco mode: if nobody joined, pause the loop until a real player starts it
+      if (runtimeEcoMode && entries.size === 0) {
+        runtimeLoopRunning = false;
+        phase = 'IDLE';
+        broadcast('instant_state', publicState());
+        return;
+      }
       beginDrawPhase().catch((e) => { console.error('instant beginDraw', e); startSelectionPhase(); });
     }
   }, 250);
@@ -384,13 +401,17 @@ async function settleAllEntries() {
 }
 
 async function joinSharedRound({ username, stake, cardNumbers }) {
-  // Auto-wake: if admin turned Instant off while idle, a real player joining turns it back on
+  // HARD off (master): nobody can play
   if (!enabled()) {
-    runtimeEnabled = true;
+    const err = new Error('Instant Bingo is turned off by admin.');
+    err.code = 'DISABLED';
+    throw err;
+  }
+  // Eco / paused loop: real player joining wakes the loop
+  if (!runtimeLoopRunning || phase === 'IDLE') {
+    runtimeLoopRunning = true;
     adminDisabledAt = null;
-    if (phase === 'IDLE' || phase === 'SELECTING' || !phaseTimer) {
-      startSelectionPhase();
-    }
+    startSelectionPhase();
   }
   if (phase !== 'SELECTING') throw new Error('Round already started — wait for the next selection.');
   const maxCards = maxCardsPerPlayer();
@@ -436,7 +457,7 @@ async function joinSharedRound({ username, stake, cardNumbers }) {
 }
 
 async function startPlay(opts) { return joinSharedRound(opts); }
-async function getStatus() { tickFakePlayers(); return publicState(); }
+async function getStatus() { if (phase === 'SELECTING') tickFakePlayers(); return publicState(); }
 function getLiveSession() {
   if (phase === 'DRAWING' || phase === 'RESULTS') {
     return { sessionId: currentRoundId, drawnNumbers, drawIndex, phase, cards: lastResults, drawIntervalMs: 1000 };
@@ -498,7 +519,16 @@ async function getLeaderboard(period = 'day', limit = 20) {
 
 function attachInstantGame(io) {
   if (!io) return;
-  ensureSchema().then(() => startSelectionPhase()).catch((e) => console.error('instant boot', e));
+  ensureSchema().then(() => {
+    if (enabled() && !runtimeEcoMode) {
+      runtimeLoopRunning = true;
+      startSelectionPhase();
+    } else if (enabled() && runtimeEcoMode) {
+      runtimeLoopRunning = false;
+      phase = 'IDLE';
+      console.log('Instant Bingo eco mode: idle until a real player joins');
+    }
+  }).catch((e) => console.error('instant boot', e));
   ioNamespace = io.of('/instant');
   ioNamespace.on('connection', (socket) => {
     socket.emit('instant_state', publicState());
@@ -510,7 +540,7 @@ function attachInstantGame(io) {
       }
     });
   });
-  setInterval(() => { tickFakePlayers(); }, 8000);
+  setInterval(() => { if (phase === 'SELECTING') tickFakePlayers(); }, 8000);
   console.log('Instant Bingo shared real-time rounds ready');
 }
 
@@ -520,19 +550,18 @@ function stopScheduler() {
 }
 
 /**
- * Admin: enable/disable Instant loop.
- * Cannot disable while real users are in the current round.
- * When disabled, timers stop (saves resources). A real join auto-enables again.
+ * MASTER switch — hard off. Players cannot force the game on.
  */
-function adminSetEnabled(on) {
+function adminSetMasterEnabled(on) {
   const want = !!on;
   if (!want) {
     if (hasActiveRealPlayers()) {
-      const err = new Error('Cannot turn off while real players are in this round (' + entries.size + ' player(s)).');
+      const err = new Error('Cannot hard-off while real players are in this round (' + entries.size + ' player(s)).');
       err.code = 'BUSY';
       throw err;
     }
-    runtimeEnabled = false;
+    runtimeMasterEnabled = false;
+    runtimeLoopRunning = false;
     adminDisabledAt = new Date().toISOString();
     stopScheduler();
     phase = 'IDLE';
@@ -540,16 +569,61 @@ function adminSetEnabled(on) {
     drawnNumbers = [];
     drawIndex = 0;
     broadcast('instant_state', publicState());
-    return { enabled: false, message: 'Instant Bingo stopped. Will auto-start when a real player joins.' };
+    return { masterEnabled: false, enabled: false, message: 'Instant Bingo HARD OFF. Players cannot start it.' };
   }
-  runtimeEnabled = true;
+  runtimeMasterEnabled = true;
   adminDisabledAt = null;
-  if (phase === 'IDLE' || !phaseTimer) {
+  // When turning master on, start loop unless eco mode prefers idle until a player joins
+  if (!runtimeEcoMode) {
+    runtimeLoopRunning = true;
     startSelectionPhase();
   } else {
+    runtimeLoopRunning = false;
+    phase = 'IDLE';
+    stopScheduler();
     broadcast('instant_state', publicState());
   }
-  return { enabled: true, message: 'Instant Bingo running.' };
+  return {
+    masterEnabled: true,
+    enabled: true,
+    ecoMode: runtimeEcoMode,
+    loopRunning: runtimeLoopRunning,
+    message: runtimeEcoMode
+      ? 'Master ON + Eco: waiting for a real player to start.'
+      : 'Master ON + 24/7 loop running.',
+  };
+}
+
+/** @deprecated alias */
+function adminSetEnabled(on) { return adminSetMasterEnabled(on); }
+
+/**
+ * Eco mode: when ON, loop pauses when no real players; a join wakes it.
+ * When OFF, 24/7 continuous selection/draw (while master is on).
+ */
+function adminSetEcoMode(on) {
+  runtimeEcoMode = !!on;
+  if (!enabled()) {
+    broadcast('instant_state', publicState());
+    return { ecoMode: runtimeEcoMode, message: 'Eco saved, but master is HARD OFF.' };
+  }
+  if (!runtimeEcoMode) {
+    // 24/7 — ensure loop running
+    runtimeLoopRunning = true;
+    if (phase === 'IDLE' || !phaseTimer) startSelectionPhase();
+    else broadcast('instant_state', publicState());
+    return { ecoMode: false, loopRunning: true, message: '24/7 mode: loop always runs.' };
+  }
+  // Eco on: if no real players, pause
+  if (!hasActiveRealPlayers() && phase === 'SELECTING') {
+    runtimeLoopRunning = false;
+    stopScheduler();
+    phase = 'IDLE';
+    broadcast('instant_state', publicState());
+    return { ecoMode: true, loopRunning: false, message: 'Eco ON: paused until a real player joins.' };
+  }
+  broadcast('instant_state', publicState());
+  return { ecoMode: true, loopRunning: runtimeLoopRunning, message: 'Eco ON: pauses when empty, players can wake it.' };
 }
 
 function adminSetSelectionSeconds(seconds) {
@@ -601,6 +675,9 @@ function adminGetControlState() {
   const preset = DIFFICULTY_PRESETS[runtimeDifficulty] || DIFFICULTY_PRESETS.medium;
   return {
     enabled: enabled(),
+    masterEnabled: enabled(),
+    ecoMode: !!runtimeEcoMode,
+    loopRunning: isLoopRunning(),
     phase,
     selectionSeconds: selectionSeconds(),
     maxCardsPerPlayer: maxCardsPerPlayer(),
@@ -723,7 +800,7 @@ module.exports = {
   joinRound: joinSharedRound, joinSharedRound, settleRound: async () => null,
   historyForUser, getLeaderboard, getLiveSession, stopScheduler, evaluateCard, drawNumbers,
   getFakePlayers: () => fakePlayers, publicState,
-  adminSetEnabled, adminSetSelectionSeconds, adminSetMaxCards, adminSetNumbersDrawn, adminSetDifficulty,
+  adminSetEnabled, adminSetMasterEnabled, adminSetEcoMode, adminSetSelectionSeconds, adminSetMaxCards, adminSetNumbersDrawn, adminSetDifficulty,
   adminGetControlState, adminSearchHistory, adminRoundHistory, adminStats,
   realPlayerCount, hasActiveRealPlayers,
 };

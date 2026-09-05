@@ -1954,11 +1954,22 @@ async function loadInstantUI() {
     try {
         const res = await fetch('/api/instant/status?_=' + Date.now(), { cache: 'no-store' });
         const data = await res.json();
-        if (!data.success || data.enabled === false) {
-            if (msg) msg.textContent = data.message || 'Disabled.';
+        if (!data.success) {
+            if (msg) msg.textContent = data.message || 'Could not load Instant.';
             return;
         }
+        // HARD off by admin — cannot play
+        if (data.enabled === false || data.masterEnabled === false) {
+            if (msg) msg.textContent = '⛔ Instant Bingo is turned OFF by admin. Please try later.';
+            applyInstantState(data);
+            const btn = document.getElementById('instantJoinBtn');
+            if (btn) btn.disabled = true;
+            return data;
+        }
         applyInstantState(data);
+        if (data.phase === 'IDLE' || data.loopRunning === false) {
+            if (msg) msg.textContent = 'Tap Play to start a round (game wakes when you join).';
+        }
         const stakes = data.stakes || [10, 20, 50, 100, 200, 500];
         if (!stakes.includes(Number(instantStake))) instantStake = stakes[0];
         renderInstantStakePills(stakes);
