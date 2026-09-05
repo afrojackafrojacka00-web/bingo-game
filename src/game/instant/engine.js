@@ -191,6 +191,12 @@ async function ensureSchema() {
     `ALTER TABLE instant_entries ALTER COLUMN round_id DROP NOT NULL`,
     `CREATE INDEX IF NOT EXISTS idx_instant_entries_round ON instant_entries(round_id)`,
     `CREATE INDEX IF NOT EXISTS idx_instant_entries_user ON instant_entries(user_id, created_at DESC)`,
+    `CREATE TABLE IF NOT EXISTS instant_settings (
+      key TEXT PRIMARY KEY,
+      value JSONB NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
+
   ];
   for (const sql of steps) {
     try { await pool.query(sql); }
@@ -581,18 +587,71 @@ async function getLeaderboard(period = 'day', limit = 20) {
   return leaders.slice(0, 20);
 }
 
+
+async function loadSettingsFromDb() {
+  try {
+    const r = await pool.query(`SELECT key, value FROM instant_settings`);
+    const map = {};
+    for (const row of r.rows) map[row.key] = row.value;
+    if (map.masterEnabled != null) runtimeMasterEnabled = map.masterEnabled !== false && map.masterEnabled !== 'false';
+    if (map.ecoMode != null) runtimeEcoMode = map.ecoMode !== false && map.ecoMode !== 'false';
+    if (map.selectionSeconds != null) runtimeSelectionSeconds = Number(map.selectionSeconds) || runtimeSelectionSeconds;
+    if (map.maxCardsPerPlayer != null) runtimeMaxCards = Number(map.maxCardsPerPlayer) || runtimeMaxCards;
+    if (map.numbersDrawn != null) runtimeNumbersDrawn = Number(map.numbersDrawn) || runtimeNumbersDrawn;
+    if (map.difficulty != null) runtimeDifficulty = String(map.difficulty);
+    if (map.winRules != null) runtimeWinRules = normalizeWinRules(map.winRules);
+    console.log('Instant settings loaded from DB', {
+      master: runtimeMasterEnabled, eco: runtimeEcoMode, difficulty: runtimeDifficulty,
+      selectionSeconds: runtimeSelectionSeconds, numbersDrawn: runtimeNumbersDrawn,
+      winRules: (runtimeWinRules || []).length,
+    });
+  } catch (e) {
+    console.error('instant loadSettingsFromDb', e.message);
+  }
+}
+
+async function saveSetting(key, value) {
+  try {
+    await pool.query(
+      `INSERT INTO instant_settings (key, value, updated_at) VALUES ($1, $2::jsonb, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [key, JSON.stringify(value)]
+    );
+  } catch (e) {
+    console.error('instant saveSetting', key, e.message);
+  }
+}
+
+async function persistAllSettings() {
+  await Promise.all([
+    saveSetting('masterEnabled', runtimeMasterEnabled),
+    saveSetting('ecoMode', runtimeEcoMode),
+    saveSetting('selectionSeconds', runtimeSelectionSeconds),
+    saveSetting('maxCardsPerPlayer', runtimeMaxCards),
+    saveSetting('numbersDrawn', runtimeNumbersDrawn),
+    saveSetting('difficulty', runtimeDifficulty),
+    saveSetting('winRules', runtimeWinRules),
+  ]);
+}
+
 function attachInstantGame(io) {
   if (!io) return;
-  ensureSchema().then(() => {
-    if (enabled() && !runtimeEcoMode) {
-      runtimeLoopRunning = true;
-      startSelectionPhase();
-    } else if (enabled() && runtimeEcoMode) {
-      runtimeLoopRunning = false;
-      phase = 'IDLE';
-      console.log('Instant Bingo eco mode: idle until a real player joins');
-    }
-  }).catch((e) => console.error('instant boot', e));
+  ensureSchema()
+    .then(() => loadSettingsFromDb())
+    .then(() => {
+      if (enabled() && !runtimeEcoMode) {
+        runtimeLoopRunning = true;
+        startSelectionPhase();
+      } else if (enabled() && runtimeEcoMode) {
+        runtimeLoopRunning = false;
+        phase = 'IDLE';
+        console.log('Instant Bingo eco mode: idle until a real player joins');
+      } else {
+        runtimeLoopRunning = false;
+        phase = 'IDLE';
+        console.log('Instant Bingo master OFF (from DB/settings)');
+      }
+    }).catch((e) => console.error('instant boot', e));
   ioNamespace = io.of('/instant');
   ioNamespace.on('connection', (socket) => {
     // Viewer opened Instant — ensure loop is running so countdown is never stuck
@@ -657,6 +716,7 @@ function adminSetMasterEnabled(on) {
     drawnNumbers = [];
     drawIndex = 0;
     broadcast('instant_state', publicState());
+    saveSetting('masterEnabled', false).catch(function(){});
     return { masterEnabled: false, enabled: false, message: 'Instant Bingo HARD OFF. Players cannot start it.' };
   }
   runtimeMasterEnabled = true;
@@ -671,6 +731,7 @@ function adminSetMasterEnabled(on) {
     stopScheduler();
     broadcast('instant_state', publicState());
   }
+  saveSetting('masterEnabled', true).catch(function(){});
   return {
     masterEnabled: true,
     enabled: true,
@@ -691,6 +752,7 @@ function adminSetEnabled(on) { return adminSetMasterEnabled(on); }
  */
 function adminSetEcoMode(on) {
   runtimeEcoMode = !!on;
+  saveSetting('ecoMode', runtimeEcoMode).catch(function(){});
   if (!enabled()) {
     broadcast('instant_state', publicState());
     return { ecoMode: runtimeEcoMode, message: 'Eco saved, but master is HARD OFF.' };
@@ -718,6 +780,7 @@ function adminSetSelectionSeconds(seconds) {
   const n = Math.max(5, Math.min(120, Number(seconds)));
   if (!Number.isFinite(n)) throw new Error('Invalid selection seconds.');
   runtimeSelectionSeconds = n;
+  saveSetting('selectionSeconds', runtimeSelectionSeconds).catch(function(){});
   // If currently selecting, extend/shorten deadline relative to remaining is complex —
   // apply on next round; also nudge current if SELECTING
   if (phase === 'SELECTING' && selectionEndsAt) {
@@ -731,12 +794,14 @@ function adminSetSelectionSeconds(seconds) {
 
 function adminSetMaxCards(n) {
   runtimeMaxCards = Math.max(1, Math.min(8, Number(n) || 4));
+  saveSetting('maxCardsPerPlayer', runtimeMaxCards).catch(function(){});
   broadcast('instant_state', publicState());
   return { maxCardsPerPlayer: maxCardsPerPlayer() };
 }
 
 function adminSetNumbersDrawn(n) {
   runtimeNumbersDrawn = Math.max(5, Math.min(40, Number(n) || 20));
+  saveSetting('numbersDrawn', runtimeNumbersDrawn).catch(function(){});
   broadcast('instant_state', publicState());
   return { numbersDrawn: numbersDrawnCount() };
 }
@@ -748,6 +813,7 @@ function adminSetDifficulty(level) {
     throw new Error('Invalid difficulty. Use easy, medium, hard, or super_hard.');
   }
   runtimeDifficulty = key;
+  saveSetting('difficulty', runtimeDifficulty).catch(function(){});
   // Numbers drawn stays independent (default 20) — difficulty only shapes WHO can win
   broadcast('instant_state', publicState());
   return {
@@ -766,6 +832,7 @@ function adminGetWinRules() {
 
 function adminSetWinRules(rules) {
   runtimeWinRules = normalizeWinRules(rules);
+  saveSetting('winRules', runtimeWinRules).catch(function(){});
   broadcast('instant_state', publicState());
   return { rules: runtimeWinRules };
 }
