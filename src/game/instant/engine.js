@@ -34,7 +34,22 @@ let runtimeEnabled = cfg().enabled !== false;
 let runtimeSelectionSeconds = Number(cfg().selectionSeconds || 25);
 let runtimeMaxCards = Number(cfg().maxCardsPerPlayer || 4);
 let runtimeNumbersDrawn = Number(cfg().numbersDrawn || 20);
+let runtimeDifficulty = String(cfg().difficulty || 'medium'); // easy|medium|hard|super_hard
 let adminDisabledAt = null; // when admin turned off while idle
+
+/**
+ * Difficulty with FIXED numbers drawn (default 20).
+ * Controls how hard we try to complete patterns on real players' cards
+ * inside the shared 20-number draw.
+ * targetWinRate ≈ fraction of real cards we try to give at least one win.
+ * (With many players, not everyone can win — 20 numbers is a hard limit.)
+ */
+const DIFFICULTY_PRESETS = {
+  easy:       { targetWinRate: 0.55, label: 'Easy', hint: 'Aim ~55% of real cards win (≥1 pattern)' },
+  medium:     { targetWinRate: 0.28, label: 'Medium', hint: 'Aim ~28% of real cards win' },
+  hard:       { targetWinRate: 0.12, label: 'Hard', hint: 'Aim ~12% of real cards win' },
+  super_hard: { targetWinRate: 0.04, label: 'Super hard', hint: 'Aim ~4% of real cards win (near pure random)' },
+};
 
 function enabled() {
   return runtimeEnabled !== false;
@@ -140,7 +155,7 @@ function publicState() {
   return {
     enabled: enabled(), phase, selectionSeconds: selectionSeconds(), secondsLeft: secsLeft,
     selectionEndsAt, maxCardsPerPlayer: maxCardsPerPlayer(),
-    numbersDrawn: numbersDrawnCount(), lineMultiplier: cfg().lineMultiplier || 2,
+    numbersDrawn: numbersDrawnCount(), difficulty: runtimeDifficulty || 'medium', lineMultiplier: cfg().lineMultiplier || 2,
     cornersMultiplier: cfg().cornersMultiplier || 2.5, stakes: stakes(),
     playing: fakePlayers, playerCount: entries.size,
     drawnNumbers: phase === 'DRAWING' || phase === 'RESULTS' ? drawnNumbers.slice(0, drawIndex) : [],
@@ -186,10 +201,125 @@ function startSelectionPhase() {
   broadcast('instant_state', publicState());
 }
 
+
+/**
+ * Fixed-size shared draw (usually 20), shaped by difficulty.
+ *
+ * Strategy:
+ *  1. List every real player's cards.
+ *  2. Pick a subset as "intended winners" using targetWinRate.
+ *  3. For each, force the numbers of ONE completable pattern (prefer 1 line / corners).
+ *  4. Fill the rest of the 20 slots with pure random numbers.
+ *
+ * Hundreds of players: we cannot make everyone win with only 20 numbers.
+ * We sample winners fairly (shuffle), so over many rounds each player gets turns.
+ * Cap forced winners so forced numbers still fit in `count` slots.
+ */
+async function buildDrawForRound(count) {
+  const n = Math.max(5, Math.min(40, Number(count) || 20));
+  const diff = String(runtimeDifficulty || 'medium');
+  const preset = DIFFICULTY_PRESETS[diff] || DIFFICULTY_PRESETS.medium;
+  const targetRate = Math.max(0, Math.min(1, Number(preset.targetWinRate) || 0));
+
+  // Load all real cards in this round
+  const cardEntries = []; // { username, cardNumber, grid }
+  for (const [username, ent] of entries.entries()) {
+    for (const cardNumber of ent.cards || []) {
+      try {
+        const grid = await getCardGrid(cardNumber);
+        if (grid) cardEntries.push({ username, cardNumber, grid });
+      } catch (_) {}
+    }
+  }
+
+  // Pure random if no real cards or super-low rate roll with empty set
+  const forced = new Set();
+  if (cardEntries.length && targetRate > 0) {
+    // Shuffle cards for fairness across rounds
+    for (let i = cardEntries.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = cardEntries[i]; cardEntries[i] = cardEntries[j]; cardEntries[j] = t;
+    }
+    // How many cards to try to make win this round
+    let want = Math.max(0, Math.round(cardEntries.length * targetRate));
+    // Always try at least 1 on easy/medium when someone is playing
+    if (want < 1 && (diff === 'easy' || diff === 'medium') && cardEntries.length) want = 1;
+    // Cap: each pattern needs up to 5 unique numbers; keep room for randomness
+    const maxForcedCards = Math.max(1, Math.floor((n * 0.75) / 3)); // rough cap
+    want = Math.min(want, maxForcedCards, cardEntries.length);
+
+    const { ROWS, COLS, DIAGONALS, CORNERS } = require('./patterns');
+    const patterns = [];
+    // Prefer cheaper patterns first so more winners fit in 20 numbers
+    ROWS.forEach((cells, idx) => patterns.push({ id: 'row' + idx, cells }));
+    COLS.forEach((cells, idx) => patterns.push({ id: 'col' + idx, cells }));
+    DIAGONALS.forEach((cells, idx) => patterns.push({ id: 'diag' + idx, cells }));
+    patterns.push({ id: 'corners', cells: CORNERS });
+
+    let made = 0;
+    for (let ci = 0; ci < cardEntries.length && made < want; ci++) {
+      const { grid } = cardEntries[ci];
+      // Shuffle patterns so different lines win, not always top row
+      const pats = patterns.slice();
+      for (let i = pats.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const t = pats[i]; pats[i] = pats[j]; pats[j] = t;
+      }
+      let chosen = null;
+      let needed = [];
+      for (const p of pats) {
+        const nums = [];
+        let ok = true;
+        for (const [r, c] of p.cells) {
+          if (r === 2 && c === 2) continue; // FREE center
+          const v = Number(grid[r][c]);
+          if (!v || v < 1 || v > 75) { ok = false; break; }
+          nums.push(v);
+        }
+        if (!ok) continue;
+        // unique nums for this pattern
+        const uniq = [...new Set(nums)];
+        // Would adding these exceed n?
+        const next = new Set(forced);
+        uniq.forEach((x) => next.add(x));
+        if (next.size <= n) {
+          chosen = p;
+          needed = uniq;
+          break;
+        }
+      }
+      if (chosen) {
+        needed.forEach((x) => forced.add(x));
+        made += 1;
+      }
+    }
+  }
+
+  // Fill remaining slots randomly
+  const picked = [...forced];
+  const seen = new Set(picked);
+  const bag = [];
+  for (let num = 1; num <= 75; num++) if (!seen.has(num)) bag.push(num);
+  for (let i = bag.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = bag[i]; bag[i] = bag[j]; bag[j] = t;
+  }
+  for (const num of bag) {
+    if (picked.length >= n) break;
+    picked.push(num);
+  }
+  // Shuffle final order so forced numbers are not all at the start
+  for (let i = picked.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = picked[i]; picked[i] = picked[j]; picked[j] = t;
+  }
+  return picked.slice(0, n);
+}
+
 async function beginDrawPhase() {
   phase = 'DRAWING';
   drawIndex = 0;
-  drawnNumbers = drawNumbers(numbersDrawnCount(), 75);
+  drawnNumbers = await buildDrawForRound(numbersDrawnCount());
   try {
     const ins = await pool.query(
       `INSERT INTO instant_rounds (stake, status, drawn_numbers, drawn_at) VALUES ($1,'DRAWING',$2,NOW()) RETURNING id`,
@@ -449,13 +579,36 @@ function adminSetNumbersDrawn(n) {
   return { numbersDrawn: numbersDrawnCount() };
 }
 
+function adminSetDifficulty(level) {
+  const key = String(level || '').toLowerCase().replace(/\s+/g, '_');
+  const preset = DIFFICULTY_PRESETS[key];
+  if (!preset) {
+    throw new Error('Invalid difficulty. Use easy, medium, hard, or super_hard.');
+  }
+  runtimeDifficulty = key;
+  // Numbers drawn stays independent (default 20) — difficulty only shapes WHO can win
+  broadcast('instant_state', publicState());
+  return {
+    difficulty: runtimeDifficulty,
+    numbersDrawn: numbersDrawnCount(),
+    targetWinRate: preset.targetWinRate,
+    label: preset.label,
+    hint: preset.hint,
+  };
+}
+
 function adminGetControlState() {
+  const preset = DIFFICULTY_PRESETS[runtimeDifficulty] || DIFFICULTY_PRESETS.medium;
   return {
     enabled: enabled(),
     phase,
     selectionSeconds: selectionSeconds(),
     maxCardsPerPlayer: maxCardsPerPlayer(),
     numbersDrawn: numbersDrawnCount(),
+    difficulty: runtimeDifficulty || 'medium',
+    difficultyLabel: preset.label,
+    difficultyHint: preset.hint,
+    difficultyPresets: DIFFICULTY_PRESETS,
     realPlayers: realPlayerCount(),
     hasActiveRealPlayers: hasActiveRealPlayers(),
     playingDisplay: fakePlayers,
@@ -570,7 +723,7 @@ module.exports = {
   joinRound: joinSharedRound, joinSharedRound, settleRound: async () => null,
   historyForUser, getLeaderboard, getLiveSession, stopScheduler, evaluateCard, drawNumbers,
   getFakePlayers: () => fakePlayers, publicState,
-  adminSetEnabled, adminSetSelectionSeconds, adminSetMaxCards, adminSetNumbersDrawn,
+  adminSetEnabled, adminSetSelectionSeconds, adminSetMaxCards, adminSetNumbersDrawn, adminSetDifficulty,
   adminGetControlState, adminSearchHistory, adminRoundHistory, adminStats,
   realPlayerCount, hasActiveRealPlayers,
 };

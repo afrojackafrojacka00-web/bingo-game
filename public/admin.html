@@ -837,19 +837,33 @@ table.data tr:hover td { background: var(--card-hover); }
             </label>
           </div>
         </div>
-        <div class="toolbar" style="flex-wrap:wrap;gap:10px;">
+        <div class="toolbar" style="flex-wrap:wrap;gap:10px;align-items:flex-end;">
+          <label class="muted" style="font-size:12px;display:block;">Difficulty (fixed 20 numbers — controls win help)
+            <select id="instantDifficulty" style="display:block;margin-top:4px;min-width:220px;">
+              <option value="easy">Easy — try ~55% of real cards win</option>
+              <option value="medium">Medium — try ~28% of real cards win</option>
+              <option value="hard">Hard — try ~12% of real cards win</option>
+              <option value="super_hard">Super hard — try ~4% (almost pure random)</option>
+            </select>
+          </label>
           <label class="muted" style="font-size:12px;">Selection countdown (sec)
             <input type="number" id="instantSelSec" min="5" max="120" step="1" style="width:90px;margin-left:6px;" value="25">
           </label>
           <label class="muted" style="font-size:12px;">Max cards / player
             <input type="number" id="instantMaxCards" min="1" max="8" step="1" style="width:70px;margin-left:6px;" value="4">
           </label>
-          <label class="muted" style="font-size:12px;">Numbers drawn
+          <label class="muted" style="font-size:12px;">Numbers drawn (override)
             <input type="number" id="instantNumsDrawn" min="5" max="40" step="1" style="width:70px;margin-left:6px;" value="20">
           </label>
           <button class="btn btn-primary btn-sm" onclick="saveInstantSettings()">Save settings</button>
           <button class="btn btn-ghost btn-sm" onclick="loadInstantControl()">Refresh</button>
         </div>
+        <p class="muted" style="font-size:12px;margin:8px 0 0;">
+          Numbers called stay at the value below (default <b>20</b>). Difficulty does <b>not</b> change that count.
+          It looks at real players’ cards and shapes the shared 20-number draw so a target share of those cards can complete a pattern.
+          With many players, not everyone can win in one round (only 20 numbers) — winners are rotated fairly over time.
+          Classic Bingo is not affected.
+        </p>
         <div id="instantControlMsg" class="muted" style="margin-top:10px;font-size:12px;"></div>
         <div style="margin-top:18px;">
           <h3 style="margin:0 0 8px;font-size:14px;">Today / all-time</h3>
@@ -2173,7 +2187,8 @@ async function loadInstantControl() {
     document.getElementById('instStatSeconds').textContent = d.phase === 'SELECTING' ? (d.secondsLeft + 's') : '—';
     if (document.getElementById('instantSelSec')) document.getElementById('instantSelSec').value = d.selectionSeconds || 25;
     if (document.getElementById('instantMaxCards')) document.getElementById('instantMaxCards').value = d.maxCardsPerPlayer || 4;
-    if (document.getElementById('instantNumsDrawn')) document.getElementById('instantNumsDrawn').value = d.numbersDrawn || 20;
+    if (document.getElementById('instantNumsDrawn')) document.getElementById('instantNumsDrawn').value = d.numbersDrawn || 24;
+    if (document.getElementById('instantDifficulty') && d.difficulty) document.getElementById('instantDifficulty').value = d.difficulty;
     const st = d.stats || {};
     const today = st.today || {};
     const all = st.allTime || {};
@@ -2227,15 +2242,16 @@ async function toggleInstantEnabled(el) {
 
 async function saveInstantSettings() {
   if (!requireSecret()) return;
+  const difficulty = document.getElementById('instantDifficulty').value;
   const selectionSeconds = Number(document.getElementById('instantSelSec').value);
   const maxCardsPerPlayer = Number(document.getElementById('instantMaxCards').value);
   const numbersDrawn = Number(document.getElementById('instantNumsDrawn').value);
-  if (!confirm('Save Instant settings?\nCountdown: ' + selectionSeconds + 's\nMax cards: ' + maxCardsPerPlayer + '\nNumbers: ' + numbersDrawn)) return;
+  if (!confirm('Save Instant settings?\nDifficulty: ' + difficulty + '\nCountdown: ' + selectionSeconds + 's\nMax cards: ' + maxCardsPerPlayer + '\nNumbers: ' + numbersDrawn)) return;
   try {
     const r = await fetch('/api/admin/instant/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...adminSecretHeader() },
-      body: JSON.stringify({ adminSecret: getSecret(), selectionSeconds, maxCardsPerPlayer, numbersDrawn })
+      body: JSON.stringify({ adminSecret: getSecret(), difficulty, selectionSeconds, maxCardsPerPlayer, numbersDrawn })
     });
     const d = await r.json();
     if (!d.success) { alert(d.message || 'Failed'); return; }

@@ -144,6 +144,10 @@ function registerInstantRoutes(app) {
     try {
       const body = req.body || {};
       const out = {};
+      // Difficulty first so it sets numbersDrawn; manual numbersDrawn can still override after
+      if (body.difficulty != null && body.difficulty !== '') {
+        out.difficulty = instant.adminSetDifficulty(body.difficulty);
+      }
       if (body.selectionSeconds != null) {
         out.selection = instant.adminSetSelectionSeconds(body.selectionSeconds);
       }
