@@ -1835,6 +1835,10 @@ function leaveInstantSelection() {
     hide('instantPlayBox');
     setInstantImmersive(false);
     disconnectInstantSocket();
+    // Eco: if not mid-draw and no paid entries, allow server to sleep
+    try {
+      fetch('/api/instant/sleep', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(function () {});
+    } catch (_) {}
     show('homeBox');
 }
 window.leaveInstantSelection = leaveInstantSelection;
@@ -1952,7 +1956,7 @@ function setInstantPlayingDisplay(n) {
 async function loadInstantUI() {
     const msg = document.getElementById('instantMsg');
     try {
-        const res = await fetch('/api/instant/status?_=' + Date.now(), { cache: 'no-store' });
+        const res = await fetch('/api/instant/status?wake=1&_=' + Date.now(), { cache: 'no-store' });
         const data = await res.json();
         if (!data.success) {
             if (msg) msg.textContent = data.message || 'Could not load Instant.';
@@ -1967,8 +1971,12 @@ async function loadInstantUI() {
             return data;
         }
         applyInstantState(data);
-        if (data.phase === 'IDLE' || data.loopRunning === false) {
-            if (msg) msg.textContent = 'Tap Play to start a round (game wakes when you join).';
+        const btn = document.getElementById('instantJoinBtn');
+        if (btn && !instantLocked && !instantJoined) btn.disabled = false;
+        if (data.phase === 'SELECTING') {
+            if (msg) msg.textContent = '';
+        } else if (data.phase === 'IDLE') {
+            if (msg) msg.textContent = 'Starting round…';
         }
         const stakes = data.stakes || [10, 20, 50, 100, 200, 500];
         if (!stakes.includes(Number(instantStake))) instantStake = stakes[0];
@@ -2173,6 +2181,21 @@ async function startInstantPlay() {
         else instantBeep();
     } catch (_) {}
     if (!currentUsername) return alertUser('Log in first.');
+    if (instantPhase !== 'SELECTING') {
+        try {
+            const wr = await fetch('/api/instant/wake', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+            const wd = await wr.json();
+            if (wd && wd.phase === 'SELECTING') {
+                applyInstantState(wd);
+            } else if (wd && (wd.enabled === false || wd.masterEnabled === false)) {
+                return alertUser('Instant Bingo is turned OFF by admin.');
+            } else {
+                return alertUser('Wait for next selection.');
+            }
+        } catch (_) {
+            return alertUser('Wait for next selection.');
+        }
+    }
     if (instantPhase !== 'SELECTING') return alertUser('Wait for next selection.');
     if (!instantSelected.size) return alertUser('Select at least one card.');
     const stake = Number(instantStake || 0);

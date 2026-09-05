@@ -60,6 +60,43 @@ function enabled() {
 function isLoopRunning() {
   return !!runtimeLoopRunning && enabled();
 }
+
+/**
+ * Real user opened Instant Bingo UI — start selection countdown immediately
+ * (only if master is ON). Does nothing during an active DRAWING round.
+ */
+function wakeForPresence() {
+  if (!enabled()) {
+    return { ok: false, reason: 'MASTER_OFF', state: publicState() };
+  }
+  if (phase === 'DRAWING' || phase === 'RESULTS') {
+    return { ok: true, reason: 'BUSY_DRAW', state: publicState() };
+  }
+  if (phase === 'SELECTING' && phaseTimer && runtimeLoopRunning) {
+    return { ok: true, reason: 'ALREADY_RUNNING', state: publicState() };
+  }
+  runtimeLoopRunning = true;
+  adminDisabledAt = null;
+  startSelectionPhase();
+  return { ok: true, reason: 'WOKEN', state: publicState() };
+}
+
+/**
+ * User left Instant UI. Eco: sleep only if not mid-draw and no real entries.
+ */
+function sleepIfEcoIdle(force) {
+  if (!runtimeEcoMode || !enabled()) return publicState();
+  // Never interrupt a live draw / results — even if viewer left
+  if (phase === 'DRAWING' || phase === 'RESULTS') return publicState();
+  if (hasActiveRealPlayers()) return publicState();
+  // Only sleep from SELECTING / IDLE when empty
+  if (!force && phase !== 'SELECTING' && phase !== 'IDLE') return publicState();
+  runtimeLoopRunning = false;
+  stopScheduler();
+  phase = 'IDLE';
+  broadcast('instant_state', publicState());
+  return publicState();
+}
 function stakes() {
   return cfg().stakes || config.stakes || [10, 20, 50, 100, 200, 500];
 }
@@ -457,7 +494,11 @@ async function joinSharedRound({ username, stake, cardNumbers }) {
 }
 
 async function startPlay(opts) { return joinSharedRound(opts); }
-async function getStatus() { if (phase === 'SELECTING') tickFakePlayers(); return publicState(); }
+async function getStatus(opts) {
+  if (opts && opts.wake) wakeForPresence();
+  if (phase === 'SELECTING') tickFakePlayers();
+  return publicState();
+}
 function getLiveSession() {
   if (phase === 'DRAWING' || phase === 'RESULTS') {
     return { sessionId: currentRoundId, drawnNumbers, drawIndex, phase, cards: lastResults, drawIntervalMs: 1000 };
@@ -796,7 +837,7 @@ async function adminStats() {
 }
 
 module.exports = {
-  enabled, ensureSchema, attachInstantGame, getStatus, listCatalog, startPlay,
+  enabled, ensureSchema, attachInstantGame, getStatus, wakeForPresence, sleepIfEcoIdle, listCatalog, startPlay,
   joinRound: joinSharedRound, joinSharedRound, settleRound: async () => null,
   historyForUser, getLeaderboard, getLiveSession, stopScheduler, evaluateCard, drawNumbers,
   getFakePlayers: () => fakePlayers, publicState,

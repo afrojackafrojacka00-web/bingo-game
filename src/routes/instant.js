@@ -9,10 +9,29 @@ const pool = require('../db/pool');
 function registerInstantRoutes(app) {
   app.get('/api/instant/status', async (req, res) => {
     try {
-      const status = await instant.getStatus();
+      const wake = String(req.query.wake || '') === '1' || String(req.query.wake || '') === 'true';
+      const status = await instant.getStatus({ wake });
       res.json({ success: true, ...status });
     } catch (err) {
       console.error('instant status', err);
+      res.status(500).json({ success: false, message: 'Server error.' });
+    }
+  });
+
+  app.post('/api/instant/wake', async (req, res) => {
+    try {
+      const result = instant.wakeForPresence();
+      res.json({ success: true, ...result.state, wakeReason: result.reason });
+    } catch (err) {
+      res.status(500).json({ success: false, message: 'Server error.' });
+    }
+  });
+
+  app.post('/api/instant/sleep', async (req, res) => {
+    try {
+      const state = instant.sleepIfEcoIdle(true);
+      res.json({ success: true, ...state });
+    } catch (err) {
       res.status(500).json({ success: false, message: 'Server error.' });
     }
   });
