@@ -2538,17 +2538,32 @@ function connectInstantSocket() {
                 if (p.playing) setInstantPlayingDisplay(p.playing);
             });
             instantSocket.on('instant_draw_end', function (payload) {
-                // strike wins on my cards if results include me
+                // Strike only the specific card that won — never paint the pattern onto every card
                 const results = (payload && payload.results) || [];
                 results.forEach(function (r) {
                     if (String(r.username).toLowerCase() !== String(currentUsername || '').toLowerCase()) return;
-                    document.querySelectorAll('#instantLiveCards table').forEach(function (table) {
+                    if (!r.hit && !(Number(r.prize) > 0)) return;
+                    const cardNum = Number(r.cardNumber);
+                    const myIndex = (instantMyCards || []).indexOf(cardNum);
+                    let table = myIndex >= 0 ? document.getElementById('myc' + myIndex) : null;
+                    if (!table) {
+                        document.querySelectorAll('#instantLiveCards .instant-card-wrap').forEach(function (wrap) {
+                            if (table) return;
+                            if ((wrap.textContent || '').indexOf('#' + cardNum) !== -1) {
+                                table = wrap.querySelector('table.instant-bingo-table');
+                            }
+                        });
+                    }
+                    if (!table) return;
+                    if (typeof applyWinStrikeToTable === 'function') {
+                        applyWinStrikeToTable(table, r.winningCells || []);
+                    } else {
                         (r.winningCells || []).forEach(function (cell) {
                             const rr = cell[0], cc = cell[1];
                             const td = table.querySelector('td[data-r="' + rr + '"][data-c="' + cc + '"]');
                             if (td) td.className = 'win-line strike';
                         });
-                    });
+                    }
                 });
                 const status = document.getElementById('instantPlayStatus');
                 if (status) status.textContent = 'Round over — next selection…';
