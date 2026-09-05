@@ -889,7 +889,15 @@ body.instant-immersive .instant-sticky-play{display:none;}
 </div>
 
 <div id="tabGames" class="tab-content hidden">
- <div id="homeBox" class="card"><h2 data-i18n="readyTitle">Ready to Play? 🎲</h2><p class="small" data-i18n="readyBody">Choose a stake, join a room, select your cards and play.</p><button class="btn-play" onclick="goToGameScreen()" data-i18n="playBtn">Play Classic Bingo 🚀</button>
+ <div id="homeBox" class="card"><h2 data-i18n="readyTitle">Ready to Play? 🎲</h2><p class="small" data-i18n="readyBody">Choose a stake, join a room, select your cards and play.</p>
+  <div id="specialHomeBlock" class="hidden" style="margin:0 0 14px;padding:14px;border-radius:14px;border:1px solid rgba(245,158,11,.45);background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(239,68,68,.08));">
+    <div id="specialHomeCd" style="font-size:22px;font-weight:800;letter-spacing:.02em;margin-bottom:6px;">--:--:--</div>
+    <div id="specialHomeText" style="font-size:14px;font-weight:700;margin-bottom:4px;">—</div>
+    <div id="specialHomeStake" class="small" style="margin-bottom:10px;">Stake —</div>
+    <button type="button" class="btn-play" id="specialHomePlayBtn" onclick="openSpecialEvent()" style="margin:0;background:linear-gradient(135deg,#8b5cf6,#6366f1);">Play</button>
+    <p id="specialHomeMsg" class="small" style="margin:8px 0 0;"></p>
+  </div>
+  <button class="btn-play" onclick="goToGameScreen()" data-i18n="playBtn">Play Classic Bingo 🚀</button>
   <button class="btn-play" style="margin-top:10px;background:linear-gradient(135deg,#f59e0b,#ef4444);" onclick="openInstantBingo()">⚡ Instant Bingo</button>
   <p class="small" style="margin-top:8px;">Instant: 20 numbers · up to 4 cards · 1×–4× patterns · same wallet</p>
 
@@ -920,7 +928,34 @@ body.instant-immersive .instant-sticky-play{display:none;}
    <div id="roomsList" class="room-list"></div>
  </div>
 
- <div id="instantBox" class="hidden">
+ 
+  <div id="specialBox" class="card hidden">
+    <div class="page-title" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+      <h2 style="margin:0;font-size:16px;">🏆 Special Event</h2>
+      <button class="back-btn" onclick="leaveSpecialSelection()">←</button>
+    </div>
+    <div class="small" id="specialSelMeta" style="margin:6px 0 8px;"></div>
+    <div id="specialSelTimer" style="font-size:20px;font-weight:800;margin-bottom:8px;">—</div>
+    <input type="search" id="specialCardSearch" placeholder="Search card #" style="width:100%;margin-bottom:8px;padding:8px;border-radius:8px;border:1px solid var(--card-border,#333);background:var(--card);color:var(--text);" oninput="filterSpecialCards()">
+    <div id="specialCardGrid" class="instant-pick-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;max-height:45vh;overflow:auto;"></div>
+    <div class="small" id="specialSelCost" style="margin:8px 0;">Selected 0 · Cost 0</div>
+    <button class="btn-play" id="specialJoinBtn" onclick="confirmSpecialJoin()" style="width:100%;">Confirm cards</button>
+    <p id="specialSelMsg" class="small" style="margin-top:8px;"></p>
+  </div>
+
+  <div id="specialPlayBox" class="card hidden">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+      <button class="back-btn" onclick="leaveSpecialPlay()" style="margin:0;">←</button>
+      <div style="font-weight:800;" id="specialPlayTitle">🏆 Special</div>
+      <div class="small" id="specialPlayProgress">0/75</div>
+    </div>
+    <div id="specialLastNum" class="instant-last-num" style="text-align:center;font-size:28px;font-weight:900;margin:6px 0;">—</div>
+    <div id="specialPlayStatus" class="small" style="text-align:center;margin-bottom:8px;"></div>
+    <div id="specialLiveCards"></div>
+    <button class="btn-play" id="specialClaimBtn" onclick="claimSpecialWin()" style="width:100%;margin-top:10px;">Claim Win</button>
+    <p id="specialPlayMsg" class="small" style="margin-top:8px;"></p>
+  </div>
+<div id="instantBox" class="hidden">
    <div class="page-title" style="margin-bottom:6px;">
      <h2 style="margin:0;font-size:16px;">⚡ Instant</h2>
      <div style="display:flex;align-items:center;gap:6px;">
@@ -1135,6 +1170,6 @@ body.instant-immersive .instant-sticky-play{display:none;}
   <div class="nav-item" onclick="switchTab('tabWallet',this)">💰<br><span data-i18n="navWallet">Wallet</span></div>
   <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
 </div>
-<script src="app.js?v=20260905-instant-ui-fix8"></script>
+<script src="app.js?v=20260905-special-event1"></script>
 </body>
 </html>

@@ -456,6 +456,8 @@ table.data tr:hover td { background: var(--card-hover); }
     <button class="nav-item" data-panel="instantcontrol"><span class="icon">⚡</span> Instant Control</button>
     <button class="nav-item" data-panel="instanthistory"><span class="icon">📋</span> Instant History</button>
     <button class="nav-item" data-panel="instantrounds"><span class="icon">🔁</span> Instant Rounds</button>
+    <div class="nav-section">Special Event</div>
+    <button class="nav-item" data-panel="specialevent"><span class="icon">🏆</span> Special Room</button>
   </nav>
 </aside>
 <div class="main">
@@ -974,6 +976,96 @@ table.data tr:hover td { background: var(--card-hover); }
       </div>
     </section>
 
+
+    <section class="panel" id="panel-specialevent">
+      <div class="card">
+        <div class="card-header">
+          <h2><span class="emoji">🏆</span> Special Event Room</h2>
+          <span class="muted" style="font-size:12px;">One admin-controlled traditional room · fixed prize</span>
+        </div>
+        <div class="inst-kpi" style="margin-bottom:14px;">
+          <div class="stat"><div class="label">Phase</div><div class="value" id="spPhase">—</div></div>
+          <div class="stat"><div class="label">Visible</div><div class="value" id="spVisible">—</div></div>
+          <div class="stat"><div class="label">Players</div><div class="value" id="spPlayers">0</div></div>
+          <div class="stat"><div class="label">Countdown</div><div class="value" id="spCd">—</div></div>
+        </div>
+        <div class="inst-grid">
+          <div class="inst-card">
+            <h3>Home block</h3>
+            <p class="hint">Show or hide the entire special block on the home screen (above Classic & Instant).</p>
+            <div class="switch-row">
+              <div class="switch-label">Display special block</div>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span class="switch-state off" id="spVisState">OFF</span>
+                <label class="switch"><input type="checkbox" id="spVisibleToggle"><span class="switch-slider"></span></label>
+              </div>
+            </div>
+          </div>
+          <div class="inst-card">
+            <h3>Prize & stake</h3>
+            <p class="hint">Fixed prize paid to winner(s). Stake is cost per card. House keeps volume − prize.</p>
+            <label class="muted" style="font-size:12px;">Prize (Birr) <input type="number" id="spPrize" min="0" step="1" style="width:110px;margin-left:6px;"></label>
+            <label class="muted" style="font-size:12px;margin-left:10px;">Stake / card <input type="number" id="spStake" min="1" step="1" style="width:90px;margin-left:6px;"></label>
+          </div>
+          <div class="inst-card">
+            <h3>Promo text</h3>
+            <p class="hint">Shown as: <b>[Prize] [promo] [game type]</b> e.g. “5000 big win today Full House”</p>
+            <label class="muted" style="font-size:12px;display:block;margin-bottom:6px;">Promo
+              <input type="text" id="spPromo" style="width:100%;margin-top:4px;" placeholder="big win today">
+            </label>
+            <label class="muted" style="font-size:12px;display:block;">Game type label
+              <input type="text" id="spGameLabel" style="width:100%;margin-top:4px;" placeholder="Full House">
+            </label>
+          </div>
+          <div class="inst-card">
+            <h3>Game rules (separate from classic)</h3>
+            <label class="muted" style="font-size:12px;display:block;margin-bottom:6px;">Winning pattern
+              <select id="spPattern" style="width:100%;margin-top:4px;">
+                <option value="any_one_line">Any One Line</option>
+                <option value="any_two_lines">Any Two Lines</option>
+                <option value="any_square">Any Square</option>
+                <option value="four_corners">Four Corners</option>
+                <option value="diagonal">Diagonal</option>
+                <option value="full_house">Full House</option>
+              </select>
+            </label>
+            <label class="muted" style="font-size:12px;">Draw gap (sec)
+              <input type="number" id="spDrawGap" min="1" max="30" style="width:70px;margin-left:6px;">
+            </label>
+            <label class="muted" style="font-size:12px;margin-left:10px;">Selection (sec)
+              <input type="number" id="spSelSec" min="15" max="300" style="width:70px;margin-left:6px;">
+            </label>
+          </div>
+          <div class="inst-card">
+            <h3>Schedule countdown</h3>
+            <p class="hint">Users wait until this hits 0, then Play opens. Latecomers after draw starts are blocked.</p>
+            <label class="muted" style="font-size:12px;">Hours
+              <input type="number" id="spHours" min="0" max="168" value="0" style="width:70px;margin-left:6px;">
+            </label>
+            <label class="muted" style="font-size:12px;margin-left:10px;">Minutes
+              <input type="number" id="spMins" min="0" max="59" value="30" style="width:70px;margin-left:6px;">
+            </label>
+            <div class="row-actions">
+              <button class="btn btn-primary btn-sm" onclick="saveSpecialEvent(true)">Save &amp; start countdown</button>
+              <button class="btn btn-ghost btn-sm" onclick="saveSpecialEvent(false)">Save settings only</button>
+            </div>
+          </div>
+          <div class="inst-card">
+            <h3>Ended message</h3>
+            <textarea id="spEndedMsg" rows="2" style="width:100%;font-size:13px;"></textarea>
+            <div class="row-actions">
+              <button class="btn btn-ghost btn-sm" onclick="specialResetIdle()">Reset to idle</button>
+              <button class="btn btn-ghost btn-sm" onclick="loadSpecialAdmin()">Refresh</button>
+            </div>
+          </div>
+        </div>
+        <div id="spAdminMsg" class="muted" style="margin-top:10px;font-size:12px;"></div>
+        <div class="inst-card" style="margin-top:14px;">
+          <h3>Recent sessions</h3>
+          <div id="spHistory" class="empty">—</div>
+        </div>
+      </div>
+    </section>
 <section class="panel" id="panel-houseprofit">
       <div class="card">
         <div class="card-header"><h2><span class="emoji">💰</span> House profit</h2></div>
@@ -1081,7 +1173,8 @@ const TITLES = {
   houseprofit: 'House Profit',
   instantcontrol: '⚡ Instant Control',
   instanthistory: '⚡ Instant History',
-  instantrounds: '⚡ Instant Rounds'
+  instantrounds: '⚡ Instant Rounds',
+  specialevent: '🏆 Special Room'
 };
 let usersPage = 1;
 let usersLimit = 10;
@@ -1229,6 +1322,7 @@ function showPanel(name) {
     if (name === 'instantcontrol') loadInstantControl();
     if (name === 'instanthistory') loadInstantHistory(true);
     if (name === 'instantrounds') loadInstantRounds(true);
+    if (name === 'specialevent') loadSpecialAdmin();
   }
 }
 document.querySelectorAll('.nav-item').forEach(btn => {
@@ -2463,6 +2557,93 @@ async function resetInstantWinRulesDefaults() {
   ];
   _instantWinRulesDraft = defaults;
   await saveInstantWinRules();
+}
+
+
+
+async function loadSpecialAdmin() {
+  if (!getSecret()) return;
+  try {
+    const r = await fetch('/api/admin/special', { headers: adminSecretHeader() });
+    const d = await r.json();
+    if (!d.success) { document.getElementById('spAdminMsg').textContent = d.message || 'Failed'; return; }
+    document.getElementById('spPhase').textContent = d.phase || '—';
+    document.getElementById('spVisible').textContent = d.visible ? 'YES' : 'NO';
+    document.getElementById('spPlayers').textContent = String(d.playerCount || 0);
+    document.getElementById('spCd').textContent = d.countdownLeft != null ? (d.countdownLeft + 's') : '—';
+    const tog = document.getElementById('spVisibleToggle');
+    if (tog) { tog.checked = !!d.visible; syncSwitchLabel(tog, 'spVisState'); }
+    document.getElementById('spPrize').value = d.prize != null ? d.prize : (d.settings && d.settings.prize) || 5000;
+    document.getElementById('spStake').value = d.stake != null ? d.stake : (d.settings && d.settings.stake) || 50;
+    document.getElementById('spPromo').value = (d.settings && d.settings.promoText) || d.promoText || '';
+    document.getElementById('spGameLabel').value = (d.settings && d.settings.gameTypeLabel) || d.gameTypeLabel || '';
+    document.getElementById('spPattern').value = d.winningPattern || 'any_one_line';
+    document.getElementById('spDrawGap').value = d.drawIntervalSeconds || 4;
+    document.getElementById('spSelSec').value = d.selectionSeconds || 60;
+    document.getElementById('spEndedMsg').value = d.endedMessage || '';
+    document.getElementById('spAdminMsg').textContent = 'Phase: ' + (d.phase || '—') + (d.canJoin ? ' · joins open' : '');
+    // history
+    const hr = await fetch('/api/admin/special/history', { headers: adminSecretHeader() });
+    const hd = await hr.json();
+    const box = document.getElementById('spHistory');
+    if (hd.success && hd.rows && hd.rows.length) {
+      box.innerHTML = '<div class="inst-table-wrap"><table class="inst-table"><thead><tr><th>ID</th><th>Status</th><th>Stake</th><th>Prize</th><th>Players</th><th>Volume</th><th>House</th><th>When</th></tr></thead><tbody>' +
+        hd.rows.map(function(row) {
+          return '<tr><td>#' + row.id + '</td><td>' + esc(row.status) + '</td><td>' + fmtMoney(row.stake) + '</td><td>' + fmtMoney(row.prize) +
+            '</td><td>' + (row.player_count||0) + '</td><td>' + fmtMoney(row.total_paid) + '</td><td>' + fmtMoney(row.house_profit) +
+            '</td><td>' + fmtDate(row.completed_at || row.started_at || row.created_at) + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    } else box.innerHTML = '<div class="empty">No sessions yet</div>';
+  } catch (e) {
+    document.getElementById('spAdminMsg').textContent = 'Network error';
+  }
+}
+
+async function saveSpecialEvent(withCountdown) {
+  if (!requireSecret()) return;
+  const body = {
+    adminSecret: getSecret(),
+    visible: !!document.getElementById('spVisibleToggle').checked,
+    stake: Number(document.getElementById('spStake').value),
+    prize: Number(document.getElementById('spPrize').value),
+    promoText: document.getElementById('spPromo').value,
+    gameTypeLabel: document.getElementById('spGameLabel').value,
+    winningPattern: document.getElementById('spPattern').value,
+    drawIntervalSeconds: Number(document.getElementById('spDrawGap').value),
+    selectionSeconds: Number(document.getElementById('spSelSec').value),
+    endedMessage: document.getElementById('spEndedMsg').value
+  };
+  if (withCountdown) {
+    body.countdownHours = Number(document.getElementById('spHours').value) || 0;
+    body.countdownMinutes = Number(document.getElementById('spMins').value) || 0;
+  }
+  if (!confirm(withCountdown ? 'Save and start countdown?' : 'Save special room settings?')) return;
+  try {
+    const r = await fetch('/api/admin/special', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminSecretHeader() },
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (!d.success) { alert(d.message || 'Failed'); return; }
+    document.getElementById('spAdminMsg').textContent = 'Saved.';
+    loadSpecialAdmin();
+  } catch (e) { alert('Network error'); }
+}
+
+async function specialResetIdle() {
+  if (!requireSecret()) return;
+  if (!confirm('Reset special room to idle?')) return;
+  try {
+    const r = await fetch('/api/admin/special', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminSecretHeader() },
+      body: JSON.stringify({ adminSecret: getSecret(), resetEnded: true, visible: !!document.getElementById('spVisibleToggle').checked })
+    });
+    const d = await r.json();
+    if (!d.success) alert(d.message || 'Failed');
+    loadSpecialAdmin();
+  } catch (e) { alert('Network error'); }
 }
 
 

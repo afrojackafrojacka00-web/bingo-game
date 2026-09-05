@@ -2436,6 +2436,16 @@ try {
   console.error('Instant Bingo failed to load (classic bingo still runs):', err.message);
 }
 
+// ---- Special Event Bingo (one admin-controlled traditional-style room) ----
+try {
+  const { registerSpecialRoutes } = require('./routes/special');
+  const specialEngine = require('./game/special/engine');
+  registerSpecialRoutes(app);
+  specialEngine.attachSpecialGame(io);
+} catch (err) {
+  console.error('Special Event Bingo failed to load:', err.message);
+}
+
 server.listen(PORT, () => console.log(`Bingo server listening on ${PORT}`));
 
 module.exports = { app, server, io, pool };

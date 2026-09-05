@@ -812,6 +812,7 @@ function showAuthBox() {
 }
 
 async function showHomeScreen(username) {
+    try { startSpecialHomePoll(); } catch (_) {}
     currentUsername = username;
     safeStorage.set('bingoUser', username);
     touchWebSession();
@@ -2873,3 +2874,285 @@ function escapeHtmlInstant(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 }
 
+
+
+/* ===================== SPECIAL EVENT BINGO ===================== */
+let specialSocket = null;
+let specialState = null;
+let specialSelected = new Set();
+let specialCatalog = [];
+let specialMyCards = [];
+let specialCalled = [];
+let specialClaimCard = null;
+let specialHomeTimer = null;
+
+function formatSpecialCd(sec) {
+  sec = Math.max(0, Number(sec) || 0);
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+}
+
+async function refreshSpecialHome() {
+  const block = document.getElementById('specialHomeBlock');
+  if (!block) return;
+  try {
+    const r = await fetch('/api/special/status?_=' + Date.now(), { cache: 'no-store' });
+    const d = await r.json();
+    if (!d.success || !d.visible) {
+      block.classList.add('hidden');
+      return;
+    }
+    block.classList.remove('hidden');
+    specialState = d;
+    const cdEl = document.getElementById('specialHomeCd');
+    const textEl = document.getElementById('specialHomeText');
+    const stakeEl = document.getElementById('specialHomeStake');
+    const btn = document.getElementById('specialHomePlayBtn');
+    const msg = document.getElementById('specialHomeMsg');
+    if (textEl) textEl.textContent = (d.prize != null ? d.prize : '') + ' ' + (d.promoText || '') + ' ' + (d.gameTypeLabel || '');
+    if (stakeEl) stakeEl.textContent = 'Stake ' + (d.stake != null ? d.stake : '—') + ' Birr · ' + (d.patternName || '');
+    if (d.phase === 'COUNTDOWN') {
+      if (cdEl) cdEl.textContent = formatSpecialCd(d.countdownLeft);
+      if (btn) { btn.disabled = true; btn.textContent = 'Play'; }
+      if (msg) msg.textContent = 'Game has not started yet';
+    } else if (d.phase === 'OPEN' || d.phase === 'SELECTING') {
+      if (cdEl) cdEl.textContent = d.selectionLeft ? ('Select · ' + d.selectionLeft + 's') : 'OPEN';
+      if (btn) { btn.disabled = false; btn.textContent = 'Play'; }
+      if (msg) msg.textContent = 'Tap Play to select cards';
+    } else if (d.phase === 'PLAYING') {
+      if (cdEl) cdEl.textContent = 'LIVE';
+      if (btn) { btn.disabled = true; btn.textContent = 'Started'; }
+      if (msg) msg.textContent = d.lateMessage || 'Game has already started. Come back next time!';
+    } else if (d.phase === 'ENDED') {
+      if (cdEl) cdEl.textContent = 'ENDED';
+      if (btn) { btn.disabled = true; btn.textContent = 'Ended'; }
+      if (msg) msg.textContent = d.endedMessage || d.lateMessage || 'Game ended for today.';
+    } else {
+      if (cdEl) cdEl.textContent = '—';
+      if (btn) { btn.disabled = true; btn.textContent = 'Play'; }
+      if (msg) msg.textContent = 'Waiting for schedule';
+    }
+  } catch (_) {}
+}
+
+function startSpecialHomePoll() {
+  if (specialHomeTimer) clearInterval(specialHomeTimer);
+  refreshSpecialHome();
+  specialHomeTimer = setInterval(refreshSpecialHome, 1000);
+}
+
+function connectSpecialSocket() {
+  if (typeof io === 'undefined') return;
+  try {
+    if (!specialSocket) {
+      specialSocket = io('/special', { transports: ['websocket', 'polling'] });
+      specialSocket.on('special_state', function (st) {
+        specialState = st;
+        applySpecialState(st);
+      });
+      specialSocket.on('special_game_started', function (st) {
+        specialState = st;
+        openSpecialPlayScreen(st);
+      });
+      specialSocket.on('special_number', function (p) {
+        specialCalled = p.drawn || specialCalled.concat([p.number]);
+        const last = document.getElementById('specialLastNum');
+        if (last) last.textContent = String(p.number);
+        const prog = document.getElementById('specialPlayProgress');
+        if (prog) prog.textContent = (p.index || 0) + '/' + (p.total || 75);
+        document.querySelectorAll('#specialLiveCards td').forEach(function (td) {
+          const t = td.textContent.trim();
+          if (t === '★' || specialCalled.map(Number).indexOf(Number(t)) !== -1) td.classList.add('marked');
+        });
+      });
+      specialSocket.on('special_ended', function (st) {
+        specialState = st;
+        const msg = document.getElementById('specialPlayMsg');
+        if (msg) {
+          if (st.winner && st.winner.winners && st.winner.winners.length) {
+            msg.textContent = 'Winner(s): ' + st.winner.winners.map(function (w) { return w.username; }).join(', ') +
+              ' · Prize ' + (st.winner.prizeEach || st.prize);
+          } else {
+            msg.textContent = st.endedMessage || 'Game ended.';
+          }
+        }
+        setTimeout(function () {
+          leaveSpecialPlay();
+          leaveSpecialSelection();
+          showHome();
+          alert(st.endedMessage || 'Game ended for today. Enjoy other bingo games until next time!');
+          refreshSpecialHome();
+        }, 2500);
+      });
+    } else if (!specialSocket.connected) specialSocket.connect();
+    else specialSocket.emit('special_sync');
+  } catch (e) { console.error(e); }
+}
+
+function applySpecialState(st) {
+  if (!st) return;
+  const meta = document.getElementById('specialSelMeta');
+  if (meta) meta.textContent = 'Prize ' + st.prize + ' · Stake ' + st.stake + ' Birr · ' + (st.patternName || st.gameTypeLabel || '');
+  const tim = document.getElementById('specialSelTimer');
+  if (tim && (st.phase === 'SELECTING' || st.phase === 'OPEN')) {
+    tim.textContent = st.selectionLeft ? (st.selectionLeft + 's') : 'Open';
+  }
+  if (st.phase === 'PLAYING' && !document.getElementById('specialPlayBox')?.classList.contains('hidden')) {
+    // keep playing
+  } else if (st.phase === 'PLAYING' && specialMyCards.length) {
+    openSpecialPlayScreen(st);
+  }
+}
+
+async function openSpecialEvent() {
+  connectSpecialSocket();
+  const r = await fetch('/api/special/status?_=' + Date.now(), { cache: 'no-store' });
+  const d = await r.json();
+  specialState = d;
+  if (!d.success) return alertUser('Could not load special event.');
+  if (d.phase === 'COUNTDOWN') return alertUser('Game has not started yet');
+  if (d.phase === 'PLAYING' || d.phase === 'ENDED') return alertUser(d.lateMessage || 'Game already started. Come back next time!');
+  if (d.phase !== 'OPEN' && d.phase !== 'SELECTING') return alertUser('Special game is not open.');
+  hide('homeBox');
+  show('specialBox');
+  specialSelected.clear();
+  specialMyCards = [];
+  await loadSpecialCards();
+  applySpecialState(d);
+}
+
+async function loadSpecialCards() {
+  const grid = document.getElementById('specialCardGrid');
+  if (grid) grid.innerHTML = 'Loading…';
+  try {
+    const r = await fetch('/api/special/cards');
+    const d = await r.json();
+    if (!d.success) {
+      if (grid) grid.innerHTML = '';
+      return alertUser(d.message || 'Cannot load cards');
+    }
+    specialCatalog = d.cards || [];
+    renderSpecialCardGrid('');
+  } catch (_) {
+    if (grid) grid.innerHTML = '';
+  }
+}
+
+function renderSpecialCardGrid(filter) {
+  const grid = document.getElementById('specialCardGrid');
+  if (!grid) return;
+  const q = String(filter || '').trim();
+  const list = q ? specialCatalog.filter(function (n) { return String(n).indexOf(q) !== -1; }) : specialCatalog;
+  const show = list.slice(0, 500);
+  grid.innerHTML = show.map(function (n) {
+    const sel = specialSelected.has(n) ? ' selected' : '';
+    return '<div class="card-item' + sel + '" data-card="' + n + '" onclick="toggleSpecialCard(' + n + ')">' + n + '</div>';
+  }).join('');
+  if (list.length > 500) grid.innerHTML += '<div class="small" style="grid-column:1/-1;">Showing 500 of ' + list.length + ' — search to find more</div>';
+  updateSpecialSelCost();
+}
+
+function filterSpecialCards() {
+  const el = document.getElementById('specialCardSearch');
+  renderSpecialCardGrid(el ? el.value : '');
+}
+
+function toggleSpecialCard(n) {
+  n = Number(n);
+  if (specialSelected.has(n)) specialSelected.delete(n);
+  else specialSelected.add(n);
+  document.querySelectorAll('#specialCardGrid .card-item').forEach(function (el) {
+    el.classList.toggle('selected', specialSelected.has(Number(el.getAttribute('data-card'))));
+  });
+  updateSpecialSelCost();
+}
+
+function updateSpecialSelCost() {
+  const stake = specialState && specialState.stake != null ? Number(specialState.stake) : 0;
+  const c = specialSelected.size;
+  const el = document.getElementById('specialSelCost');
+  if (el) el.textContent = 'Selected ' + c + ' · Cost ' + (c * stake);
+}
+
+async function confirmSpecialJoin() {
+  if (!currentUsername) return alertUser('Login required');
+  if (!specialSelected.size) return alertUser('Select at least one card');
+  const btn = document.getElementById('specialJoinBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch('/api/special/join', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: currentUsername, cardNumbers: [...specialSelected] })
+    });
+    const d = await r.json();
+    if (!d.success) {
+      if (btn) btn.disabled = false;
+      return alertUser(d.message || 'Join failed');
+    }
+    specialMyCards = d.cards || [...specialSelected];
+    specialClaimCard = specialMyCards[0] || null;
+    const msg = document.getElementById('specialSelMsg');
+    if (msg) msg.textContent = 'Cards locked. Waiting for game start…';
+    if (typeof loadUserData === 'function') loadUserData(currentUsername);
+    if (d.state && d.state.phase === 'PLAYING') openSpecialPlayScreen(d.state);
+  } catch (_) {
+    if (btn) btn.disabled = false;
+    alertUser('Network error');
+  }
+}
+
+async function openSpecialPlayScreen(st) {
+  hide('specialBox');
+  show('specialPlayBox');
+  specialCalled = (st && st.drawn) || [];
+  const title = document.getElementById('specialPlayTitle');
+  if (title) title.textContent = '🏆 ' + ((st && st.prize) || '') + ' · ' + ((st && st.gameTypeLabel) || 'Special');
+  const live = document.getElementById('specialLiveCards');
+  if (!live) return;
+  live.innerHTML = 'Loading cards…';
+  const blocks = [];
+  for (let i = 0; i < specialMyCards.length; i++) {
+    const n = specialMyCards[i];
+    try {
+      const r = await fetch('/api/special/card/' + n);
+      const d = await r.json();
+      if (d.success && d.grid) {
+        blocks.push('<div class="instant-card-wrap" data-card="' + n + '" onclick="specialClaimCard=' + n + '"><div class="small"><b>#' + n + '</b> (tap to claim)</div>' +
+          (typeof renderInstantGridHtml === 'function' ? renderInstantGridHtml(d.grid, specialCalled, [], 'spc' + i, n) : '') + '</div>');
+      }
+    } catch (_) {}
+  }
+  live.innerHTML = blocks.join('') || '<p class="small">No cards</p>';
+}
+
+async function claimSpecialWin() {
+  if (!currentUsername || !specialClaimCard) return alertUser('Tap your winning card first');
+  try {
+    const r = await fetch('/api/special/claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: currentUsername, cardNumber: specialClaimCard })
+    });
+    const d = await r.json();
+    if (!d.success) return alertUser(d.message || 'Not a valid win');
+    const msg = document.getElementById('specialPlayMsg');
+    if (msg) msg.textContent = 'Win claimed!';
+  } catch (_) { alertUser('Network error'); }
+}
+
+function leaveSpecialSelection() {
+  hide('specialBox');
+  show('homeBox');
+  refreshSpecialHome();
+}
+
+function leaveSpecialPlay() {
+  hide('specialPlayBox');
+  show('homeBox');
+  refreshSpecialHome();
+}
+
+// Hook home screen
