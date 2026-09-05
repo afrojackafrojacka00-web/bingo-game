@@ -118,8 +118,79 @@ function registerInstantRoutes(app) {
   app.get('/api/admin/instant/status', async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
-      const status = await instant.getStatus();
-      res.json({ success: true, ...status });
+      const control = instant.adminGetControlState();
+      const stats = await instant.adminStats();
+      res.json({ success: true, ...control, stats });
+    } catch (err) {
+      console.error('admin instant status', err);
+      res.status(500).json({ success: false, message: 'Server error.' });
+    }
+  });
+
+  app.post('/api/admin/instant/enabled', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const on = !!(req.body && (req.body.enabled === true || req.body.enabled === 'true' || req.body.enabled === 1));
+      const result = instant.adminSetEnabled(on);
+      res.json({ success: true, ...result });
+    } catch (err) {
+      const status = err.code === 'BUSY' ? 409 : 400;
+      res.status(status).json({ success: false, message: err.message || 'Failed.' });
+    }
+  });
+
+  app.post('/api/admin/instant/settings', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const body = req.body || {};
+      const out = {};
+      if (body.selectionSeconds != null) {
+        out.selection = instant.adminSetSelectionSeconds(body.selectionSeconds);
+      }
+      if (body.maxCardsPerPlayer != null) {
+        out.maxCards = instant.adminSetMaxCards(body.maxCardsPerPlayer);
+      }
+      if (body.numbersDrawn != null) {
+        out.numbers = instant.adminSetNumbersDrawn(body.numbersDrawn);
+      }
+      res.json({ success: true, ...out, control: instant.adminGetControlState() });
+    } catch (err) {
+      res.status(400).json({ success: false, message: err.message || 'Failed.' });
+    }
+  });
+
+  app.get('/api/admin/instant/history', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const q = String(req.query.q || '');
+      const limit = Number(req.query.limit) || 20;
+      const offset = Number(req.query.offset) || 0;
+      const data = await instant.adminSearchHistory({ q, limit, offset });
+      res.json({ success: true, ...data, q, limit, offset });
+    } catch (err) {
+      console.error('admin instant history', err);
+      res.status(500).json({ success: false, message: 'Server error.' });
+    }
+  });
+
+  app.get('/api/admin/instant/rounds', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const limit = Number(req.query.limit) || 20;
+      const offset = Number(req.query.offset) || 0;
+      const data = await instant.adminRoundHistory({ limit, offset });
+      res.json({ success: true, ...data, limit, offset });
+    } catch (err) {
+      console.error('admin instant rounds', err);
+      res.status(500).json({ success: false, message: 'Server error.' });
+    }
+  });
+
+  app.get('/api/admin/instant/stats', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const stats = await instant.adminStats();
+      res.json({ success: true, ...stats });
     } catch (err) {
       res.status(500).json({ success: false, message: 'Server error.' });
     }

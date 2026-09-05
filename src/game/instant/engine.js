@@ -29,14 +29,33 @@ const FAKE_PREFIXES = [
   'daw', 'hel', 'rob', 'sol', 'mir', 'abe', 'fen', 'gat', 'hir', 'jem',
 ];
 
+// Runtime admin overrides (not mixed with classic bingo config)
+let runtimeEnabled = cfg().enabled !== false;
+let runtimeSelectionSeconds = Number(cfg().selectionSeconds || 25);
+let runtimeMaxCards = Number(cfg().maxCardsPerPlayer || 4);
+let runtimeNumbersDrawn = Number(cfg().numbersDrawn || 20);
+let adminDisabledAt = null; // when admin turned off while idle
+
 function enabled() {
-  return cfg().enabled !== false;
+  return runtimeEnabled !== false;
 }
 function stakes() {
   return cfg().stakes || config.stakes || [10, 20, 50, 100, 200, 500];
 }
 function selectionSeconds() {
-  return Number(cfg().selectionSeconds || 25);
+  return Math.max(5, Math.min(120, Number(runtimeSelectionSeconds || cfg().selectionSeconds || 25)));
+}
+function maxCardsPerPlayer() {
+  return Math.max(1, Math.min(8, Number(runtimeMaxCards || cfg().maxCardsPerPlayer || 4)));
+}
+function numbersDrawnCount() {
+  return Math.max(5, Math.min(40, Number(runtimeNumbersDrawn || cfg().numbersDrawn || 20)));
+}
+function realPlayerCount() {
+  return entries.size;
+}
+function hasActiveRealPlayers() {
+  return entries.size > 0;
 }
 function tickFakePlayers() {
   const step = Math.floor(Math.random() * 21) - 8;
@@ -120,13 +139,14 @@ function publicState() {
   }
   return {
     enabled: enabled(), phase, selectionSeconds: selectionSeconds(), secondsLeft: secsLeft,
-    selectionEndsAt, maxCardsPerPlayer: cfg().maxCardsPerPlayer || 4,
-    numbersDrawn: cfg().numbersDrawn || 20, lineMultiplier: cfg().lineMultiplier || 2,
+    selectionEndsAt, maxCardsPerPlayer: maxCardsPerPlayer(),
+    numbersDrawn: numbersDrawnCount(), lineMultiplier: cfg().lineMultiplier || 2,
     cornersMultiplier: cfg().cornersMultiplier || 2.5, stakes: stakes(),
     playing: fakePlayers, playerCount: entries.size,
     drawnNumbers: phase === 'DRAWING' || phase === 'RESULTS' ? drawnNumbers.slice(0, drawIndex) : [],
     fullDrawn: phase === 'RESULTS' ? drawnNumbers : [], drawIndex, roundId: currentRoundId,
     fakeOpponents, players, lastResults: phase === 'RESULTS' ? lastResults : [],
+    adminDisabledAt,
   };
 }
 
@@ -135,6 +155,13 @@ function broadcast(event, payload) {
 }
 
 function startSelectionPhase() {
+  if (!enabled()) {
+    phase = 'IDLE';
+    if (phaseTimer) { clearInterval(phaseTimer); phaseTimer = null; }
+    if (drawTimer) { clearInterval(drawTimer); drawTimer = null; }
+    broadcast('instant_state', publicState());
+    return;
+  }
   phase = 'SELECTING';
   entries.clear();
   drawnNumbers = [];
@@ -162,7 +189,7 @@ function startSelectionPhase() {
 async function beginDrawPhase() {
   phase = 'DRAWING';
   drawIndex = 0;
-  drawnNumbers = drawNumbers(cfg().numbersDrawn || 20, 75);
+  drawnNumbers = drawNumbers(numbersDrawnCount(), 75);
   try {
     const ins = await pool.query(
       `INSERT INTO instant_rounds (stake, status, drawn_numbers, drawn_at) VALUES ($1,'DRAWING',$2,NOW()) RETURNING id`,
@@ -227,9 +254,16 @@ async function settleAllEntries() {
 }
 
 async function joinSharedRound({ username, stake, cardNumbers }) {
-  if (!enabled()) { const err = new Error('Instant Bingo is temporarily unavailable.'); err.code = 'DISABLED'; throw err; }
+  // Auto-wake: if admin turned Instant off while idle, a real player joining turns it back on
+  if (!enabled()) {
+    runtimeEnabled = true;
+    adminDisabledAt = null;
+    if (phase === 'IDLE' || phase === 'SELECTING' || !phaseTimer) {
+      startSelectionPhase();
+    }
+  }
   if (phase !== 'SELECTING') throw new Error('Round already started — wait for the next selection.');
-  const maxCards = cfg().maxCardsPerPlayer || 4;
+  const maxCards = maxCardsPerPlayer();
   const cards = [...new Set((cardNumbers || []).map(Number))].filter((n) => n > 0);
   if (!cards.length) throw new Error('Select at least one card.');
   if (cards.length > maxCards) throw new Error('Max ' + maxCards + ' cards.');
@@ -351,8 +385,184 @@ function attachInstantGame(io) {
 }
 
 function stopScheduler() {
-  if (phaseTimer) clearInterval(phaseTimer);
-  if (drawTimer) clearInterval(drawTimer);
+  if (phaseTimer) { clearInterval(phaseTimer); phaseTimer = null; }
+  if (drawTimer) { clearInterval(drawTimer); drawTimer = null; }
+}
+
+/**
+ * Admin: enable/disable Instant loop.
+ * Cannot disable while real users are in the current round.
+ * When disabled, timers stop (saves resources). A real join auto-enables again.
+ */
+function adminSetEnabled(on) {
+  const want = !!on;
+  if (!want) {
+    if (hasActiveRealPlayers()) {
+      const err = new Error('Cannot turn off while real players are in this round (' + entries.size + ' player(s)).');
+      err.code = 'BUSY';
+      throw err;
+    }
+    runtimeEnabled = false;
+    adminDisabledAt = new Date().toISOString();
+    stopScheduler();
+    phase = 'IDLE';
+    entries.clear();
+    drawnNumbers = [];
+    drawIndex = 0;
+    broadcast('instant_state', publicState());
+    return { enabled: false, message: 'Instant Bingo stopped. Will auto-start when a real player joins.' };
+  }
+  runtimeEnabled = true;
+  adminDisabledAt = null;
+  if (phase === 'IDLE' || !phaseTimer) {
+    startSelectionPhase();
+  } else {
+    broadcast('instant_state', publicState());
+  }
+  return { enabled: true, message: 'Instant Bingo running.' };
+}
+
+function adminSetSelectionSeconds(seconds) {
+  const n = Math.max(5, Math.min(120, Number(seconds)));
+  if (!Number.isFinite(n)) throw new Error('Invalid selection seconds.');
+  runtimeSelectionSeconds = n;
+  // If currently selecting, extend/shorten deadline relative to remaining is complex —
+  // apply on next round; also nudge current if SELECTING
+  if (phase === 'SELECTING' && selectionEndsAt) {
+    const left = Math.max(0, selectionEndsAt - Date.now());
+    // keep remaining time but clamp to new max on next full cycle; optional soft update:
+    selectionEndsAt = Date.now() + Math.min(left, n * 1000);
+  }
+  broadcast('instant_state', publicState());
+  return { selectionSeconds: selectionSeconds() };
+}
+
+function adminSetMaxCards(n) {
+  runtimeMaxCards = Math.max(1, Math.min(8, Number(n) || 4));
+  broadcast('instant_state', publicState());
+  return { maxCardsPerPlayer: maxCardsPerPlayer() };
+}
+
+function adminSetNumbersDrawn(n) {
+  runtimeNumbersDrawn = Math.max(5, Math.min(40, Number(n) || 20));
+  broadcast('instant_state', publicState());
+  return { numbersDrawn: numbersDrawnCount() };
+}
+
+function adminGetControlState() {
+  return {
+    enabled: enabled(),
+    phase,
+    selectionSeconds: selectionSeconds(),
+    maxCardsPerPlayer: maxCardsPerPlayer(),
+    numbersDrawn: numbersDrawnCount(),
+    realPlayers: realPlayerCount(),
+    hasActiveRealPlayers: hasActiveRealPlayers(),
+    playingDisplay: fakePlayers,
+    roundId: currentRoundId,
+    adminDisabledAt,
+    stakes: stakes(),
+    secondsLeft: phase === 'SELECTING' ? Math.max(0, Math.ceil((selectionEndsAt - Date.now()) / 1000)) : 0,
+    players: publicState().players || [],
+  };
+}
+
+async function adminSearchHistory({ q, limit = 20, offset = 0 }) {
+  const lim = Math.min(Math.max(Number(limit) || 20, 1), 50);
+  const off = Math.max(Number(offset) || 0, 0);
+  const query = String(q || '').trim();
+  if (!query) {
+    const r = await pool.query(
+      `SELECT e.id, e.username, e.card_number, e.stake, e.paid, e.pattern, e.multiplier,
+              e.prize, e.winning_cells, e.created_at, r.drawn_numbers, r.completed_at, r.id AS round_id,
+              u.phone_number, u.display_name
+       FROM instant_entries e
+       LEFT JOIN instant_rounds r ON r.id = e.round_id
+       LEFT JOIN users u ON LOWER(u.username) = LOWER(e.username)
+       ORDER BY e.id DESC LIMIT $1 OFFSET $2`, [lim, off]);
+    return { rows: mapAdminHistory(r.rows), hasMore: r.rows.length >= lim };
+  }
+  const like = '%' + query.replace(/%/g, '') + '%';
+  const r = await pool.query(
+    `SELECT e.id, e.username, e.card_number, e.stake, e.paid, e.pattern, e.multiplier,
+            e.prize, e.winning_cells, e.created_at, r.drawn_numbers, r.completed_at, r.id AS round_id,
+            u.phone_number, u.display_name
+     FROM instant_entries e
+     LEFT JOIN instant_rounds r ON r.id = e.round_id
+     LEFT JOIN users u ON LOWER(u.username) = LOWER(e.username)
+     WHERE LOWER(e.username) LIKE LOWER($1)
+        OR COALESCE(u.phone_number,'') LIKE $1
+        OR COALESCE(u.display_name,'') ILIKE $1
+     ORDER BY e.id DESC LIMIT $2 OFFSET $3`, [like, lim, off]);
+  return { rows: mapAdminHistory(r.rows), hasMore: r.rows.length >= lim };
+}
+
+function mapAdminHistory(rows) {
+  return (rows || []).map((row) => ({
+    id: row.id,
+    username: row.username,
+    phone: row.phone_number || null,
+    displayName: row.display_name || null,
+    cardNumber: row.card_number,
+    stake: Number(row.stake),
+    paid: Number(row.paid),
+    pattern: row.pattern,
+    multiplier: Number(row.multiplier || 0),
+    prize: Number(row.prize || 0),
+    winningCells: row.winning_cells || [],
+    drawnNumbers: row.drawn_numbers || [],
+    roundId: row.round_id,
+    date: row.completed_at || row.created_at,
+  }));
+}
+
+async function adminRoundHistory({ limit = 20, offset = 0 }) {
+  const lim = Math.min(Math.max(Number(limit) || 20, 1), 50);
+  const off = Math.max(Number(offset) || 0, 0);
+  const r = await pool.query(
+    `SELECT r.id, r.stake, r.status, r.drawn_numbers, r.created_at, r.drawn_at, r.completed_at,
+            (SELECT COUNT(*) FROM instant_entries e WHERE e.round_id = r.id) AS entry_count,
+            (SELECT COALESCE(SUM(e.paid),0) FROM instant_entries e WHERE e.round_id = r.id) AS total_paid,
+            (SELECT COALESCE(SUM(e.prize),0) FROM instant_entries e WHERE e.round_id = r.id) AS total_prize
+     FROM instant_rounds r
+     ORDER BY r.id DESC LIMIT $1 OFFSET $2`, [lim, off]);
+  return {
+    rows: r.rows.map((row) => ({
+      id: row.id,
+      stake: Number(row.stake),
+      status: row.status,
+      drawnNumbers: row.drawn_numbers || [],
+      entryCount: Number(row.entry_count || 0),
+      totalPaid: Number(row.total_paid || 0),
+      totalPrize: Number(row.total_prize || 0),
+      house: Number(row.total_paid || 0) - Number(row.total_prize || 0),
+      createdAt: row.created_at,
+      drawnAt: row.drawn_at,
+      completedAt: row.completed_at,
+    })),
+    hasMore: r.rows.length >= lim,
+  };
+}
+
+async function adminStats() {
+  const day = await pool.query(
+    `SELECT COUNT(*)::int AS plays,
+            COALESCE(SUM(paid),0)::float AS volume,
+            COALESCE(SUM(prize),0)::float AS paid_out,
+            COUNT(*) FILTER (WHERE prize > 0)::int AS wins
+     FROM instant_entries WHERE created_at >= date_trunc('day', NOW())`);
+  const all = await pool.query(
+    `SELECT COUNT(*)::int AS plays,
+            COALESCE(SUM(paid),0)::float AS volume,
+            COALESCE(SUM(prize),0)::float AS paid_out
+     FROM instant_entries`);
+  const d = day.rows[0] || {};
+  const a = all.rows[0] || {};
+  return {
+    today: { plays: d.plays || 0, volume: d.volume || 0, paidOut: d.paid_out || 0, wins: d.wins || 0, house: (d.volume || 0) - (d.paid_out || 0) },
+    allTime: { plays: a.plays || 0, volume: a.volume || 0, paidOut: a.paid_out || 0, house: (a.volume || 0) - (a.paid_out || 0) },
+    control: adminGetControlState(),
+  };
 }
 
 module.exports = {
@@ -360,4 +570,7 @@ module.exports = {
   joinRound: joinSharedRound, joinSharedRound, settleRound: async () => null,
   historyForUser, getLeaderboard, getLiveSession, stopScheduler, evaluateCard, drawNumbers,
   getFakePlayers: () => fakePlayers, publicState,
+  adminSetEnabled, adminSetSelectionSeconds, adminSetMaxCards, adminSetNumbersDrawn,
+  adminGetControlState, adminSearchHistory, adminRoundHistory, adminStats,
+  realPlayerCount, hasActiveRealPlayers,
 };
