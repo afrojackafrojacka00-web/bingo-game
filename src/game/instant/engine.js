@@ -61,6 +61,24 @@ function isLoopRunning() {
   return !!runtimeLoopRunning && enabled();
 }
 
+function connectedViewerCount() {
+  try {
+    if (!ioNamespace) return 0;
+    // socket.io v3/v4: namespace.sockets is a Map
+    if (ioNamespace.sockets && typeof ioNamespace.sockets.size === 'number') {
+      return ioNamespace.sockets.size;
+    }
+    if (ioNamespace.sockets && ioNamespace.sockets.sockets) {
+      return ioNamespace.sockets.sockets.size || 0;
+    }
+  } catch (_) {}
+  return 0;
+}
+
+function hasViewers() {
+  return connectedViewerCount() > 0;
+}
+
 /**
  * Real user opened Instant Bingo UI — start selection countdown immediately
  * (only if master is ON). Does nothing during an active DRAWING round.
@@ -89,6 +107,8 @@ function sleepIfEcoIdle(force) {
   // Never interrupt a live draw / results — even if viewer left
   if (phase === 'DRAWING' || phase === 'RESULTS') return publicState();
   if (hasActiveRealPlayers()) return publicState();
+  // Someone still on Instant page (socket connected) — keep the show running
+  if (hasViewers()) return publicState();
   // Only sleep from SELECTING / IDLE when empty
   if (!force && phase !== 'SELECTING' && phase !== 'IDLE') return publicState();
   runtimeLoopRunning = false;
@@ -207,7 +227,7 @@ function publicState() {
     drawnNumbers: phase === 'DRAWING' || phase === 'RESULTS' ? drawnNumbers.slice(0, drawIndex) : [],
     fullDrawn: phase === 'RESULTS' ? drawnNumbers : [], drawIndex, roundId: currentRoundId,
     fakeOpponents, players, lastResults: phase === 'RESULTS' ? lastResults : [],
-    adminDisabledAt,
+    adminDisabledAt, viewers: connectedViewerCount(),
   };
 }
 
@@ -242,8 +262,10 @@ function startSelectionPhase() {
     if (left <= 0) {
       clearInterval(phaseTimer);
       phaseTimer = null;
-      // Eco mode: if nobody joined, pause the loop until a real player starts it
-      if (runtimeEcoMode && entries.size === 0) {
+      // Eco: sleep only when NO ONE is watching Instant (no sockets).
+      // If a user is on the card-selection page (even without pressing Play),
+      // keep going: draw → selection → draw…
+      if (runtimeEcoMode && entries.size === 0 && !hasViewers()) {
         runtimeLoopRunning = false;
         phase = 'IDLE';
         broadcast('instant_state', publicState());
@@ -572,13 +594,37 @@ function attachInstantGame(io) {
   }).catch((e) => console.error('instant boot', e));
   ioNamespace = io.of('/instant');
   ioNamespace.on('connection', (socket) => {
+    // Viewer opened Instant — ensure loop is running so countdown is never stuck
+    if (enabled()) {
+      wakeForPresence();
+    }
     socket.emit('instant_state', publicState());
-    socket.on('instant_sync', () => socket.emit('instant_state', publicState()));
-    socket.on('instant_watch', () => {
+    if (phase === 'DRAWING') {
+      socket.emit('instant_draw_start', { ...publicState(), drawnNumbers, drawIntervalMs: 1000, resume: true, drawIndex });
+    }
+    socket.on('instant_sync', () => {
+      if (enabled()) wakeForPresence();
       socket.emit('instant_state', publicState());
       if (phase === 'DRAWING') {
         socket.emit('instant_draw_start', { ...publicState(), drawnNumbers, drawIntervalMs: 1000, resume: true, drawIndex });
       }
+    });
+    socket.on('instant_watch', () => {
+      if (enabled()) wakeForPresence();
+      socket.emit('instant_state', publicState());
+      if (phase === 'DRAWING') {
+        socket.emit('instant_draw_start', { ...publicState(), drawnNumbers, drawIntervalMs: 1000, resume: true, drawIndex });
+      }
+    });
+    socket.on('disconnect', () => {
+      // Small delay so refresh/reconnect does not flash sleep
+      setTimeout(() => {
+        if (runtimeEcoMode && enabled() && !hasViewers() && !hasActiveRealPlayers()) {
+          if (phase === 'SELECTING' || phase === 'IDLE') {
+            sleepIfEcoIdle(true);
+          }
+        }
+      }, 4000);
     });
   });
   setInterval(() => { if (phase === 'SELECTING') tickFakePlayers(); }, 8000);
