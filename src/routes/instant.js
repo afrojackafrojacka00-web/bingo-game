@@ -233,6 +233,26 @@ function registerInstantRoutes(app) {
       res.status(500).json({ success: false, message: 'Server error.' });
     }
   });
+
+  app.get('/api/admin/instant/win-rules', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      res.json({ success: true, ...instant.adminGetWinRules() });
+    } catch (err) {
+      res.status(500).json({ success: false, message: 'Server error.' });
+    }
+  });
+
+  app.post('/api/admin/instant/win-rules', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const rules = (req.body && req.body.rules) || [];
+      const result = instant.adminSetWinRules(rules);
+      res.json({ success: true, ...result });
+    } catch (err) {
+      res.status(400).json({ success: false, message: err.message || 'Failed.' });
+    }
+  });
 }
 
 module.exports = { registerInstantRoutes };

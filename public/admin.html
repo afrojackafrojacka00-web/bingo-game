@@ -922,6 +922,18 @@ table.data tr:hover td { background: var(--card-hover); }
 
         <div id="instantControlMsg" class="muted" style="margin:8px 0 14px;font-size:12px;"></div>
         <div class="inst-card">
+          <h3>5 · Win patterns &amp; multipliers (X)</h3>
+          <p class="hint">Enable/disable patterns and set the prize multiplier. Highest matching pattern pays. Changes apply to the next settled round.</p>
+          <div id="instantWinRulesBox" class="empty">Load control to edit rules…</div>
+          <div class="row-actions">
+            <button class="btn btn-primary btn-sm" onclick="saveInstantWinRules()">Save win rules</button>
+            <button class="btn btn-ghost btn-sm" onclick="loadInstantWinRules()">Reload</button>
+            <button class="btn btn-ghost btn-sm" onclick="resetInstantWinRulesDefaults()">Reset defaults</button>
+          </div>
+          <p class="hint" style="margin-top:10px;">Catalog: 1 line · 2+ lines · diagonal · both diagonals · 4 corners · corners+line · full card. Turn on “full card” and set e.g. 5X to add a new prize tier without code.</p>
+        </div>
+
+        <div class="inst-card">
           <h3>Performance snapshot</h3>
           <div id="instantStatsBox" class="muted" style="font-size:13px;">—</div>
         </div>
@@ -2291,6 +2303,7 @@ async function loadInstantControl() {
     else if (ecoOn) msg = 'Eco ON · loop active — will sleep when a selection ends with 0 players.';
     else msg = '24/7 mode · loop runs continuously.';
     document.getElementById('instantControlMsg').textContent = msg;
+    loadInstantWinRules();
     if (instantControlTimer) clearInterval(instantControlTimer);
     if (document.getElementById('panel-instantcontrol')?.classList.contains('active')) {
       instantControlTimer = setInterval(loadInstantControl, 5000);
@@ -2381,6 +2394,77 @@ async function saveInstantSettings() {
     loadInstantControl();
   } catch (e) { alert('Network error'); }
 }
+
+
+let _instantWinRulesDraft = [];
+
+async function loadInstantWinRules() {
+  if (!getSecret()) return;
+  const box = document.getElementById('instantWinRulesBox');
+  if (!box) return;
+  try {
+    const r = await fetch('/api/admin/instant/win-rules', { headers: adminSecretHeader() });
+    const d = await r.json();
+    if (!d.success) { box.innerHTML = '<div class="empty">' + esc(d.message || 'Failed') + '</div>'; return; }
+    _instantWinRulesDraft = (d.rules || []).map(function (x) { return Object.assign({}, x); });
+    renderInstantWinRulesEditor();
+  } catch (e) {
+    box.innerHTML = '<div class="empty">Network error</div>';
+  }
+}
+
+function renderInstantWinRulesEditor() {
+  const box = document.getElementById('instantWinRulesBox');
+  if (!box) return;
+  if (!_instantWinRulesDraft.length) { box.innerHTML = '<div class="empty">No rules</div>'; return; }
+  let html = '<div class="inst-table-wrap"><table class="inst-table"><thead><tr>' +
+    '<th>On</th><th>Pattern</th><th>What wins</th><th>Multiplier (X)</th></tr></thead><tbody>';
+  _instantWinRulesDraft.forEach(function (rule, idx) {
+    html += '<tr>' +
+      '<td><input type="checkbox" ' + (rule.enabled !== false ? 'checked' : '') + ' onchange="_instantWinRulesDraft[' + idx + '].enabled=this.checked"></td>' +
+      '<td><b>' + esc(rule.label || rule.id) + '</b><br><span class="muted" style="font-size:11px;">' + esc(rule.id) + '</span></td>' +
+      '<td class="muted" style="font-size:12px;">' + esc(rule.description || rule.type || '') + '</td>' +
+      '<td><input type="number" min="0.1" max="100" step="0.1" value="' + Number(rule.multiplier || 1) + '" style="width:90px;" onchange="_instantWinRulesDraft[' + idx + '].multiplier=Number(this.value)"></td>' +
+      '</tr>';
+  });
+  html += '</tbody></table></div>';
+  box.innerHTML = html;
+}
+
+async function saveInstantWinRules() {
+  if (!requireSecret()) return;
+  if (!confirm('Save win patterns & multipliers?\\nHighest matching pattern is paid per card.')) return;
+  try {
+    const r = await fetch('/api/admin/instant/win-rules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminSecretHeader() },
+      body: JSON.stringify({ adminSecret: getSecret(), rules: _instantWinRulesDraft })
+    });
+    const d = await r.json();
+    if (!d.success) { alert(d.message || 'Failed'); return; }
+    _instantWinRulesDraft = d.rules || _instantWinRulesDraft;
+    renderInstantWinRulesEditor();
+    document.getElementById('instantControlMsg').textContent = 'Win rules saved.';
+  } catch (e) { alert('Network error'); }
+}
+
+async function resetInstantWinRulesDefaults() {
+  if (!requireSecret()) return;
+  if (!confirm('Reset all win rules to built-in defaults?')) return;
+  // Load catalog defaults by posting empty normalization — server defaultWinRules when invalid; send known defaults
+  const defaults = [
+    { id: 'one_line', type: 'row_col_count', label: '1 row or 1 column', enabled: true, multiplier: 1, minLines: 1, maxLines: 1, description: 'Exactly one completed row or column' },
+    { id: 'two_lines', type: 'row_col_count', label: '2+ rows/columns', enabled: true, multiplier: 2, minLines: 2, maxLines: 99, description: 'Two or more completed rows/columns' },
+    { id: 'diagonal', type: 'diagonal', label: '1 diagonal', enabled: true, multiplier: 1.5, description: 'Either main diagonal complete' },
+    { id: 'both_diagonals', type: 'both_diagonals', label: 'Both diagonals (X)', enabled: false, multiplier: 3, description: 'Both diagonals complete' },
+    { id: 'four_corners', type: 'corners', label: 'Four corners', enabled: true, multiplier: 2.5, description: 'All four corner cells' },
+    { id: 'corners_plus_line', type: 'corners_plus_line', label: 'Corners + any line', enabled: true, multiplier: 4, description: 'Four corners plus any row, column, or diagonal' },
+    { id: 'full_card', type: 'full_card', label: 'Full card (blackout)', enabled: false, multiplier: 5, description: 'Every cell marked' }
+  ];
+  _instantWinRulesDraft = defaults;
+  await saveInstantWinRules();
+}
+
 
 async function loadInstantHistory(reset) {
   if (!getSecret()) return;

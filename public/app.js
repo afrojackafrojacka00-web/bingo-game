@@ -1905,6 +1905,7 @@ window.openInstantBingo = openInstantBingo;
 
 function applyInstantState(st) {
     if (!st) return;
+    if (st.winRules) window._instantWinRules = st.winRules;
     const prevPhase = instantPhase;
     instantPhase = st.phase || 'SELECTING';
     instantSelectSeconds = st.selectionSeconds || 25;
@@ -2398,58 +2399,71 @@ function instantLineComplete(grid, drawnSet, cells) {
   return cells.every(function (p) { return instantCellMatched(grid, p[0], p[1], drawnSet); });
 }
 function evaluateInstantCard(grid, drawnNumbers) {
+  const rules = (window._instantWinRules && window._instantWinRules.length)
+    ? window._instantWinRules
+    : null;
   const drawnSet = new Set((drawnNumbers || []).map(Number));
   if (!grid || !grid.length) return { hit: false, pattern: null, multiplier: 0, winningCells: [] };
-  const completedRows = INSTANT_ROWS.filter(function (line) { return instantLineComplete(grid, drawnSet, line); });
-  const completedCols = INSTANT_COLS.filter(function (line) { return instantLineComplete(grid, drawnSet, line); });
-  const completedDiags = INSTANT_DIAGS.filter(function (line) { return instantLineComplete(grid, drawnSet, line); });
-  const rowColCount = completedRows.length + completedCols.length;
-  const hasCorners = instantLineComplete(grid, drawnSet, INSTANT_CORNERS);
-  const hasDiag = completedDiags.length > 0;
-  const hasRowOrCol = rowColCount > 0;
+
+  function cellOk(r, c) {
+    const v = grid[r][c];
+    if (v === 'FREE' || v === 0 || (r === 2 && c === 2)) return true;
+    return drawnSet.has(Number(v));
+  }
+  function lineOk(cells) { return cells.every(function (p) { return cellOk(p[0], p[1]); }); }
+  function uniq(list) {
+    const s = new Set(); const o = [];
+    (list || []).forEach(function (p) { const k = p[0] + ',' + p[1]; if (!s.has(k)) { s.add(k); o.push(p); } });
+    return o;
+  }
+
+  const rows = INSTANT_ROWS.filter(lineOk);
+  const cols = INSTANT_COLS.filter(lineOk);
+  const diags = INSTANT_DIAGS.filter(lineOk);
+  const rowCol = rows.length + cols.length;
+  const hasCorners = lineOk(INSTANT_CORNERS);
+  const hasDiag = diags.length > 0;
+  let full = true; const allCells = [];
+  for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) { allCells.push([r, c]); if (!cellOk(r, c)) full = false; }
+
+  const active = (rules || [
+    { id: 'one_line', type: 'row_col_count', enabled: true, multiplier: 1, minLines: 1, maxLines: 1 },
+    { id: 'two_lines', type: 'row_col_count', enabled: true, multiplier: 2, minLines: 2, maxLines: 99 },
+    { id: 'diagonal', type: 'diagonal', enabled: true, multiplier: 1.5 },
+    { id: 'four_corners', type: 'corners', enabled: true, multiplier: 2.5 },
+    { id: 'corners_plus_line', type: 'corners_plus_line', enabled: true, multiplier: 4 }
+  ]).filter(function (r) { return r && r.enabled !== false && Number(r.multiplier) > 0; });
+
   const candidates = [];
-  if (hasCorners && (hasRowOrCol || hasDiag)) {
-    const extra = hasRowOrCol ? (completedRows[0] || completedCols[0]) : completedDiags[0];
-    const cells = INSTANT_CORNERS.concat(extra || []);
-    const seen = new Set(); const uniq = [];
-    cells.forEach(function (p) { const k = p[0] + ',' + p[1]; if (!seen.has(k)) { seen.add(k); uniq.push(p); } });
-    candidates.push({ pattern: 'corners_plus_line', multiplier: 4, winningCells: uniq });
-  }
-  if (hasCorners) {
-    candidates.push({ pattern: 'four_corners', multiplier: 2.5, winningCells: INSTANT_CORNERS.map(function (p) { return [p[0], p[1]]; }) });
-  }
-  if (hasDiag) {
-    candidates.push({ pattern: 'diagonal', multiplier: 1.5, winningCells: completedDiags[0].map(function (p) { return [p[0], p[1]]; }) });
-  }
-  if (rowColCount >= 2) {
-    const lines = completedRows.concat(completedCols).slice(0, 2);
-    const cells = []; const seen = new Set();
-    lines.forEach(function (line) {
-      line.forEach(function (p) { const k = p[0] + ',' + p[1]; if (!seen.has(k)) { seen.add(k); cells.push(p); } });
-    });
-    candidates.push({ pattern: 'two_lines', multiplier: 2, winningCells: cells });
-  } else if (rowColCount === 1) {
-    const line = completedRows[0] || completedCols[0];
-    candidates.push({ pattern: 'one_line', multiplier: 1, winningCells: line.map(function (p) { return [p[0], p[1]]; }) });
-  }
+  active.forEach(function (rule) {
+    const mult = Number(rule.multiplier) || 0;
+    const type = rule.type || rule.id;
+    if (type === 'row_col_count' || type === 'one_line' || type === 'two_lines') {
+      const minL = Number(rule.minLines != null ? rule.minLines : (type === 'two_lines' ? 2 : 1));
+      const maxL = Number(rule.maxLines != null ? rule.maxLines : (type === 'one_line' ? 1 : 99));
+      if (rowCol >= minL && rowCol <= maxL) {
+        const take = Math.min(rowCol, Math.max(minL, 2));
+        const lines = rows.concat(cols).slice(0, take);
+        const cells = []; lines.forEach(function (line) { line.forEach(function (p) { cells.push(p); }); });
+        candidates.push({ pattern: rule.id || type, multiplier: mult, winningCells: uniq(cells) });
+      }
+    } else if (type === 'diagonal' && hasDiag) {
+      candidates.push({ pattern: rule.id || 'diagonal', multiplier: mult, winningCells: uniq(diags[0]) });
+    } else if (type === 'both_diagonals' && diags.length >= 2) {
+      candidates.push({ pattern: rule.id || 'both_diagonals', multiplier: mult, winningCells: uniq(diags[0].concat(diags[1])) });
+    } else if ((type === 'corners' || type === 'four_corners') && hasCorners) {
+      candidates.push({ pattern: rule.id || 'four_corners', multiplier: mult, winningCells: INSTANT_CORNERS.map(function (p) { return [p[0], p[1]]; }) });
+    } else if (type === 'corners_plus_line' && hasCorners && (rowCol > 0 || hasDiag)) {
+      const extra = rowCol > 0 ? (rows[0] || cols[0]) : diags[0];
+      candidates.push({ pattern: rule.id || 'corners_plus_line', multiplier: mult, winningCells: uniq(INSTANT_CORNERS.concat(extra || [])) });
+    } else if (type === 'full_card' && full) {
+      candidates.push({ pattern: rule.id || 'full_card', multiplier: mult, winningCells: allCells });
+    }
+  });
   if (!candidates.length) return { hit: false, pattern: null, multiplier: 0, winningCells: [] };
   candidates.sort(function (a, b) { return b.multiplier - a.multiplier; });
   const best = candidates[0];
   return { hit: true, pattern: best.pattern, multiplier: best.multiplier, winningCells: best.winningCells };
-}
-
-function applyWinStrikeToTable(table, winningCells) {
-  if (!table) return;
-  // clear previous win marks on this table only (keep marked numbers)
-  table.querySelectorAll('td.win-line, td.strike').forEach(function (td) {
-    td.classList.remove('win-line', 'strike');
-    if (!td.classList.contains('marked') && td.textContent.trim() === '★') td.classList.add('marked');
-  });
-  (winningCells || []).forEach(function (cell) {
-    const rr = cell[0], cc = cell[1];
-    const td = table.querySelector('td[data-r="' + rr + '"][data-c="' + cc + '"]');
-    if (td) td.className = 'win-line strike';
-  });
 }
 
 async function checkMyInstantWinsLive() {

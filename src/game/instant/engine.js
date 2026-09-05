@@ -6,7 +6,7 @@
 
 const pool = require('../../db/pool');
 const config = require('../../config');
-const { evaluateCard, drawNumbers } = require('./patterns');
+const { evaluateCard, drawNumbers, defaultWinRules, normalizeWinRules, PATTERN_CATALOG } = require('./patterns');
 
 const cfg = () => config.instantBingo || {};
 
@@ -37,6 +37,7 @@ let runtimeSelectionSeconds = Number(cfg().selectionSeconds || 25);
 let runtimeMaxCards = Number(cfg().maxCardsPerPlayer || 4);
 let runtimeNumbersDrawn = Number(cfg().numbersDrawn || 20);
 let runtimeDifficulty = String(cfg().difficulty || 'medium'); // easy|medium|hard|super_hard
+let runtimeWinRules = defaultWinRules();
 let adminDisabledAt = null;
 
 /**
@@ -227,7 +228,7 @@ function publicState() {
     drawnNumbers: phase === 'DRAWING' || phase === 'RESULTS' ? drawnNumbers.slice(0, drawIndex) : [],
     fullDrawn: phase === 'RESULTS' ? drawnNumbers : [], drawIndex, roundId: currentRoundId,
     fakeOpponents, players, lastResults: phase === 'RESULTS' ? lastResults : [],
-    adminDisabledAt, viewers: connectedViewerCount(),
+    adminDisabledAt, viewers: connectedViewerCount(), winRules: runtimeWinRules,
   };
 }
 
@@ -430,7 +431,7 @@ async function settleAllEntries() {
   for (const [username, ent] of entries.entries()) {
     for (const cardNumber of ent.cards) {
       const grid = await getCardGrid(cardNumber);
-      const evalResult = evaluateCard(grid, drawnNumbers);
+      const evalResult = evaluateCard(grid, drawnNumbers, runtimeWinRules);
       const prize = evalResult.hit ? Number((Number(ent.stake) * evalResult.multiplier).toFixed(2)) : 0;
       try {
         if (currentRoundId) {
@@ -758,9 +759,22 @@ function adminSetDifficulty(level) {
   };
 }
 
+
+function adminGetWinRules() {
+  return { rules: runtimeWinRules, catalog: PATTERN_CATALOG };
+}
+
+function adminSetWinRules(rules) {
+  runtimeWinRules = normalizeWinRules(rules);
+  broadcast('instant_state', publicState());
+  return { rules: runtimeWinRules };
+}
+
 function adminGetControlState() {
   const preset = DIFFICULTY_PRESETS[runtimeDifficulty] || DIFFICULTY_PRESETS.medium;
   return {
+    winRules: runtimeWinRules,
+
     enabled: enabled(),
     masterEnabled: enabled(),
     ecoMode: !!runtimeEcoMode,
@@ -888,6 +902,6 @@ module.exports = {
   historyForUser, getLeaderboard, getLiveSession, stopScheduler, evaluateCard, drawNumbers,
   getFakePlayers: () => fakePlayers, publicState,
   adminSetEnabled, adminSetMasterEnabled, adminSetEcoMode, adminSetSelectionSeconds, adminSetMaxCards, adminSetNumbersDrawn, adminSetDifficulty,
-  adminGetControlState, adminSearchHistory, adminRoundHistory, adminStats,
+  adminGetControlState, adminGetWinRules, adminSetWinRules, adminSearchHistory, adminRoundHistory, adminStats,
   realPlayerCount, hasActiveRealPlayers,
 };
