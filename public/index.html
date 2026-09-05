@@ -721,15 +721,18 @@ body.instant-immersive #tabGames{padding-bottom:70px;}
   font-size:18px;box-shadow:0 0 18px rgba(245,158,11,.7);will-change:transform,opacity;
   transition:transform .5s cubic-bezier(.15,.85,.25,1), opacity .5s ease;
 }
-.instant-opponents{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;max-height:200px;overflow:auto;}
+.instant-opponents{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:220px;overflow:auto;}
 .instant-opp{
-  font-size:9px;padding:4px;border:1px solid var(--card-border,#333);border-radius:8px;
+  display:flex;gap:8px;align-items:center;font-size:10px;padding:6px 8px;
+  border:1px solid var(--card-border,#333);border-radius:8px;
   background:rgba(0,0,0,.2);opacity:0;transform:translateY(6px);
   transition:opacity .35s ease, transform .35s ease;
 }
 .instant-opp.visible{opacity:1;transform:none;}
+.instant-opp .opp-meta{flex:1;min-width:0;text-align:left;}
 .instant-opp .opp-name{font-weight:700;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.instant-opp table.instant-bingo-table{font-size:8px;}
+.instant-opp .opp-card-wrap{width:42%;max-width:130px;flex-shrink:0;}
+.instant-opp table.instant-bingo-table{font-size:8px;width:100%;}
 .instant-opp table.instant-bingo-table th{font-size:7px;padding:0;}
 .instant-opp table.instant-bingo-table td{font-size:8px;padding:1px;border-radius:2px;}
 
@@ -739,13 +742,34 @@ body.instant-immersive #tabGames{padding-bottom:70px;}
   letter-spacing:.04em;
 }
 .instant-timer-big{display:none !important;}
-.instant-stake-row{display:flex;flex-wrap:nowrap;gap:5px;justify-content:center;margin:8px 0 4px;overflow-x:auto;}
+.instant-stake-wrap{position:relative;margin:8px 0 2px;}
+.instant-stake-row{
+  display:flex;flex-wrap:nowrap;gap:6px;justify-content:flex-start;margin:0;
+  overflow-x:auto;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;
+  padding:2px 4px 8px;scrollbar-width:thin;
+}
+.instant-stake-row::-webkit-scrollbar{height:4px;}
+.instant-stake-row::-webkit-scrollbar-thumb{background:rgba(255,255,255,.25);border-radius:4px;}
 .instant-stake-pill{
-  border:1px solid var(--line);border-radius:999px;padding:5px 9px;font-size:11px;
-  background:transparent;color:var(--text);cursor:pointer;min-width:44px;flex:0 0 auto;
+  border:1px solid var(--line);border-radius:999px;padding:5px 6px;font-size:11px;
+  background:transparent;color:var(--text);cursor:pointer;
+  flex:0 0 18%;min-width:48px;max-width:58px;
+  scroll-snap-align:start;box-sizing:border-box;text-align:center;
 }
 .instant-stake-pill.active{border-color:var(--blue);background:rgba(59,130,246,.2);font-weight:700;}
-.instant-pick-grid .card-item{padding:4px 2px;font-size:10px;min-height:28px;border-radius:8px;}
+.instant-card-scroll-wrap{position:relative;margin:4px 0 6px;}
+.instant-pick-grid{
+  display:grid !important;grid-template-columns:repeat(8,1fr) !important;gap:4px !important;
+  max-height:280px;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-top:4px !important;
+  scrollbar-width:thin;padding-bottom:4px;
+}
+.instant-pick-grid::-webkit-scrollbar{width:4px;}
+.instant-pick-grid::-webkit-scrollbar-thumb{background:rgba(255,255,255,.25);border-radius:4px;}
+.instant-pick-grid .card-item{padding:3px 1px;font-size:9px;min-height:24px;border-radius:6px;}
+.instant-scroll-hint{
+  font-size:10px;opacity:.55;margin-top:2px;pointer-events:none;
+}
+.instant-scroll-hint.side{margin-top:0;}
 .instant-lb-list .instant-lb-row{display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--card-border,#333);}
 .instant-lb-list .instant-lb-meta{flex:1;min-width:0;font-size:10px;text-align:left;}
 .instant-lb-list .instant-lb-card{width:48%;max-width:150px;}
@@ -768,9 +792,14 @@ body.instant-immersive #tabGames{padding-bottom:70px;}
 .instant-random-btn{width:auto;padding:6px 12px;font-size:11px;}
 .instant-live-full{width:100%;margin-top:10px;}
 .instant-live-full .instant-cards-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;}
-.instant-live-full .instant-others-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;width:100%;}
+.instant-live-full .instant-others-grid{display:flex;flex-direction:column;gap:6px;margin-top:8px;width:100%;}
 .instant-live-full .instant-card-wrap{width:100%;}
 .instant-live-full .instant-bingo-table{width:100%;}
+.instant-live-full .instant-others-grid .instant-card-wrap{
+  display:flex;gap:8px;align-items:center;padding:6px 8px !important;
+}
+.instant-live-full .instant-others-grid .instant-card-wrap > div:first-child{flex:1;min-width:0;}
+.instant-live-full .instant-others-grid .instant-card-wrap table{width:42%;max-width:130px;flex-shrink:0;}
 
 </style>
 </head>
@@ -892,13 +921,19 @@ body.instant-immersive #tabGames{padding-bottom:70px;}
    <div class="card" style="text-align:center;padding:10px 12px;">
      <div class="small" id="instantPlayingPill" style="font-size:11px;font-weight:600;opacity:.9;">🟢 LIVE · Playing | —</div>
      <div id="instantSelectTimer" class="instant-timer-mid">25</div>
-     <div style="display:flex;justify-content:center;gap:16px;margin:4px 0 6px;font-size:11px;">
+     <div class="instant-card-scroll-wrap">
+       <div id="instantCardGrid" class="grid-container instant-pick-grid"></div>
+       <div class="instant-scroll-hint" id="instantCardScrollHint">↕ more cards</div>
+     </div>
+     <div id="instantSelectedCards" class="instant-selected-row"></div>
+     <div class="instant-stake-wrap">
+       <div class="instant-stake-row" id="instantStakeRow"></div>
+       <div class="instant-scroll-hint side" id="instantStakeScrollHint">← swipe more →</div>
+     </div>
+     <div style="display:flex;justify-content:center;gap:16px;margin:6px 0 2px;font-size:11px;">
        <span>Cost <strong id="instantCost">0</strong></span>
        <span>Cards <strong id="instantSelectedCount">0/4</strong></span>
      </div>
-     <div id="instantCardGrid" class="grid-container instant-pick-grid" style="max-height:140px;overflow:auto;"></div>
-     <div id="instantSelectedCards" class="instant-selected-row"></div>
-     <div class="instant-stake-row" id="instantStakeRow"></div>
      <div class="instant-random-row">
        <button type="button" class="btn-secondary instant-random-btn" onclick="pickRandomInstantCards(2)">🎲 Pick 2</button>
        <button type="button" class="btn-secondary instant-random-btn" onclick="pickRandomInstantCards(4)">🎲 Pick 4</button>
@@ -1082,6 +1117,6 @@ body.instant-immersive #tabGames{padding-bottom:70px;}
   <div class="nav-item" onclick="switchTab('tabWallet',this)">💰<br><span data-i18n="navWallet">Wallet</span></div>
   <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
 </div>
-<script src="app.js?v=20260905-instant-ui-fix"></script>
+<script src="app.js?v=20260905-instant-ui-fix2"></script>
 </body>
 </html>

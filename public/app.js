@@ -2142,7 +2142,10 @@ async function renderInstantOpponents() {
         const gridHtml = g ? renderInstantGridHtml(g, [], [], 'opp' + i) : '';
         const el = document.createElement('div');
         el.className = 'instant-opp';
-        el.innerHTML = '<div class="opp-name">' + escapeHtmlInstant(p.username) + ' · #' + (cardN || '—') + '</div>' + gridHtml;
+        el.innerHTML =
+            '<div class="opp-meta"><div class="opp-name">' + escapeHtmlInstant(p.username) + '</div>' +
+            '<div style="opacity:.75;">#' + (cardN || '—') + '</div></div>' +
+            '<div class="opp-card-wrap">' + gridHtml + '</div>';
         box.appendChild(el);
         await new Promise(function (r) { setTimeout(r, i === 0 ? 40 : 1000); });
         if (token !== instantOppRenderToken) return;
@@ -2267,8 +2270,8 @@ function openSharedDrawScreen(payload) {
             const cn = p.cardNumber;
             const g = await fetchInstantGrid(cn);
             otherRows.push(
-                '<div class="instant-card-wrap" style="padding:4px;">' +
-                '<div style="font-size:9px;margin-bottom:2px;opacity:.85;"><b>' + escapeHtmlInstant(p.username) + '</b> · #' + cn + '</div>' +
+                '<div class="instant-card-wrap" style="padding:6px 8px;">' +
+                '<div style="font-size:10px;text-align:left;"><b>' + escapeHtmlInstant(p.username) + '</b><br><span style="opacity:.75;">#' + cn + '</span></div>' +
                 (g ? renderInstantGridHtml(g, [], [], 'otc' + i) : '') + '</div>'
             );
         }
@@ -2485,54 +2488,63 @@ async function loadInstantHistory() {
 
 async function renderInstantHistoryTab() {
     const title = document.querySelector('#tabHistory .page-title h2');
-    if (title) title.textContent = '⚡ Instant · History & Leaders';
+    if (title) title.textContent = '⚡ Instant';
     const list = document.getElementById('historyList');
     if (!list) return;
+    const panel = window._instantHistPanel || 'history'; // 'history' | 'leaders'
+    const period = window._instantLbPeriod || 'day';
     list.innerHTML = '<p class="small">Loading…</p>';
     try {
-        const period = window._instantLbPeriod || 'day';
-        const [histRes, lbRes] = await Promise.all([
-            fetch('/api/instant/history?username=' + encodeURIComponent(currentUsername || '') + '&_=' + Date.now(), { cache: 'no-store' }),
-            fetch('/api/instant/leaderboard?period=' + encodeURIComponent(period) + '&_=' + Date.now(), { cache: 'no-store' })
-        ]);
-        const histData = await histRes.json();
-        const lbData = await lbRes.json();
-
-        let html = '<div style="display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap;">' +
-            '<button type="button" class="btn-secondary' + (period === 'day' ? ' active' : '') + '" onclick="window._instantLbPeriod=\'day\';renderInstantHistoryTab()" style="width:auto;padding:4px 8px;font-size:10px;">Day</button>' +
-            '<button type="button" class="btn-secondary' + (period === 'week' ? ' active' : '') + '" onclick="window._instantLbPeriod=\'week\';renderInstantHistoryTab()" style="width:auto;padding:4px 8px;font-size:10px;">Week</button>' +
-            '<button type="button" class="btn-secondary' + (period === 'all' ? ' active' : '') + '" onclick="window._instantLbPeriod=\'all\';renderInstantHistoryTab()" style="width:auto;padding:4px 8px;font-size:10px;">All</button>' +
+        let html = '<div style="display:flex;gap:6px;margin-bottom:10px;">' +
+            '<button type="button" class="btn-secondary' + (panel === 'history' ? ' active' : '') + '" onclick="window._instantHistPanel=\'history\';renderInstantHistoryTab()" style="width:auto;padding:6px 12px;font-size:11px;">📜 My history</button>' +
+            '<button type="button" class="btn-secondary' + (panel === 'leaders' ? ' active' : '') + '" onclick="window._instantHistPanel=\'leaders\';renderInstantHistoryTab()" style="width:auto;padding:6px 12px;font-size:11px;">🏆 Leaderboard</button>' +
             '</div>';
 
-        html += '<div style="font-weight:700;font-size:13px;margin:8px 0 6px;">🏆 Leaderboard</div>';
-        if (!lbData.success || !lbData.leaders || !lbData.leaders.length) {
-            html += '<p class="small">No winners yet.</p>';
+        if (panel === 'leaders') {
+            html += '<div style="display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap;">' +
+                '<button type="button" class="btn-secondary' + (period === 'day' ? ' active' : '') + '" onclick="window._instantLbPeriod=\'day\';renderInstantHistoryTab()" style="width:auto;padding:4px 8px;font-size:10px;">Day</button>' +
+                '<button type="button" class="btn-secondary' + (period === 'week' ? ' active' : '') + '" onclick="window._instantLbPeriod=\'week\';renderInstantHistoryTab()" style="width:auto;padding:4px 8px;font-size:10px;">Week</button>' +
+                '<button type="button" class="btn-secondary' + (period === 'all' ? ' active' : '') + '" onclick="window._instantLbPeriod=\'all\';renderInstantHistoryTab()" style="width:auto;padding:4px 8px;font-size:10px;">All</button>' +
+                '</div>';
+            const lbRes = await fetch('/api/instant/leaderboard?period=' + encodeURIComponent(period) + '&_=' + Date.now(), { cache: 'no-store' });
+            const lbData = await lbRes.json();
+            if (!lbData.success || !lbData.leaders || !lbData.leaders.length) {
+                html += '<p class="small">No winners yet.</p>';
+            } else {
+                html += lbData.leaders.map(function (row, i) {
+                    const mult = Number(row.multiplier) || 0;
+                    const multLabel = mult ? mult + 'X' : '—';
+                    const bet = Number(row.paid || row.stake || 0);
+                    const prize = Number(row.prize || 0);
+                    const gridHtml = row.grid ? renderInstantGridHtml(row.grid, row.drawnNumbers || [], row.winningCells || [], 'lb' + period + i) : '';
+                    return '<div class="instant-lb-row"><div class="instant-lb-meta">' +
+                        '<strong>#' + (i + 1) + ' ' + escapeHtmlInstant(row.username) + '</strong><br>' +
+                        'Bet ' + bet.toFixed(0) + ' · Won ' + prize.toFixed(0) + ' · <b>' + multLabel + '</b>' +
+                        '</div><div class="instant-lb-card">' + gridHtml + '</div></div>';
+                }).join('');
+            }
         } else {
-            html += lbData.leaders.map(function (row, i) {
-                const mult = Number(row.multiplier) || 0;
-                const multLabel = mult ? mult + 'X' : '—';
-                const gridHtml = row.grid ? renderInstantGridHtml(row.grid, row.drawnNumbers || [], row.winningCells || [], 'lb' + period + i) : '';
-                return '<div class="instant-lb-row"><div class="instant-lb-meta">' +
-                    '<strong>#' + (i + 1) + ' ' + escapeHtmlInstant(row.username) + '</strong><br>' +
-                    'Bet ' + Number(row.paid).toFixed(0) + ' · Won ' + Number(row.prize).toFixed(0) + ' · <b>' + multLabel + '</b>' +
-                    '</div><div class="instant-lb-card">' + gridHtml + '</div></div>';
-            }).join('');
-        }
-
-        html += '<div style="font-weight:700;font-size:13px;margin:14px 0 6px;">📜 My Instant history</div>';
-        if (!histData.success || !histData.history || !histData.history.length) {
-            html += '<p class="small">No plays yet.</p>';
-        } else {
-            html += histData.history.map(function (h) {
-                const won = Number(h.prize) > 0;
-                const mult = Number(h.multiplier) || 0;
-                const gridHtml = h.grid ? renderInstantGridHtml(h.grid, h.drawnNumbers || [], h.winningCells || [], 'hist' + h.id) : '';
-                return '<div class="instant-lb-row">' +
-                    '<div class="instant-lb-meta"><strong>#' + h.cardNumber + '</strong><br>' +
-                    (won ? ('Won ' + Number(h.prize).toFixed(0) + ' · <b>' + mult + 'X</b>') : 'LOSE') +
-                    '<br><span style="opacity:.65">' + (h.date ? new Date(h.date).toLocaleString() : '') + '</span></div>' +
-                    '<div class="instant-lb-card">' + gridHtml + '</div></div>';
-            }).join('');
+            const histRes = await fetch('/api/instant/history?username=' + encodeURIComponent(currentUsername || '') + '&_=' + Date.now(), { cache: 'no-store' });
+            const histData = await histRes.json();
+            if (!histData.success || !histData.history || !histData.history.length) {
+                html += '<p class="small">No plays yet.</p>';
+            } else {
+                html += histData.history.map(function (h) {
+                    const won = Number(h.prize) > 0;
+                    const mult = Number(h.multiplier) || 0;
+                    const bet = Number(h.paid != null ? h.paid : (h.stake || 0));
+                    const prize = Number(h.prize || 0);
+                    const gridHtml = h.grid ? renderInstantGridHtml(h.grid, h.drawnNumbers || [], h.winningCells || [], 'hist' + h.id) : '';
+                    const outcome = won
+                        ? ('Won ' + prize.toFixed(0) + ' · <b>' + mult + 'X</b> on bet ' + bet.toFixed(0))
+                        : ('LOSE · Bet ' + bet.toFixed(0));
+                    return '<div class="instant-lb-row">' +
+                        '<div class="instant-lb-meta"><strong>#' + h.cardNumber + '</strong><br>' +
+                        outcome +
+                        '<br><span style="opacity:.65">' + (h.date ? new Date(h.date).toLocaleString() : '') + '</span></div>' +
+                        '<div class="instant-lb-card">' + gridHtml + '</div></div>';
+                }).join('');
+            }
         }
         list.innerHTML = html;
     } catch (_) {
