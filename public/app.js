@@ -2913,17 +2913,20 @@ async function refreshSpecialHome() {
     const msg = document.getElementById('specialHomeMsg');
     if (textEl) textEl.textContent = (d.prize != null ? d.prize : '') + ' ' + (d.promoText || '') + ' ' + (d.gameTypeLabel || '');
     if (stakeEl) stakeEl.textContent = 'Stake ' + (d.stake != null ? d.stake : '—') + ' Birr · ' + (d.patternName || '');
-    if (d.phase === 'COUNTDOWN') {
+    // Treat finished countdown as open (server may lag one tick)
+    const openNow = (d.phase === 'OPEN' || d.phase === 'SELECTING') ||
+      (d.phase === 'COUNTDOWN' && Number(d.countdownLeft) <= 0 && d.countdownEndsAt);
+    if (d.phase === 'COUNTDOWN' && !openNow) {
       if (cdEl) cdEl.textContent = formatSpecialCd(d.countdownLeft);
       if (btn) { btn.disabled = true; btn.textContent = 'Play'; }
       if (msg) msg.textContent = 'Game has not started yet';
-    } else if (d.phase === 'OPEN' || d.phase === 'SELECTING') {
-      if (cdEl) cdEl.textContent = d.selectionLeft ? ('Select · ' + d.selectionLeft + 's') : 'OPEN';
+    } else if (openNow) {
+      if (cdEl) cdEl.textContent = d.selectionLeft ? ('JOINING · ' + d.selectionLeft + 's') : 'JOINING';
       if (btn) { btn.disabled = false; btn.textContent = 'Play'; }
-      if (msg) msg.textContent = 'Tap Play to select cards';
+      if (msg) msg.textContent = 'Room is open — tap Play to select cards';
     } else if (d.phase === 'PLAYING') {
-      if (cdEl) cdEl.textContent = 'LIVE';
-      if (btn) { btn.disabled = true; btn.textContent = 'Started'; }
+      if (cdEl) cdEl.textContent = 'PLAYING';
+      if (btn) { btn.disabled = true; btn.textContent = 'Playing'; }
       if (msg) msg.textContent = d.lateMessage || 'Game has already started. Come back next time!';
     } else if (d.phase === 'ENDED') {
       if (cdEl) cdEl.textContent = 'ENDED';
@@ -3012,7 +3015,7 @@ async function openSpecialEvent() {
   const d = await r.json();
   specialState = d;
   if (!d.success) return alertUser('Could not load special event.');
-  if (d.phase === 'COUNTDOWN') return alertUser('Game has not started yet');
+  if (d.phase === 'COUNTDOWN' && Number(d.countdownLeft) > 0) return alertUser('Game has not started yet');
   if (d.phase === 'PLAYING' || d.phase === 'ENDED') return alertUser(d.lateMessage || 'Game already started. Come back next time!');
   if (d.phase !== 'OPEN' && d.phase !== 'SELECTING') return alertUser('Special game is not open.');
   hide('homeBox');

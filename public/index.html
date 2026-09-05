@@ -766,6 +766,8 @@ body.instant-immersive #tabGames{padding-bottom:70px;}
 .instant-pick-grid::-webkit-scrollbar{width:4px;}
 .instant-pick-grid::-webkit-scrollbar-thumb{background:rgba(255,255,255,.25);border-radius:4px;}
 .instant-pick-grid .card-item{padding:3px 1px;font-size:9px;min-height:24px;border-radius:6px;}
+.grid-container.instant-pick-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:4px;}
+.grid-container.instant-pick-grid .card-item{padding:3px 1px;font-size:9px;min-height:24px;border-radius:6px;}
 .instant-scroll-hint{
   font-size:10px;opacity:.55;margin-top:2px;pointer-events:none;
 }
@@ -937,7 +939,7 @@ body.instant-immersive .instant-sticky-play{display:none;}
     <div class="small" id="specialSelMeta" style="margin:6px 0 8px;"></div>
     <div id="specialSelTimer" style="font-size:20px;font-weight:800;margin-bottom:8px;">—</div>
     <input type="search" id="specialCardSearch" placeholder="Search card #" style="width:100%;margin-bottom:8px;padding:8px;border-radius:8px;border:1px solid var(--card-border,#333);background:var(--card);color:var(--text);" oninput="filterSpecialCards()">
-    <div id="specialCardGrid" class="instant-pick-grid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;max-height:45vh;overflow:auto;"></div>
+    <div id="specialCardGrid" class="instant-pick-grid" style="display:grid;grid-template-columns:repeat(8,1fr);gap:4px;max-height:45vh;overflow:auto;"></div>
     <div class="small" id="specialSelCost" style="margin:8px 0;">Selected 0 · Cost 0</div>
     <button class="btn-play" id="specialJoinBtn" onclick="confirmSpecialJoin()" style="width:100%;">Confirm cards</button>
     <p id="specialSelMsg" class="small" style="margin-top:8px;"></p>
@@ -1041,7 +1043,7 @@ body.instant-immersive .instant-sticky-play{display:none;}
    <div id="lockoutNotice" class="notice hidden"></div>
    <input type="search" id="cardSearchInput" placeholder="Search card number..." style="margin:10px 0;" oninput="searchCards(this.value)">
    <div id="cardPreview" class="hidden" style="margin:10px 0;text-align:left;"></div>
-   <div id="cardGrid" class="grid-container" style="max-height:50vh;overflow-y:auto;"></div>
+   <div id="cardGrid" class="grid-container instant-pick-grid" style="max-height:50vh;overflow-y:auto;"></div>
    <div id="readyBar" style="position:fixed;bottom:70px;left:0;right:0;background:var(--card);border-top:1px solid var(--line);padding:10px 15px;z-index:50;display:flex;align-items:center;justify-content:space-between;gap:10px;">
      <span>Selected: <strong id="selectedCount">0</strong></span>
      <button id="playGameBtn" class="btn-play" style="width:auto;margin:0;padding:10px 24px;" disabled onclick="launchGame()">READY 🚀</button>
@@ -1170,6 +1172,6 @@ body.instant-immersive .instant-sticky-play{display:none;}
   <div class="nav-item" onclick="switchTab('tabWallet',this)">💰<br><span data-i18n="navWallet">Wallet</span></div>
   <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
 </div>
-<script src="app.js?v=20260905-special-event1"></script>
+<script src="app.js?v=20260906-special-fix1"></script>
 </body>
 </html>

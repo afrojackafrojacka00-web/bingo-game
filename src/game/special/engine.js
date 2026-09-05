@@ -53,35 +53,69 @@ const COLS = [
 const DIAGS = [[[0,0],[1,1],[2,2],[3,3],[4,4]],[[0,4],[1,3],[2,2],[3,1],[4,0]]];
 const CORNERS = [[0,0],[0,4],[4,0],[4,4]];
 
+// Same pattern catalog / rules family as traditional bingo
 const PATTERN_NAMES = {
   any_one_line: 'Any One Line',
   any_two_lines: 'Any Two Lines',
-  any_square: 'Any Square',
-  four_corners: 'Four Corners',
-  full_house: 'Full House',
-  diagonal: 'Diagonal',
+  any_square: 'Any Square (2×2)',
+  full: 'Full House',
+  N: 'N', H: 'H', 'Reverse H': 'Reverse H', Z: 'Z', K: 'K', E: 'E',
+  'Three Horizontal Lines': 'Three Horizontal Lines',
+  'Three Vertical Lines': 'Three Vertical Lines',
+  '5': '5', M: 'M', cross: 'Cross',
+  vertical_line: 'One Vertical Line', horizontal_line: 'One Horizontal Line',
+  'Five Dots': 'Five Dots', x: 'X', t: 'T', reverse_t: 'Reverse T',
+  big_l: 'Big L', reverse_l: 'Reverse L',
+  'Top Triangle': 'Top Triangle', 'Bottom Triangle': 'Bottom Triangle',
+  half_above: 'Half Above', half_below: 'Half Below',
+};
+
+const ANY_ONE_LINE_PATTERNS = ROWS.concat(COLS).concat(DIAGS).concat([
+  CORNERS,
+  [[1,1],[3,1],[1,3],[3,3]],
+  [[2,1],[1,2],[2,2],[3,2],[2,3]],
+]);
+const ANY_TWO_LINE_PATTERNS = ROWS.concat(COLS).concat(DIAGS).concat([
+  CORNERS,
+  [[1,1],[3,1],[1,3],[3,3]],
+]);
+const FIXED_PATTERNS = {
+  N: [[0,0],[1,0],[2,0],[3,0],[4,0],[1,1],[2,2],[3,3],[4,4],[0,4],[1,4],[2,4],[3,4]],
+  H: [[0,0],[1,0],[2,0],[3,0],[4,0],[2,1],[2,2],[2,3],[0,4],[1,4],[2,4],[3,4],[4,4]],
+  'Reverse H': [[0,0],[0,1],[0,2],[0,3],[0,4],[1,2],[2,2],[3,2],[4,0],[4,1],[4,2],[4,3],[4,4]],
+  Z: [[0,0],[0,1],[0,2],[0,3],[0,4],[1,3],[2,2],[3,1],[4,0],[4,1],[4,2],[4,3],[4,4]],
+  K: [[0,0],[1,0],[2,0],[3,0],[4,0],[0,3],[1,2],[2,1],[3,2],[4,3]],
+  E: [[0,0],[1,0],[2,0],[3,0],[4,0],[0,1],[0,2],[0,3],[0,4],[2,1],[2,2],[2,3],[2,4],[4,1],[4,2],[4,3],[4,4]],
+  'Three Horizontal Lines': [[0,0],[2,0],[4,0],[0,1],[0,2],[0,3],[0,4],[2,1],[2,2],[2,3],[2,4],[4,1],[4,2],[4,3],[4,4]],
+  'Three Vertical Lines': [[0,0],[1,0],[2,0],[3,0],[4,0],[0,2],[1,2],[2,2],[3,2],[4,2],[0,4],[1,4],[2,4],[3,4],[4,4]],
+  '5': [[0,0],[1,0],[2,0],[3,4],[4,0],[0,1],[0,2],[0,3],[0,4],[2,1],[2,2],[2,3],[2,4],[4,1],[4,2],[4,3],[4,4]],
+  M: [[0,0],[1,0],[2,0],[3,0],[4,0],[1,1],[2,2],[1,3],[0,4],[1,4],[2,4],[3,4],[4,4]],
+  cross: [[2,0],[2,1],[3,2],[2,4],[2,2],[0,2],[1,2],[2,3],[4,2]],
+  vertical_line: [[0,2],[1,2],[2,2],[3,2],[4,2]],
+  'Five Dots': [[0,0],[0,4],[2,2],[4,0],[4,4]],
+  horizontal_line: [[2,0],[2,1],[2,2],[2,3],[2,4]],
+  full: (function(){ const a=[]; for(let r=0;r<5;r++) for(let c=0;c<5;c++) a.push([r,c]); return a; })(),
+  x: [[0,0],[1,1],[2,2],[3,3],[4,4],[0,4],[1,3],[3,1],[4,0]],
+  t: [[0,0],[0,1],[0,2],[0,3],[0,4],[1,2],[2,2],[3,2],[4,2]],
+  reverse_t: [[4,0],[4,1],[4,2],[4,3],[4,4],[0,2],[1,2],[2,2],[3,2]],
+  big_l: [[0,0],[1,0],[2,0],[3,0],[4,0],[4,1],[4,2],[4,3],[4,4]],
+  reverse_l: [[0,4],[1,4],[2,4],[3,4],[4,4],[4,0],[4,1],[4,2],[4,3]],
+  'Top Triangle': [[0,0],[1,0],[2,0],[3,0],[4,0],[0,1],[1,1],[2,1],[3,1],[0,2],[1,2],[2,2],[0,3],[1,3],[0,4]],
+  'Bottom Triangle': [[4,0],[4,1],[4,2],[4,3],[4,4],[3,1],[3,2],[3,3],[3,4],[2,2],[2,3],[2,4],[1,3],[1,4],[0,4]],
+  half_above: [[0,0],[0,1],[0,2],[0,3],[0,4],[1,0],[1,1],[1,2],[1,3],[1,4],[2,0],[2,1],[2,2],[2,3],[2,4]],
+  half_below: [[2,0],[2,1],[2,2],[2,3],[2,4],[3,0],[3,1],[3,2],[3,3],[3,4],[4,0],[4,1],[4,2],[4,3],[4,4]],
 };
 
 function getPatternCells(pattern) {
-  if (pattern === 'any_one_line') return ROWS.concat(COLS).concat(DIAGS);
-  if (pattern === 'any_two_lines') return ROWS.concat(COLS).concat(DIAGS);
-  if (pattern === 'diagonal') return DIAGS;
-  if (pattern === 'four_corners') return [CORNERS];
-  if (pattern === 'full_house') {
-    const all = [];
-    for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) all.push([r, c]);
-    return [all];
-  }
+  if (pattern === 'any_one_line') return ANY_ONE_LINE_PATTERNS;
+  if (pattern === 'any_two_lines') return ANY_TWO_LINE_PATTERNS;
   if (pattern === 'any_square') {
     const out = [];
-    for (let r = 0; r < 4; r++) {
-      for (let c = 0; c < 4; c++) {
-        out.push([[r,c],[r,c+1],[r+1,c],[r+1,c+1]]);
-      }
-    }
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) out.push([[r,c],[r,c+1],[r+1,c],[r+1,c+1]]);
     return out;
   }
-  return ROWS.concat(COLS);
+  if (FIXED_PATTERNS[pattern]) return [FIXED_PATTERNS[pattern]];
+  return ANY_ONE_LINE_PATTERNS;
 }
 
 function cellHit(grid, r, c, drawnSet) {
@@ -227,6 +261,11 @@ function broadcast(event, payload) {
 
 function publicState() {
   const now = Date.now();
+  // Auto-open when countdown has finished (even if tick was delayed)
+  if (phase === 'COUNTDOWN' && countdownEndsAt && now >= countdownEndsAt) {
+    phase = 'OPEN';
+    selectionEndsAt = 0;
+  }
   let countdownLeft = 0;
   if (phase === 'COUNTDOWN' && countdownEndsAt) {
     countdownLeft = Math.max(0, Math.ceil((countdownEndsAt - now) / 1000));
@@ -553,7 +592,7 @@ async function adminUpdate(body) {
   if (body.prize != null) patch.prize = Math.max(0, Number(body.prize));
   if (body.gameTypeLabel != null) patch.gameTypeLabel = String(body.gameTypeLabel).slice(0, 80);
   if (body.promoText != null) patch.promoText = String(body.promoText).slice(0, 120);
-  if (body.winningPattern != null && PATTERN_NAMES[body.winningPattern]) patch.winningPattern = body.winningPattern;
+  if (body.winningPattern != null && (PATTERN_NAMES[body.winningPattern] || body.winningPattern === 'full')) patch.winningPattern = body.winningPattern;
   if (body.drawIntervalSeconds != null) patch.drawIntervalSeconds = Math.max(1, Math.min(30, Number(body.drawIntervalSeconds)));
   if (body.selectionSeconds != null) patch.selectionSeconds = Math.max(15, Math.min(300, Number(body.selectionSeconds)));
   if (body.endedMessage != null) patch.endedMessage = String(body.endedMessage).slice(0, 240);

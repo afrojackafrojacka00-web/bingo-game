@@ -997,9 +997,10 @@ table.data tr:hover td { background: var(--card-hover); }
               <div class="switch-label">Display special block</div>
               <div style="display:flex;align-items:center;gap:10px;">
                 <span class="switch-state off" id="spVisState">OFF</span>
-                <label class="switch"><input type="checkbox" id="spVisibleToggle"><span class="switch-slider"></span></label>
+                <label class="switch"><input type="checkbox" id="spVisibleToggle" onchange="toggleSpecialVisible(this)"><span class="switch-slider"></span></label>
               </div>
             </div>
+            <p class="hint">Applies immediately after confirmation — no need to press Save.</p>
           </div>
           <div class="inst-card">
             <h3>Prize & stake</h3>
@@ -1023,10 +1024,31 @@ table.data tr:hover td { background: var(--card-hover); }
               <select id="spPattern" style="width:100%;margin-top:4px;">
                 <option value="any_one_line">Any One Line</option>
                 <option value="any_two_lines">Any Two Lines</option>
-                <option value="any_square">Any Square</option>
-                <option value="four_corners">Four Corners</option>
-                <option value="diagonal">Diagonal</option>
-                <option value="full_house">Full House</option>
+                <option value="any_square">Any Square (2×2)</option>
+                <option value="full">Full House</option>
+                <option value="N">N</option>
+                <option value="H">H</option>
+                <option value="Reverse H">Reverse H</option>
+                <option value="Z">Z</option>
+                <option value="K">K</option>
+                <option value="E">E</option>
+                <option value="Three Horizontal Lines">Three Horizontal Lines</option>
+                <option value="Three Vertical Lines">Three Vertical Lines</option>
+                <option value="5">5</option>
+                <option value="M">M</option>
+                <option value="cross">Cross</option>
+                <option value="vertical_line">One Vertical Line</option>
+                <option value="horizontal_line">One Horizontal Line</option>
+                <option value="Five Dots">Five Dots</option>
+                <option value="x">X</option>
+                <option value="t">T</option>
+                <option value="reverse_t">Reverse T</option>
+                <option value="big_l">Big L</option>
+                <option value="reverse_l">Reverse L</option>
+                <option value="Top Triangle">Top Triangle</option>
+                <option value="Bottom Triangle">Bottom Triangle</option>
+                <option value="half_above">Half Above</option>
+                <option value="half_below">Half Below</option>
               </select>
             </label>
             <label class="muted" style="font-size:12px;">Draw gap (sec)
@@ -1045,18 +1067,20 @@ table.data tr:hover td { background: var(--card-hover); }
             <label class="muted" style="font-size:12px;margin-left:10px;">Minutes
               <input type="number" id="spMins" min="0" max="59" value="30" style="width:70px;margin-left:6px;">
             </label>
-            <div class="row-actions">
-              <button class="btn btn-primary btn-sm" onclick="saveSpecialEvent(true)">Save &amp; start countdown</button>
-              <button class="btn btn-ghost btn-sm" onclick="saveSpecialEvent(false)">Save settings only</button>
-            </div>
           </div>
           <div class="inst-card">
             <h3>Ended message</h3>
             <textarea id="spEndedMsg" rows="2" style="width:100%;font-size:13px;"></textarea>
-            <div class="row-actions">
-              <button class="btn btn-ghost btn-sm" onclick="specialResetIdle()">Reset to idle</button>
-              <button class="btn btn-ghost btn-sm" onclick="loadSpecialAdmin()">Refresh</button>
-            </div>
+          </div>
+        </div>
+        <div class="inst-card" style="margin-top:14px;">
+          <h3>Actions</h3>
+          <p class="hint">Save all settings above, schedule countdown, or reset the room after a game.</p>
+          <div class="row-actions">
+            <button class="btn btn-primary btn-sm" onclick="saveSpecialEvent(true)">Save &amp; start countdown</button>
+            <button class="btn btn-primary btn-sm" onclick="saveSpecialEvent(false)">Save settings</button>
+            <button class="btn btn-ghost btn-sm" onclick="specialResetIdle()">Reset to idle</button>
+            <button class="btn btn-ghost btn-sm" onclick="loadSpecialAdmin()">Refresh</button>
           </div>
         </div>
         <div id="spAdminMsg" class="muted" style="margin-top:10px;font-size:12px;"></div>
@@ -2599,7 +2623,32 @@ async function loadSpecialAdmin() {
   }
 }
 
+async function toggleSpecialVisible(el) {
+  if (!requireSecret()) { el.checked = !el.checked; return; }
+  const want = !!el.checked;
+  const ok = confirm(want
+    ? 'Show the Special Event block on the home screen for all users?'
+    : 'Hide the Special Event block from the home screen?');
+  if (!ok) { el.checked = !want; return; }
+  try {
+    const r = await fetch('/api/admin/special', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminSecretHeader() },
+      body: JSON.stringify({ adminSecret: getSecret(), visible: want })
+    });
+    const d = await r.json();
+    if (!d.success) { alert(d.message || 'Failed'); el.checked = !want; return; }
+    syncSwitchLabel(el, 'spVisState');
+    document.getElementById('spAdminMsg').textContent = want ? 'Special block is now VISIBLE on home.' : 'Special block is now HIDDEN.';
+    loadSpecialAdmin();
+  } catch (e) {
+    alert('Network error');
+    el.checked = !want;
+  }
+}
+
 async function saveSpecialEvent(withCountdown) {
+
   if (!requireSecret()) return;
   const body = {
     adminSecret: getSecret(),
