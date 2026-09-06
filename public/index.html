@@ -934,7 +934,10 @@ body.instant-immersive .instant-sticky-play{display:none;}
   <div id="specialBox" class="card hidden">
     <div class="page-title" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
       <h2 style="margin:0;font-size:16px;">🏆 Special Event</h2>
-      <button class="back-btn" onclick="leaveSpecialSelection()">←</button>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button type="button" class="back-btn" onclick="openSpecialHistory()" style="margin:0;">History</button>
+        <button class="back-btn" onclick="leaveSpecialSelection()">←</button>
+      </div>
     </div>
     <div class="small" id="specialSelMeta" style="margin:6px 0 8px;"></div>
     <div id="specialSelTimer" style="font-size:20px;font-weight:800;margin-bottom:8px;">—</div>
@@ -943,6 +946,14 @@ body.instant-immersive .instant-sticky-play{display:none;}
     <div class="small" id="specialSelCost" style="margin:8px 0;">Selected 0 · Cost 0</div>
     <button class="btn-play" id="specialJoinBtn" onclick="confirmSpecialJoin()" style="width:100%;">READY</button>
     <p id="specialSelMsg" class="small" style="margin-top:8px;"></p>
+  </div>
+
+  <div id="specialHistoryBox" class="card hidden">
+    <div class="page-title" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+      <h2 style="margin:0;font-size:16px;">⭐ Special History</h2>
+      <button class="back-btn" onclick="closeSpecialHistory()">←</button>
+    </div>
+    <div id="specialHistoryList" class="history-list" style="margin-top:10px;"></div>
   </div>
 
   <div id="specialPlayBox" class="card hidden">
@@ -1172,6 +1183,6 @@ body.instant-immersive .instant-sticky-play{display:none;}
   <div class="nav-item" onclick="switchTab('tabWallet',this)">💰<br><span data-i18n="navWallet">Wallet</span></div>
   <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
 </div>
-<script src="app.js?v=20260906-special-fix8"></script>
+<script src="app.js?v=20260906-special-fix9"></script>
 </body>
 </html>

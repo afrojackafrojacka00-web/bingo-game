@@ -107,7 +107,7 @@ async function state(){
     if(d.winnerPayload){ended=true;showWinner(d.winnerPayload)}
   }catch{}
 }
-function header(){patternName.textContent=room.patternName||'Any One Line';playersPlaying.textContent=`Players | ${room.totalCards||0}`;calledCount.textContent=`${drawn.size} / 75`;lastNumber.textContent=room.lastNumber?`${letter(room.lastNumber)} ${room.lastNumber}`:'--';prizePool.textContent=Number(room.prizePool||0).toFixed(2);renderLastCalled()}
+function header(){patternName.textContent=room.patternName||'Any One Line';playersPlaying.textContent=isSpecial?'':'Players | '+(room.totalCards||0);if(isSpecial&&playersPlaying){playersPlaying.style.display='none'}else if(playersPlaying){playersPlaying.style.display='';}calledCount.textContent=`${drawn.size} / 75`;lastNumber.textContent=room.lastNumber?`${letter(room.lastNumber)} ${room.lastNumber}`:'--';prizePool.textContent=Number(room.prizePool||0).toFixed(2);renderLastCalled()}
 function renderLastCalled(){
     const el=document.getElementById('lastCalledBalls');
     if(!el)return;
