@@ -546,6 +546,73 @@ async function goToGameScreen() {
     renderRooms();
 }
 
+
+function refreshToHome() {
+    try {
+        // Leave special selection/play if open
+        if (typeof leaveSpecialSelection === 'function') {
+            try { leaveSpecialSelection(); } catch (_) {}
+        }
+        if (typeof closeSpecialPlay === 'function') {
+            try { closeSpecialPlay(); } catch (_) {}
+        }
+        // Instant
+        if (typeof leaveInstantPlay === 'function') {
+            try { leaveInstantPlay(); } catch (_) {}
+        }
+        if (typeof leaveInstantSelection === 'function') {
+            try { leaveInstantSelection(); } catch (_) {}
+        }
+        // Classic room
+        if (typeof leaveCurrentRoom === 'function' && currentStake) {
+            try { leaveCurrentRoom(); } catch (_) {}
+        }
+        if (typeof returnToRooms === 'function') {
+            try { returnToRooms(); } catch (_) {}
+        }
+        showHome();
+        switchTab('tabGames', document.querySelector('.nav-item'));
+        // Soft reload of user balance/data
+        if (currentUsername && typeof loadUserData === 'function') {
+            loadUserData(currentUsername).catch(() => {});
+        }
+        try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) { window.scrollTo(0, 0); }
+    } catch (e) {
+        console.error('refreshToHome', e);
+        location.href = '/index.html';
+    }
+}
+window.refreshToHome = refreshToHome;
+
+function setDepositChipVisible(on) {
+    const chip = document.getElementById('depositFloatChip');
+    if (!chip) return;
+    if (on) {
+        chip.style.display = 'inline-flex';
+        // next frame for slide-in
+        requestAnimationFrame(() => chip.classList.add('show'));
+    } else {
+        chip.classList.remove('show');
+        setTimeout(() => {
+            if (!chip.classList.contains('show')) chip.style.display = 'none';
+        }, 280);
+    }
+}
+
+async function openQuickDeposit() {
+    try {
+        // Ensure wallet context, then open deposit modal
+        if (typeof openDepositModal === 'function') {
+            await openDepositModal();
+        }
+    } catch (e) {
+        console.error(e);
+        // Fallback: go to wallet tab
+        switchTab('tabWallet', document.querySelectorAll('.nav-item')[2]);
+    }
+}
+window.openQuickDeposit = openQuickDeposit;
+
 function showHome() {
     hide('roomsBox');
     hide('selectionBox');
@@ -843,6 +910,7 @@ function showAuthBox() {
     hide('bootSplash');
     show('authBox');
     hide('headerBar'); hide('bottomNav');
+    try { setDepositChipVisible(false); } catch (_) {}
     document.querySelectorAll('.tab-content').forEach(t => hide(t.id));
     markAppBooted();
 }
@@ -855,6 +923,7 @@ async function showHomeScreen(username) {
     document.getElementById('playerDisplay').innerText = username;
     hide('bootSplash');
     hide('authBox'); show('headerBar'); show('bottomNav');
+    try { setDepositChipVisible(true); } catch (_) {}
     markAppBooted();
     applyLanguage(safeStorage.get('bingoLang') || 'am', false);
     switchTab('tabGames', document.querySelector('.nav-item'));
@@ -1684,6 +1753,7 @@ function switchTab(tabId, navElement) {
 }
 
 function logoutUser() {
+    try { setDepositChipVisible(false); } catch (_) {}
     stopLobbyTimer();
     if (typeof disconnectInstantSocket === 'function') disconnectInstantSocket();
     if (notificationRefreshTimer) {

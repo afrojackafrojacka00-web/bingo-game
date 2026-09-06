@@ -208,24 +208,88 @@ button:disabled { opacity:.55; cursor:not-allowed; }
   display:flex;
   justify-content:space-between;
   align-items:center;
-  gap:10px;
-  background:var(--card);
-  padding:12px 14px;
-  border-radius:var(--radius-sm);
-  margin-bottom:16px;
-  border:1px solid var(--card-border);
+  gap:8px;
+  background:rgba(21,29,39,.72);
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+  padding:8px 10px;
+  border-radius:14px;
+  margin-bottom:10px;
+  border:1px solid rgba(255,255,255,.06);
   color:var(--text-color);
-  box-shadow:var(--shadow);
+  box-shadow:0 6px 20px rgba(0,0,0,.18);
+  position:relative;
+  z-index:40;
+}
+[data-theme="light"] .header-bar {
+  background:rgba(255,255,255,.78);
+  border-color:rgba(15,23,42,.08);
 }
 .user-info {
   display:flex;
   align-items:center;
-  gap:8px;
-  font-size:14px;
+  gap:6px;
+  font-size:12px;
   font-weight:500;
-  flex-wrap:wrap;
+  flex-wrap:nowrap;
+  min-width:0;
   color:var(--text-color);
 }
+.user-info span{white-space:nowrap;}
+.header-actions{display:flex;gap:6px;align-items:center;flex-shrink:0;}
+.header-icon-btn{
+  width:32px;height:32px;border-radius:10px;
+  display:inline-flex;align-items:center;justify-content:center;
+  background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.08);
+  color:var(--text-color);
+  font-size:15px;padding:0;margin:0;cursor:pointer;
+  transition:transform .15s ease, background .15s ease;
+}
+.header-icon-btn:hover{background:rgba(255,255,255,.12);transform:scale(1.04);}
+.header-icon-btn:active{transform:scale(.96);}
+#logoutBtn.btn-logout{padding:6px 10px;font-size:11px;border-radius:10px;margin:0;}
+
+/* Floating deposit chip — under header, slides from right */
+#depositFloatChip{
+  position:fixed;
+  top:58px;
+  right:10px;
+  z-index:45;
+  display:none;
+  align-items:center;
+  gap:8px;
+  padding:8px 12px 8px 10px;
+  border-radius:999px;
+  border:1px solid rgba(245,158,11,.35);
+  background:rgba(15,23,42,.55);
+  backdrop-filter:blur(14px);
+  -webkit-backdrop-filter:blur(14px);
+  color:#f8fafc;
+  box-shadow:0 8px 24px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.08);
+  cursor:pointer;
+  transform:translateX(120%);
+  opacity:0;
+  transition:transform .35s cubic-bezier(.2,.9,.2,1), opacity .25s ease;
+  font-size:12px;font-weight:700;letter-spacing:.02em;
+  user-select:none;
+}
+#depositFloatChip.show{
+  display:inline-flex;
+  transform:translateX(0);
+  opacity:1;
+}
+#depositFloatChip .df-ico{
+  width:26px;height:26px;border-radius:50%;
+  display:inline-flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,#f59e0b,#ea580c);
+  color:#111;font-size:13px;font-weight:800;
+  box-shadow:0 2px 8px rgba(245,158,11,.4);
+}
+#depositFloatChip .df-txt{line-height:1.1;}
+#depositFloatChip .df-txt small{display:block;font-size:10px;font-weight:500;opacity:.75;margin-top:1px;}
+#depositFloatChip:active{transform:translateX(0) scale(.97);}
+body.instant-immersive #depositFloatChip{display:none !important;}
 .status-container {
   display:inline-flex;
   align-items:center;
@@ -842,14 +906,19 @@ body.instant-immersive .instant-sticky-play{display:none;}
   <div class="user-info">
     <div class="status-container"><span>📶</span><span id="connectionDot" class="status-dot offline"></span></div>
     <span>👤 <strong id="playerDisplay">User</strong></span>
-    <span>| 💰 <strong id="balanceDisplay">10.00</strong> Birr</span>
+    <span>| 💰 <strong id="balanceDisplay">10.00</strong> <span data-i18n="birr">Birr</span></span>
   </div>
-  <div style="display:flex;gap:12px;align-items:center;">
-    <button id="profileBtn" onclick="toggleProfileModal()" style="position:relative;background:none;border:none;font-size:20px;padding:0;width:auto;margin:0;">👤</button>
-    <button id="notifBell" onclick="toggleNotificationModal()" style="position:relative;background:none;border:none;font-size:20px;padding:0;width:auto;margin:0;">🔔<span id="notifBadge" class="hidden" style="position:absolute;top:-5px;right:-5px;background:#ff4d4d;color:#fff;font-size:10px;padding:2px 6px;border-radius:50%;">0</span></button>
+  <div class="header-actions">
+    <button type="button" class="header-icon-btn" id="homeRefreshBtn" title="Home" aria-label="Refresh to home" onclick="refreshToHome()">↻</button>
+    <button type="button" class="header-icon-btn" id="profileBtn" onclick="toggleProfileModal()" aria-label="Profile">👤</button>
+    <button type="button" class="header-icon-btn" id="notifBell" onclick="toggleNotificationModal()" aria-label="Notifications" style="position:relative;">🔔<span id="notifBadge" class="hidden" style="position:absolute;top:-4px;right:-4px;background:#ff4d4d;color:#fff;font-size:9px;padding:1px 5px;border-radius:50%;">0</span></button>
     <button id="logoutBtn" class="btn-logout" onclick="logoutUser()">Logout</button>
   </div>
 </div>
+<button type="button" id="depositFloatChip" class="" onclick="openQuickDeposit()" aria-label="Deposit">
+  <span class="df-ico">+</span>
+  <span class="df-txt"><span data-i18n="deposit">Deposit</span><small>Wallet</small></span>
+</button>
 
 <div id="notifModal" class="modal hidden">
  <div class="card" style="max-height:85vh;display:flex;flex-direction:column;">
@@ -1209,6 +1278,6 @@ body.instant-immersive .instant-sticky-play{display:none;}
   <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
 </div>
 <script src="i18n.js?v=3""></script>
-<script src="app.js?v=20260906-kal-boot2"></script>
+<script src="app.js?v=20260906-header-deposit"></script>
 </body>
 </html>
