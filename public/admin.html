@@ -1159,7 +1159,14 @@ table.data tr:hover td { background: var(--card-hover); }
             <option value="200">200</option>
             <option value="500">500</option>
           </select>
+          <select id="profitPeriod" onchange="loadHouseProfit()">
+            <option value="day">Today</option>
+            <option value="week">This week</option>
+            <option value="month">This month</option>
+            <option value="all" selected>All time</option>
+          </select>
           <button class="btn btn-ghost btn-sm" onclick="loadHouseProfit()">Filter</button>
+          <button class="btn btn-ghost btn-sm" onclick="repairCancelledHouse()" title="Move full pot to house for past cancelled games">Repair cancelled pots</button>
         </div>
         <div id="houseProfitBox" class="empty">—</div>
       </div>
@@ -1994,9 +2001,11 @@ async function loadHouseProfit() {
   const fr = document.getElementById('profitFrom');
   const to = document.getElementById('profitTo');
   const sk = document.getElementById('profitStake');
+  const per = document.getElementById('profitPeriod');
   if (fr && fr.value) params.set('from', fr.value);
   if (to && to.value) params.set('to', to.value);
   if (sk && sk.value) params.set('stake', sk.value);
+  if (per && per.value) params.set('period', per.value);
   try {
     const r = await fetch('/api/admin/house-profit?' + params.toString(), { headers: adminSecretHeader() });
     const d = await r.json();
@@ -2005,26 +2014,47 @@ async function loadHouseProfit() {
       return;
     }
     const s = d.summary || {};
-    let out = '<div class="stats-grid" style="margin-bottom:14px;">' +
-      '<div class="stat-card"><div class="stat-label">House profit</div><div class="stat-value green">' + fmtMoney(s.total_house || 0) + '</div></div>' +
-      '<div class="stat-card"><div class="stat-label">Games</div><div class="stat-value">' + (s.games || 0) + '</div></div>' +
-      '<div class="stat-card"><div class="stat-label">Total pots</div><div class="stat-value">' + fmtMoney(s.total_pots || 0) + '</div></div>' +
-      '<div class="stat-card"><div class="stat-label">Paid to winners</div><div class="stat-value">' + fmtMoney(s.total_paid_winners || 0) + '</div></div>' +
-      '<div class="stat-card"><div class="stat-label">Exhausted games</div><div class="stat-value">' + (s.exhausted_games || 0) + '</div></div>' +
-      '<div class="stat-card"><div class="stat-label">From exhausted pots</div><div class="stat-value gold">' + fmtMoney(s.exhausted_house || 0) + '</div></div>' +
+    const classic = d.classic || {};
+    const instant = d.instant || {};
+    const special = d.special || {};
+    let out = '';
+    out += '<div class="stats-grid" style="margin-bottom:14px;">' +
+      '<div class="stat-card"><div class="stat-label">Grand total (all games)</div><div class="stat-value green">' + fmtMoney(d.grandTotal || 0) + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Traditional house</div><div class="stat-value">' + fmtMoney(classic.house || 0) + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Instant house</div><div class="stat-value">' + fmtMoney(instant.house || 0) + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Special house</div><div class="stat-value">' + fmtMoney(special.house || 0) + '</div></div>' +
       '</div>';
-    out += '<h3 style="font-size:14px;margin:12px 0 8px;">Today by room</h3>';
+
+    out += '<h3 style="font-size:14px;margin:14px 0 8px;">By game type</h3>';
+    out += '<div class="inst-table-wrap"><table class="inst-table"><thead><tr><th>Game</th><th>House</th><th>Volume / pots</th><th>Games / plays</th><th>Notes</th></tr></thead><tbody>';
+    out += '<tr><td><b>Traditional Bingo</b></td><td>' + fmtMoney(classic.house || 0) + '</td><td>' + fmtMoney(s.total_pots || 0) + '</td><td>' + (classic.games || 0) +
+      '</td><td>Cancelled→house ' + fmtMoney(classic.cancelledHouse || 0) + ' (' + (classic.cancelledGames || 0) + ') · Exhausted ' + fmtMoney(classic.exhaustedHouse || 0) + '</td></tr>';
+    out += '<tr><td><b>Instant Bingo</b></td><td>' + fmtMoney(instant.house || 0) + '</td><td>' + fmtMoney(instant.volume || 0) + '</td><td>' + (instant.plays || 0) +
+      '</td><td>Paid to winners ' + fmtMoney(instant.paidOut || 0) + '</td></tr>';
+    out += '<tr><td><b>Special Event</b></td><td>' + fmtMoney(special.house || 0) + '</td><td>' + fmtMoney(special.volume || 0) + '</td><td>' + (special.games || 0) +
+      '</td><td>Prize pool sum ' + fmtMoney(special.prize || 0) + '</td></tr>';
+    out += '</tbody></table></div>';
+
+    out += '<h3 style="font-size:14px;margin:14px 0 8px;">Traditional detail</h3>';
+    out += '<div class="stats-grid" style="margin-bottom:10px;">' +
+      '<div class="stat-card"><div class="stat-label">Paid to winners</div><div class="stat-value">' + fmtMoney(s.total_paid_winners || 0) + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Exhausted pots</div><div class="stat-value gold">' + fmtMoney(s.exhausted_house || 0) + '</div></div>' +
+      '<div class="stat-card"><div class="stat-label">Cancelled (all left)</div><div class="stat-value gold">' + fmtMoney(s.cancelled_house || 0) + '</div></div>' +
+      '</div>';
+
+    out += '<h3 style="font-size:14px;margin:12px 0 8px;">Today by classic room</h3>';
     const today = d.todayByStake || [];
-    if (!today.length) out += '<div class="empty">No completed games today.</div>';
+    if (!today.length) out += '<div class="empty">No classic games today.</div>';
     else out += today.map(function(row) {
       return '<div class="item-meta">' + row.stake + ' Birr · ' + row.games + ' games · house ' + fmtMoney(row.house) + '</div>';
     }).join('');
-    out += '<h3 style="font-size:14px;margin:12px 0 8px;">By room (filter)</h3>';
+
+    out += '<h3 style="font-size:14px;margin:12px 0 8px;">By classic room (filter)</h3>';
     (d.byStake || []).forEach(function(row) {
       out += '<div class="item-meta">' + row.stake + ' Birr · ' + row.games + ' games · house ' + fmtMoney(row.house) +
-        ' · avg cut ' + Number(row.avgCut || 0).toFixed(1) + '%</div>';
+        ' · cancelled ' + (row.cancelled || 0) + ' · avg cut ' + Number(row.avgCut || 0).toFixed(1) + '%</div>';
     });
-    out += '<h3 style="font-size:14px;margin:12px 0 8px;">By day</h3>';
+    out += '<h3 style="font-size:14px;margin:12px 0 8px;">Classic by day</h3>';
     (d.byDay || []).forEach(function(row) {
       out += '<div class="item-meta">' + esc(String(row.day).slice(0, 10)) + ' · ' + row.games + ' games · house ' + fmtMoney(row.house) + '</div>';
     });
@@ -2033,6 +2063,21 @@ async function loadHouseProfit() {
     console.error(e);
     box.innerHTML = '<div class="empty">Failed to load profit</div>';
   }
+}
+
+async function repairCancelledHouse() {
+  if (!requireSecret()) return;
+  if (!confirm('Set house = full pot for past CANCELLED classic games where money was missing?')) return;
+  try {
+    const r = await fetch('/api/admin/repair-cancelled-house', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminSecretHeader() },
+      body: JSON.stringify({ adminSecret: getSecret() })
+    });
+    const d = await r.json();
+    alert(d.success ? ('Fixed ' + (d.fixed || 0) + ' cancelled games') : (d.message || 'Failed'));
+    loadHouseProfit();
+  } catch (e) { alert('Network error'); }
 }
 
 

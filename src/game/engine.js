@@ -467,13 +467,28 @@ async function startRoomGame(room) {
 
         if (room.readyPlayers.size === 0) {
             clearDrawTimer(room);
+            // Players already paid at READY; no refund on mid-game leave.
+            // Entire locked pot belongs to the house (was vanishing as CANCELLED with only the partial rake).
+            const pot = Number(
+                room.frozenPrizePool != null
+                    ? room.frozenPrizePool
+                    : ((Number(room.frozenWinnerPrize) || 0) + (Number(room.frozenHouseCut) || 0))
+            );
             if (room.gameId) {
                 await pool.query(
-                    "UPDATE game_sessions SET status='CANCELLED', ended_at=NOW() WHERE id=$1",
-                    [room.gameId]
+                    `UPDATE game_sessions SET
+                        status = 'CANCELLED',
+                        ended_at = NOW(),
+                        winner_username = NULL,
+                        house_cut = $1,
+                        winner_prize = 0,
+                        prize_pool = COALESCE(prize_pool, $1),
+                        cut_percent = 100
+                     WHERE id = $2`,
+                    [pot, room.gameId]
                 );
             }
-            await resetRoom(room, 'Game ended because all players left.');
+            await resetRoom(room, 'Game ended because all players left. Entry payments went to the house.');
             return;
         }
 
@@ -662,12 +677,44 @@ app.get('/api/admin/house-profit', async (req, res) => {
     const from = req.query.from ? String(req.query.from) : null;
     const to = req.query.to ? String(req.query.to) : null;
     const stake = req.query.stake ? Number(req.query.stake) : null;
+    const period = String(req.query.period || 'all'); // day|week|month|all
     const params = [];
-    const where = ["status IN ('COMPLETED', 'EXHAUSTED')"];
+    const where = ["status IN ('COMPLETED', 'EXHAUSTED', 'CANCELLED')"];
+    // Period shortcuts (overridden by explicit from/to when provided)
+    if (!from && !to) {
+        if (period === 'day') where.push(`created_at >= CURRENT_DATE`);
+        else if (period === 'week') where.push(`created_at >= date_trunc('week', CURRENT_TIMESTAMP)`);
+        else if (period === 'month') where.push(`created_at >= date_trunc('month', CURRENT_TIMESTAMP)`);
+    }
     if (from) { params.push(from); where.push(`created_at >= $${params.length}::date`); }
     if (to) { params.push(to); where.push(`created_at < ($${params.length}::date + INTERVAL '1 day')`); }
     if (stake && Number.isFinite(stake)) { params.push(stake); where.push(`stake = $${params.length}`); }
     const wsql = where.join(' AND ');
+
+    // Instant date filter (uses paid_at / drawn_at / created)
+    const iParams = [];
+    const iWhere = ["1=1"];
+    if (!from && !to) {
+        if (period === 'day') iWhere.push(`e.created_at >= CURRENT_DATE`);
+        else if (period === 'week') iWhere.push(`e.created_at >= date_trunc('week', CURRENT_TIMESTAMP)`);
+        else if (period === 'month') iWhere.push(`e.created_at >= date_trunc('month', CURRENT_TIMESTAMP)`);
+    }
+    if (from) { iParams.push(from); iWhere.push(`e.created_at >= $${iParams.length}::date`); }
+    if (to) { iParams.push(to); iWhere.push(`e.created_at < ($${iParams.length}::date + INTERVAL '1 day')`); }
+    const iSql = iWhere.join(' AND ');
+
+    // Special date filter
+    const sParams = [];
+    const sWhere = ["status = 'COMPLETED'"];
+    if (!from && !to) {
+        if (period === 'day') sWhere.push(`COALESCE(completed_at, started_at, created_at) >= CURRENT_DATE`);
+        else if (period === 'week') sWhere.push(`COALESCE(completed_at, started_at, created_at) >= date_trunc('week', CURRENT_TIMESTAMP)`);
+        else if (period === 'month') sWhere.push(`COALESCE(completed_at, started_at, created_at) >= date_trunc('month', CURRENT_TIMESTAMP)`);
+    }
+    if (from) { sParams.push(from); sWhere.push(`COALESCE(completed_at, started_at, created_at) >= $${sParams.length}::date`); }
+    if (to) { sParams.push(to); sWhere.push(`COALESCE(completed_at, started_at, created_at) < ($${sParams.length}::date + INTERVAL '1 day')`); }
+    const sSql = sWhere.join(' AND ');
+
     try {
         const summary = await pool.query(
             `SELECT
@@ -676,9 +723,11 @@ app.get('/api/admin/house-profit', async (req, res) => {
                 COALESCE(SUM(house_cut),0)::float AS total_house,
                 COALESCE(SUM(winner_prize),0)::float AS total_paid_winners,
                 COALESCE(SUM(card_count),0)::int AS total_cards,
-                                COALESCE(SUM(player_count),0)::int AS total_player_seats,
+                COALESCE(SUM(player_count),0)::int AS total_player_seats,
                 COUNT(*) FILTER (WHERE status = 'EXHAUSTED')::int AS exhausted_games,
-                COALESCE(SUM(house_cut) FILTER (WHERE status = 'EXHAUSTED'),0)::float AS exhausted_house
+                COALESCE(SUM(house_cut) FILTER (WHERE status = 'EXHAUSTED'),0)::float AS exhausted_house,
+                COUNT(*) FILTER (WHERE status = 'CANCELLED')::int AS cancelled_games,
+                COALESCE(SUM(house_cut) FILTER (WHERE status = 'CANCELLED'),0)::float AS cancelled_house
              FROM game_sessions WHERE ${wsql}`,
             params
         );
@@ -687,7 +736,8 @@ app.get('/api/admin/house-profit', async (req, res) => {
                 COUNT(*)::int AS games,
                 COALESCE(SUM(house_cut),0)::float AS house,
                 COALESCE(SUM(prize_pool),0)::float AS pots,
-                COALESCE(AVG(cut_percent),0)::float AS avg_cut
+                COALESCE(AVG(cut_percent),0)::float AS avg_cut,
+                COUNT(*) FILTER (WHERE status = 'CANCELLED')::int AS cancelled
              FROM game_sessions WHERE ${wsql}
              GROUP BY stake ORDER BY stake ASC`,
             params
@@ -703,23 +753,105 @@ app.get('/api/admin/house-profit', async (req, res) => {
         const todayByStake = await pool.query(
             `SELECT stake, COUNT(*)::int AS games, COALESCE(SUM(house_cut),0)::float AS house
              FROM game_sessions
-             WHERE status IN ('COMPLETED', 'EXHAUSTED') AND created_at >= CURRENT_DATE
+             WHERE status IN ('COMPLETED', 'EXHAUSTED', 'CANCELLED') AND created_at >= CURRENT_DATE
              GROUP BY stake ORDER BY stake ASC`
         );
+
+        // Instant house = volume paid - prizes paid
+        let instant = { volume: 0, paidOut: 0, house: 0, plays: 0 };
+        try {
+            const ir = await pool.query(
+                `SELECT COUNT(*)::int AS plays,
+                        COALESCE(SUM(e.paid),0)::float AS volume,
+                        COALESCE(SUM(e.prize),0)::float AS paid_out
+                 FROM instant_entries e
+                 LEFT JOIN instant_rounds r ON r.id = e.round_id
+                 WHERE ${iSql}`,
+                iParams
+            );
+            const row = ir.rows[0] || {};
+            instant = {
+                plays: row.plays || 0,
+                volume: Number(row.volume || 0),
+                paidOut: Number(row.paid_out || 0),
+                house: Number(row.volume || 0) - Number(row.paid_out || 0),
+            };
+        } catch (e) {
+            console.error('house-profit instant', e.message);
+        }
+
+        // Special house
+        let special = { games: 0, volume: 0, house: 0, prize: 0 };
+        try {
+            const sr = await pool.query(
+                `SELECT COUNT(*)::int AS games,
+                        COALESCE(SUM(total_paid),0)::float AS volume,
+                        COALESCE(SUM(house_profit),0)::float AS house,
+                        COALESCE(SUM(prize),0)::float AS prize
+                 FROM special_event_sessions WHERE ${sSql}`,
+                sParams
+            );
+            const row = sr.rows[0] || {};
+            special = {
+                games: row.games || 0,
+                volume: Number(row.volume || 0),
+                house: Number(row.house || 0),
+                prize: Number(row.prize || 0),
+            };
+        } catch (e) {
+            console.error('house-profit special', e.message);
+        }
+
+        const classicHouse = Number(summary.rows[0]?.total_house || 0);
+        const grandTotal = classicHouse + Number(instant.house || 0) + Number(special.house || 0);
+
         res.json({
             success: true,
+            period,
             summary: summary.rows[0],
             byStake: byStake.rows.map(r => ({
-                stake: Number(r.stake), games: r.games, house: r.house, pots: r.pots, avgCut: r.avg_cut
+                stake: Number(r.stake), games: r.games, house: r.house, pots: r.pots, avgCut: r.avg_cut, cancelled: r.cancelled
             })),
             byDay: byDay.rows.map(r => ({ day: r.day, games: r.games, house: r.house })),
             todayByStake: todayByStake.rows.map(r => ({
                 stake: Number(r.stake), games: r.games, house: r.house
-            }))
+            })),
+            classic: {
+                name: 'Traditional Bingo',
+                house: classicHouse,
+                games: summary.rows[0]?.games || 0,
+                cancelledHouse: summary.rows[0]?.cancelled_house || 0,
+                cancelledGames: summary.rows[0]?.cancelled_games || 0,
+                exhaustedHouse: summary.rows[0]?.exhausted_house || 0,
+            },
+            instant,
+            special,
+            grandTotal,
         });
     } catch (err) {
         console.error('house-profit', err);
         res.status(500).json({ success: false, message: 'Server error.' });
+    }
+});
+
+// One-time style repair endpoint: fix past CANCELLED sessions that still hold only the rake as house_cut
+app.post('/api/admin/repair-cancelled-house', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+        // For CANCELLED sessions, house should equal the full pot (prize_pool), not the original rake.
+        const r = await pool.query(
+            `UPDATE game_sessions
+             SET house_cut = COALESCE(prize_pool, house_cut),
+                 winner_prize = 0,
+                 cut_percent = 100
+             WHERE status = 'CANCELLED'
+               AND COALESCE(prize_pool, 0) > COALESCE(house_cut, 0)
+             RETURNING id, stake, prize_pool, house_cut`
+        );
+        res.json({ success: true, fixed: r.rowCount, rows: r.rows });
+    } catch (err) {
+        console.error('repair-cancelled-house', err);
+        res.status(500).json({ success: false, message: err.message });
     }
 });
 
