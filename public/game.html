@@ -15,19 +15,19 @@
 <body>
 <header>
   <div class="head-left">
-    <span class="live"><i></i> LIVE</span>
+    <span class="live"><i></i> <span data-i18n="live">LIVE</span></span>
     <b id="patternName">Any One Line</b>
-    <small id="playersPlaying">0 players playing</small>
+    <small id="playersPlaying">0</small>
   </div>
   <div class="prize-block">
-    <small>PRIZE</small>
-    <b><span id="prizePool">0.00</span> Birr</b>
+    <small data-i18n="prize">PRIZE</small>
+    <b><span id="prizePool">0.00</span> <span data-i18n="birr">Birr</span></b>
   </div>
 </header>
 <main>
   <section class="status">
     <div class="last-called">
-      <small class="lc-label">Last Called</small>
+      <small class="lc-label" data-i18n="lastCalled">Last Called</small>
       <div id="lastCalledBalls" class="lc-balls"><span class="empty">--</span></div>
     </div>
     <div class="stat-block center"><strong id="lastNumber">--</strong></div>
@@ -40,27 +40,27 @@
     </aside>
     <section class="card-side">
       <div class="card-side-head">
-        <h3>Your Cards</h3>
+        <h3 data-i18n="yourCards">Your Cards</h3>
         <div class="controls">
           <button id="autoMarkToggle" class="switch-pill" type="button" role="switch" aria-checked="true">
-            <span class="dot"></span><span class="switch-label">AUTO</span>
+            <span class="dot"></span><span class="switch-label" data-i18n="auto">AUTO</span>
           </button>
           <button id="blinkToggle" class="switch-pill" type="button" role="switch" aria-checked="true">
-            <span class="dot"></span><span class="switch-label">Blink</span>
+            <span class="dot"></span><span class="switch-label" data-i18n="blink">Blink</span>
           </button>
           <button id="soundToggle" class="switch-pill icon-only" type="button" role="switch" aria-checked="true" aria-label="Toggle sound">
             <span id="soundToggleIcon">🔊</span>
           </button>
           <button id="colorPickerBtn" class="switch-pill color-picker-btn" type="button" onclick="toggleColorPicker()">
             <span class="color-dot" id="currentColorDot" style="background:#22c55e;"></span>
-            <span class="switch-label">Color</span>
+            <span class="switch-label" data-i18n="color">Color</span>
           </button>
           <button id="leaveGameBtn" class="switch-pill leave" type="button" onclick="leaveGame()">
-            <span class="switch-label">Leave</span>
+            <span class="switch-label" data-i18n="leaveGame">Leave</span>
           </button>
         </div>
       </div>
-      <div id="cardsEl" class="cards"><p>Loading cards…</p></div>
+      <div id="cardsEl" class="cards"><p data-i18n="loadingCards">Loading cards…</p></div>
     </section>
   </section>
 </main>
@@ -70,19 +70,19 @@
     <h2 id="winnerTitle">BINGO!</h2>
     <p id="winnerText"></p>
     <div id="winnerCard"></div>
-    <p class="returning">Returning to card selection…</p>
+    <p class="returning" data-i18n="returningSelection">Returning to card selection…</p>
   </div>
 </div>
 <div id="toast" class="toast"></div>
 
 <div id="colorPickerOverlay" class="overlay">
   <div class="color-picker-modal">
-    <h3 style="margin:0 0 15px;color:var(--gold);">🎨 Choose Highlight Color</h3>
+    <h3 style="margin:0 0 15px;color:var(--gold);"><span data-i18n="chooseColor">🎨 Choose Highlight Color</span></h3>
     <div class="color-grid" id="colorGrid"></div>
     <button class="switch-pill" style="margin-top:15px;padding:10px 20px;background:var(--card);border:1px solid var(--line);" onclick="closeColorPicker()">Close</button>
   </div>
 </div>
-<script src="i18n.js"></script>
+<script src="i18n.js?v=3"></script>
 <script src="game.js"></script>
 </body>
 </html>

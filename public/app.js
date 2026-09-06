@@ -279,7 +279,7 @@ async function resyncCurrentRoom() {
                 if (btn) {
                     btn.disabled = true;
                     btn.dataset.ready = '1';
-                    btn.innerText = 'READY — Waiting for start...';
+                    btn.innerText = t('readyWaiting', 'READY — Waiting for start...');
                 }
             } else {
                 resetReadyButton();
@@ -400,15 +400,15 @@ function resetReadyButton() {
     const btn = document.getElementById('playGameBtn');
     if (!btn) return;
     delete btn.dataset.ready;
-    btn.innerText = 'READY';
+    btn.innerText = t('ready', 'READY 🚀');
     btn.disabled = selectedCards.size === 0;
 }
 
 function formatStatus(room) {
-    if (!room) return 'Waiting';
-    if (room.status === 'PLAYING') return '🔴 Playing';
-    if (room.status === 'JOINING') return `🟡 Joining · ${room.timer}s`;
-    return '⚪ Waiting';
+    if (!room) return t('statusWaiting', '⚪ Waiting');
+    if (room.status === 'PLAYING') return t('statusPlaying', '🔴 Playing');
+    if (room.status === 'JOINING') return `${t('statusJoining', '🟡 Joining')} · ${room.timer}s`;
+    return t('statusWaiting', '⚪ Waiting');
 }
 
 function renderRooms() {
@@ -421,14 +421,14 @@ function renderRooms() {
         const disabled = room.status === 'PLAYING';
         return `<div class="room-row">
             <div>
-                <div class="room-stake">💰 ${Number(room.stake).toFixed(0)} Birr</div>
-                <div class="room-meta">Players | ${room.totalCards || 0}</div>
+                <div class="room-stake">💰 ${Number(room.stake).toFixed(0)} ${t('birr', 'Birr')}</div>
+                <div class="room-meta">${t('roomPlayers', 'Players')} | ${room.totalCards || 0}</div>
             </div>
             <div class="room-status ${statusClass}">
-                🏆 ${Number(room.prizePool).toFixed(2)} Birr<br>
+                🏆 ${Number(room.prizePool).toFixed(2)} ${t('birr', 'Birr')}<br>
                 ${formatStatus(room)}
             </div>
-            <button class="room-join" ${disabled ? 'disabled' : ''} onclick="joinRoom(${Number(room.stake)})">${disabled ? 'PLAYING' : 'JOIN'}</button>
+            <button class="room-join" ${disabled ? 'disabled' : ''} onclick="joinRoom(${Number(room.stake)})">${disabled ? t('roomPlaying', 'PLAYING') : t('roomJoin', 'JOIN')}</button>
         </div>`;
     }).join('');
 
@@ -442,14 +442,14 @@ function renderMyGame() {
         hide('myGameBox');
         return;
     }
-    box.innerHTML = `<h3 style="margin-top:0">🎮 Your Current Game</h3>
+    box.innerHTML = `<h3 style="margin-top:0">${t('yourCurrentGame', '🎮 Your Current Game')}</h3>
         <div class="info-grid">
-          <div class="info-box"><span>STAKE</span><strong>${currentStake} Birr</strong></div>
-          <div class="info-box"><span>PLAYERS</span><strong>${currentRoom.players}</strong></div>
-          <div class="info-box"><span>PRIZE POOL</span><strong>${Number(currentRoom.prizePool).toFixed(2)} Birr</strong></div>
-          <div class="info-box"><span>STATUS</span><strong>${formatStatus(currentRoom)}</strong></div>
+          <div class="info-box"><span>${t('stake', 'STAKE')}</span><strong>${currentStake} ${t('birr', 'Birr')}</strong></div>
+          <div class="info-box"><span>${t('players', 'PLAYERS')}</span><strong>${currentRoom.players}</strong></div>
+          <div class="info-box"><span>${t('prizePool', 'PRIZE POOL')}</span><strong>${Number(currentRoom.prizePool).toFixed(2)} ${t('birr', 'Birr')}</strong></div>
+          <div class="info-box"><span>${t('status', 'STATUS')}</span><strong>${formatStatus(currentRoom)}</strong></div>
         </div>
-        <button class="btn-play" onclick="returnToSelection()">Return to Game</button>`;
+        <button class="btn-play" onclick="returnToSelection()">${t('returnToGame', 'Return to Game')}</button>`;
     show('myGameBox');
 }
 
@@ -498,7 +498,7 @@ function confirmJoin() {
                     if (btn) {
                         btn.disabled = true;
                         btn.dataset.ready = '1';
-                        btn.innerText = 'READY — Waiting for start...';
+                        btn.innerText = t('readyWaiting', 'READY — Waiting for start...');
                     }
                 } else {
                     resetReadyButton();
@@ -698,7 +698,7 @@ function launchGame() {
 
             btn.disabled = true;
             btn.dataset.ready = '1';
-            btn.innerText = 'READY — Waiting for start...';
+            btn.innerText = t('readyWaiting', 'READY — Waiting for start...');
         }
     );
 }
@@ -1536,6 +1536,7 @@ async function changeLanguage(language) {
     applyLanguage(language, true);
     // Refresh open tabs so dynamic strings (history/wallet) switch language
     try {
+        if (typeof renderRooms === 'function') renderRooms();
         const hist = document.getElementById('tabHistory');
         if (hist && !hist.classList.contains('hidden') && currentUsername) {
             fetchHistory(currentUsername, true);
@@ -2059,7 +2060,7 @@ function applyInstantState(st) {
 function setInstantPlayingDisplay(n) {
     n = Math.max(200, Math.min(400, Number(n) || 260));
     instantFakePlaying = n;
-    const text = '🟢 LIVE · Playing | ' + n;
+    const text = t('livePlaying', '🟢 LIVE · Playing') + ' | ' + n;
     ['instantPlayingPill', 'instantPlayPlaying'].forEach(function (id) {
         const a = document.getElementById(id);
         if (a) a.textContent = text;
@@ -2261,7 +2262,7 @@ async function renderInstantOpponents() {
     _lastOppSignature = signature;
 
     if (!list.length) {
-        box.innerHTML = '<p class="small" style="opacity:.6;">Waiting for players…</p>';
+        box.innerHTML = '<p class="small" style="opacity:.6;">' + t('waitingPlayers', 'Waiting for players…') + '</p>';
         return;
     }
     const token = ++instantOppRenderToken;

@@ -1,3 +1,4 @@
+try{if(typeof window.applyBingoLanguage==='function')window.applyBingoLanguage(window.getBingoLang?window.getBingoLang():'am',false);}catch(_){}
 function t(k,f){try{var L=(typeof window.getBingoLang==='function'&&window.getBingoLang())||'am';var P=(window.BINGO_I18N&&window.BINGO_I18N[L])||{};var E=(window.BINGO_I18N&&window.BINGO_I18N.en)||{};if(P[k]!=null)return P[k];if(E[k]!=null)return E[k];}catch(_){ }return f!=null?f:k;}
 const params=new URLSearchParams(location.search),active=JSON.parse(localStorage.getItem('bingoActiveGame')||'{}');
 const specialActive=JSON.parse(localStorage.getItem('bingoSpecialActive')||'{}');
@@ -108,7 +109,7 @@ async function state(){
     if(d.winnerPayload){ended=true;showWinner(d.winnerPayload)}
   }catch{}
 }
-function header(){patternName.textContent=room.patternName||'Any One Line';playersPlaying.textContent=isSpecial?'':'Players | '+(room.totalCards||0);if(isSpecial&&playersPlaying){playersPlaying.style.display='none'}else if(playersPlaying){playersPlaying.style.display='';}calledCount.textContent=`${drawn.size} / 75`;lastNumber.textContent=room.lastNumber?`${letter(room.lastNumber)} ${room.lastNumber}`:'--';prizePool.textContent=Number(room.prizePool||0).toFixed(2);renderLastCalled()}
+function header(){patternName.textContent=room.patternName||'Any One Line';playersPlaying.textContent=isSpecial?'':(t('playersLabel','Players')+' | '+(room.totalCards||0));if(isSpecial&&playersPlaying){playersPlaying.style.display='none'}else if(playersPlaying){playersPlaying.style.display='';}calledCount.textContent=`${drawn.size} / 75`;lastNumber.textContent=room.lastNumber?`${letter(room.lastNumber)} ${room.lastNumber}`:'--';prizePool.textContent=Number(room.prizePool||0).toFixed(2);renderLastCalled()}
 function renderLastCalled(){
     const el=document.getElementById('lastCalledBalls');
     if(!el)return;
@@ -119,7 +120,7 @@ function renderLastCalled(){
 }
 function board(){let h='<div class="board-head">B</div><div class="board-head">I</div><div class="board-head">N</div><div class="board-head">G</div><div class="board-head">O</div>';for(let r=1;r<=15;r++)for(let c=0;c<5;c++){const n=r+c*15;h+=`<div class="ball ${drawn.has(n)?'called':''}">${n}</div>`}numberBoard.innerHTML=h}
 function render(){board();cardsEl.innerHTML=cards.map(card).join('')||'<p>No cards found.</p>'}
-function card(c){const close=showBlink?near(c.grid):new Set(),marks=manualMarks.get(c.cardNumber)||new Set();return `<article class="bingo"><div class="ct"><b>CARD #${c.cardNumber}</b><small>${locked.has(c.cardNumber)?'LOCKED':autoMark?'AUTO':'MANUAL'}</small></div><table><thead><tr><th>B</th><th>I</th><th>N</th><th>G</th><th>O</th></tr></thead><tbody>${c.grid.map((row,r)=>'<tr>'+row.map((v,col)=>{const free=v==='FREE'||(r===2&&col===2),n=Number(v),called=drawn.has(n),marked=free||(autoMark&&called)||(!autoMark&&marks.has(n)),bl=!called&&close.has(`${r},${col}`);return `<td class="${free?'free ':''}${marked?'marked ':''}${bl?'blink ':''}" data-card="${c.cardNumber}" data-number="${free?'':n}" onclick="manualMark(${c.cardNumber},${n||0})" ${marked && !free ? `style="background:${getHighlightColor()};color:#fff;border-color:${getHighlightColor()};"` : ''}>${free?'FREE':v}</td>`}).join('')+'</tr>').join('')}</tbody></table><button ${ended||locked.has(c.cardNumber)?'disabled':''} onclick="claim(${c.cardNumber})">${locked.has(c.cardNumber)?'CARD LOCKED':'BINGO'}</button></article>`}
+function card(c){const close=showBlink?near(c.grid):new Set(),marks=manualMarks.get(c.cardNumber)||new Set();return `<article class="bingo"><div class="ct"><b>CARD #${c.cardNumber}</b><small>${locked.has(c.cardNumber)?t('locked','LOCKED'):(autoMark?t('auto','AUTO'):t('manual','MANUAL'))}</small></div><table><thead><tr><th>B</th><th>I</th><th>N</th><th>G</th><th>O</th></tr></thead><tbody>${c.grid.map((row,r)=>'<tr>'+row.map((v,col)=>{const free=v==='FREE'||(r===2&&col===2),n=Number(v),called=drawn.has(n),marked=free||(autoMark&&called)||(!autoMark&&marks.has(n)),bl=!called&&close.has(`${r},${col}`);return `<td class="${free?'free ':''}${marked?'marked ':''}${bl?'blink ':''}" data-card="${c.cardNumber}" data-number="${free?'':n}" onclick="manualMark(${c.cardNumber},${n||0})" ${marked && !free ? `style="background:${getHighlightColor()};color:#fff;border-color:${getHighlightColor()};"` : ''}>${free?'FREE':v}</td>`}).join('')+'</tr>').join('')}</tbody></table><button ${ended||locked.has(c.cardNumber)?'disabled':''} onclick="claim(${c.cardNumber})">${locked.has(c.cardNumber)?'CARD '+t('locked','LOCKED')+'':t('claimBingo','BINGO')}</button></article>`}
 
 // Manual mode: let the player mark ANY cell on their card, not only ones
 // that have actually been called. This is purely a visual aid — the server
@@ -135,7 +136,7 @@ function claim(cardNumber){
         const res=await r.json().catch(()=>({}));
         if(!res?.success){
           if(res?.locked||/locked/i.test(res?.message||'')){locked.add(Number(cardNumber));render()}
-          toast(res?.message||'BINGO claim failed.');
+          toast(res?.message||t('claimFailed','BINGO claim failed.'));
           return;
         }
         if(res.pending){toast(res.message||'Claim received…');return}
@@ -153,7 +154,7 @@ function claim(cardNumber){
       }).catch(()=>toast('BINGO claim failed.'));
     return;
   }
-  socket.emit('claim_bingo',{stake,username,cardNumber},res=>{if(!res?.success){if(res?.locked){locked.add(cardNumber);render()}toast(res?.message||'BINGO claim failed.')}});
+  socket.emit('claim_bingo',{stake,username,cardNumber},res=>{if(!res?.success){if(res?.locked){locked.add(cardNumber);render()}toast(res?.message||t('claimFailed','BINGO claim failed.'))}});
 }
 
 // ---- modern top-right toggles: Auto/Manual (label flips) + Blink (static label) ----
