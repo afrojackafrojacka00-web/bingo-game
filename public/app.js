@@ -819,7 +819,7 @@ async function showHomeScreen(username) {
     document.getElementById('playerDisplay').innerText = username;
     hide('authBox'); show('headerBar'); show('bottomNav');
     markAppBooted();
-    applyLanguage(safeStorage.get('bingoLang') || 'en', false);
+    applyLanguage(safeStorage.get('bingoLang') || 'am', false);
     switchTab('tabGames', document.querySelector('.nav-item'));
     showHome();
 
@@ -941,7 +941,7 @@ async function loadUserData(username) {
             const profilePhone = document.getElementById('profilePhone');
             if (profilePhone) profilePhone.innerText = data.user.phone_number || 'Not set';
 
-            const lang = data.user.preferred_language || safeStorage.get('bingoLang') || 'am';
+            const lang = data.user.preferred_language || safeStorage.get('bingoLang') || 'am'; // default Amharic
             const langSelect = document.getElementById('languageSelect');
             if (langSelect) langSelect.value = lang;
             applyLanguage(lang, false);
@@ -1108,8 +1108,8 @@ function renderHistory(games, reset = true) {
         const winnerNames = split
             ? (winners.length
                 ? winners.map(w => escapeHtml(w.displayName || w.username)).join(', ')
-                : escapeHtml(game.winner || 'Multiple winners'))
-            : escapeHtml(game.winner || 'None');
+                : escapeHtml(game.winner || t('multipleWinners', 'Multiple winners')))
+            : escapeHtml(game.winner || t('none', 'None'));
 
         const cardCell = (game.winningCardNumber || split)
             ? (game.special
@@ -1534,6 +1534,18 @@ function toggleProfileModal() {
 
 async function changeLanguage(language) {
     applyLanguage(language, true);
+    // Refresh open tabs so dynamic strings (history/wallet) switch language
+    try {
+        const hist = document.getElementById('tabHistory');
+        if (hist && !hist.classList.contains('hidden') && currentUsername) {
+            fetchHistory(currentUsername, true);
+        }
+        const wallet = document.getElementById('tabWallet');
+        if (wallet && !wallet.classList.contains('hidden') && currentUsername) {
+            fetchWallet(currentUsername);
+            fetchPendingRequests(currentUsername);
+        }
+    } catch (_) {}
     if (!currentUsername) return;
     try {
         await fetch('/api/user/language', {
@@ -1548,8 +1560,16 @@ async function changeLanguage(language) {
 
 // ---------------- LANGUAGE (EN / AM) ----------------
 const translations = (window.BINGO_I18N || { en: {}, am: {} });
+// IMPORTANT: do not name this `t` — that overwrites window.t and causes infinite recursion
 function t(key, fallback) {
-    return (typeof window.t === 'function') ? window.t(key, fallback) : (fallback != null ? fallback : key);
+    try {
+        const lang = (typeof window.getBingoLang === 'function') ? window.getBingoLang() : (safeStorage.get('bingoLang') || 'am');
+        const pack = (window.BINGO_I18N && window.BINGO_I18N[lang]) || {};
+        const en = (window.BINGO_I18N && window.BINGO_I18N.en) || {};
+        if (pack[key] != null) return pack[key];
+        if (en[key] != null) return en[key];
+    } catch (_) {}
+    return fallback != null ? fallback : key;
 }
 
 function applyTheme(theme) {

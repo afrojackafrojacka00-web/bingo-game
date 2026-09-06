@@ -1,4 +1,4 @@
-function t(k,f){return (typeof window.t==='function')?window.t(k,f):(f!=null?f:k);}
+function t(k,f){try{var L=(typeof window.getBingoLang==='function'&&window.getBingoLang())||'am';var P=(window.BINGO_I18N&&window.BINGO_I18N[L])||{};var E=(window.BINGO_I18N&&window.BINGO_I18N.en)||{};if(P[k]!=null)return P[k];if(E[k]!=null)return E[k];}catch(_){ }return f!=null?f:k;}
 const params=new URLSearchParams(location.search),active=JSON.parse(localStorage.getItem('bingoActiveGame')||'{}');
 const specialActive=JSON.parse(localStorage.getItem('bingoSpecialActive')||'{}');
 const isSpecial=params.get('special')==='1'||!!specialActive.cards;

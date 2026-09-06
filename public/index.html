@@ -851,12 +851,12 @@ body.instant-immersive .instant-sticky-play{display:none;}
    <option value="am" selected>አማርኛ</option>
    <option value="en">English</option>
   </select>
-  <label class="small" style="display:block;text-align:left;margin-top:14px;">Theme</label>
+  <label class="small" style="display:block;text-align:left;margin-top:14px;" data-i18n="theme">Theme</label>
   <select id="themeSelect" onchange="changeTheme(this.value)">
    <option value="dark">Dark</option>
    <option value="light">Light</option>
   </select>
-  <label class="small" style="display:block;text-align:left;margin-top:14px;">Display name</label>
+  <label class="small" style="display:block;text-align:left;margin-top:14px;" data-i18n="displayName">Display name</label>
   <input id="displayNameInput" placeholder="Shown name (optional)">
   <button class="btn-secondary" style="margin-top:8px;" onclick="saveDisplayName()">Save Display Name</button>
  </div>
@@ -933,7 +933,7 @@ body.instant-immersive .instant-sticky-play{display:none;}
  
   <div id="specialBox" class="card hidden">
     <div class="page-title" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-      <h2 style="margin:0;font-size:16px;">🏆 Special Event</h2>
+      <h2 style="margin:0;font-size:16px;"><span data-i18n="specialTitle">🏆 Special Event</span></h2>
       <button class="back-btn" onclick="leaveSpecialSelection()">←</button>
     </div>
     <div class="small" id="specialSelMeta" style="margin:6px 0 8px;"></div>
@@ -941,7 +941,7 @@ body.instant-immersive .instant-sticky-play{display:none;}
     <input type="search" id="specialCardSearch" placeholder="Search card #" data-i18n-placeholder="searchCards" style="width:100%;margin-bottom:8px;padding:8px;border-radius:8px;border:1px solid var(--card-border,#333);background:var(--card);color:var(--text);" oninput="filterSpecialCards()">
     <div id="specialCardGrid" class="instant-pick-grid" style="display:grid;grid-template-columns:repeat(8,1fr);gap:4px;max-height:45vh;overflow:auto;"></div>
     <div class="small" id="specialSelCost" style="margin:8px 0;">Selected 0 · Cost 0</div>
-    <button class="btn-play" id="specialJoinBtn" onclick="confirmSpecialJoin()" style="width:100%;">READY</button>
+    <button class="btn-play" id="specialJoinBtn" onclick="confirmSpecialJoin()" style="width:100%;" data-i18n="ready">READY</button>
     <p id="specialSelMsg" class="small" style="margin-top:8px;"></p>
   </div>
 
@@ -959,7 +959,7 @@ body.instant-immersive .instant-sticky-play{display:none;}
   </div>
 <div id="instantBox" class="hidden">
    <div class="page-title" style="margin-bottom:6px;">
-     <h2 style="margin:0;font-size:16px;">⚡ Instant</h2>
+     <h2 style="margin:0;font-size:16px;"><span data-i18n="instantTitle">⚡ Instant Bingo</span></h2>
      <div style="display:flex;align-items:center;gap:6px;">
        <button type="button" id="instantHelpBtn" onclick="showInstantHelp()" title="How to play"
          style="width:28px;height:28px;border-radius:50%;border:1px solid var(--line);background:transparent;color:var(--text);font-weight:800;cursor:pointer;font-size:13px;">?</button>
@@ -1075,9 +1075,9 @@ body.instant-immersive .instant-sticky-play{display:none;}
   <p class="small" id="walletBonusDisplay" style="margin-top:-6px;">Bonus: 0.00 Birr</p>
  </div>
  <div class="wallet-action-row">
-   <button class="wallet-action-btn" onclick="openDepositModal()">⬇️<span>Deposit</span></button>
-   <button class="wallet-action-btn" onclick="openWithdrawModal()">⬆️<span>Withdraw</span></button>
-   <button class="wallet-action-btn" onclick="openTransferModal()">🔁<span>Transfer</span></button>
+   <button class="wallet-action-btn" onclick="openDepositModal()">⬇️<span data-i18n="deposit">Deposit</span></button>
+   <button class="wallet-action-btn" onclick="openWithdrawModal()">⬆️<span data-i18n="withdraw">Withdraw</span></button>
+   <button class="wallet-action-btn" onclick="openTransferModal()">🔁<span data-i18n="transfer">Transfer</span></button>
  </div>
  <div id="pendingRequestsCard" class="card hidden" style="text-align:left;">
    <h3 style="margin-top:0;">Pending Requests</h3>
@@ -1091,7 +1091,7 @@ body.instant-immersive .instant-sticky-play{display:none;}
 
 <div id="depositModal" class="modal hidden">
  <div class="card" style="max-height:90vh;overflow-y:auto;">
-  <div class="page-title"><h3 style="margin:0;color:var(--blue)">Deposit</h3><button class="back-btn" onclick="closeModal('depositModal')">✕</button></div>
+  <div class="page-title"><h3 style="margin:0;color:var(--blue)" data-i18n="deposit">Deposit</h3><button class="back-btn" onclick="closeModal('depositModal')">✕</button></div>
   <label class="small" style="display:block;text-align:left;">Amount (Birr)</label>
   <input type="number" id="depositAmount" placeholder="e.g. 100" min="1" step="0.01">
   <label class="small" style="display:block;text-align:left;">Transaction ID</label>
@@ -1109,7 +1109,7 @@ body.instant-immersive .instant-sticky-play{display:none;}
 
 <div id="withdrawModal" class="modal hidden">
  <div class="card" style="max-height:90vh;overflow-y:auto;">
-  <div class="page-title"><h3 style="margin:0;color:var(--blue)">Withdraw</h3><button class="back-btn" onclick="closeModal('withdrawModal')">✕</button></div>
+  <div class="page-title"><h3 style="margin:0;color:var(--blue)" data-i18n="withdraw">Withdraw</h3><button class="back-btn" onclick="closeModal('withdrawModal')">✕</button></div>
   <p class="small">Your balance: <strong id="withdrawBalanceDisplay">0.00</strong> Birr · Minimum 21 Birr</p>
   <div class="pay-method-toggle">
     <button id="withdrawMethodTelebirr" class="pay-method-btn active" onclick="selectWithdrawMethod('telebirr')"><img src="/images/telebirr.jpg" alt=""><span>telebirr</span></button>
@@ -1129,7 +1129,7 @@ body.instant-immersive .instant-sticky-play{display:none;}
 
 <div id="transferModal" class="modal hidden">
  <div class="card">
-  <div class="page-title"><h3 style="margin:0;color:var(--blue)">Transfer</h3><button class="back-btn" onclick="closeModal('transferModal')">✕</button></div>
+  <div class="page-title"><h3 style="margin:0;color:var(--blue)" data-i18n="transfer">Transfer</h3><button class="back-btn" onclick="closeModal('transferModal')">✕</button></div>
   <p class="small">Your balance: <strong id="transferBalanceDisplay">0.00</strong> Birr · More than 20 Birr</p>
   <label class="small" style="display:block;text-align:left;margin-top:14px;">Amount (Birr)</label>
   <input type="number" id="transferAmount" placeholder="More than 20">
@@ -1172,7 +1172,7 @@ body.instant-immersive .instant-sticky-play{display:none;}
   <div class="nav-item" onclick="switchTab('tabWallet',this)">💰<br><span data-i18n="navWallet">Wallet</span></div>
   <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
 </div>
-<script src="i18n.js"></script>
-<script src="app.js?v=20260906-i18n-am"></script>
+<script src="i18n.js?v=2"></script>
+<script src="app.js?v=20260906-i18n-am2"></script>
 </body>
 </html>

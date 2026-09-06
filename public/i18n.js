@@ -45,6 +45,21 @@ window.BINGO_I18N = {
     specialTag: "⭐ Special",
     open: "Open", closed: "Closed",
     selectLanguage: "Language",
+    theme: "Theme", displayName: "Display name", voicePack: "Voice pack",
+    rooms: "Rooms", chooseStake: "Choose a stake room",
+    selected: "Selected", waiting: "Waiting…", start: "Start",
+    depositBtn: "Deposit", withdrawBtn: "Withdraw", transferBtn: "Transfer",
+    amount: "Amount", method: "Method", submit: "Submit",
+    recentTx: "Recent Transactions", noTx: "No transactions yet.",
+    profile: "Profile", announcements: "Announcements",
+    gameHistory: "Game History",
+    classicBingo: "Classic Bingo", instantBingo: "Instant Bingo", specialBingo: "Special Bingo",
+    stakeLabel: "Stake", prizeLabel: "Prize",
+    card: "Card", cardsSelected: "cards selected",
+    confirmReady: "READY",
+    watching: "Watching",
+    win: "Win", loss: "Loss",
+    dark: "Dark", light: "Light",
   },
   am: {
     navGames: "ጨዋታዎች", navHistory: "ታሪክ", navWallet: "ዋሌት", navAccount: "መለያ",
@@ -92,6 +107,21 @@ window.BINGO_I18N = {
     specialTag: "⭐ ልዩ",
     open: "ክፍት", closed: "ዝግ",
     selectLanguage: "ቋንቋ",
+    theme: "ገጽታ", displayName: "የማሳያ ስም", voicePack: "የድምጽ ጥቅል",
+    rooms: "ክፍሎች", chooseStake: "የውርርድ ክፍል ይምረጡ",
+    selected: "ተመርጧል", waiting: "በመጠባበቅ…", start: "ጀምር",
+    depositBtn: "አስገባ", withdrawBtn: "አውጣ", transferBtn: "አስተላልፍ",
+    amount: "መጠን", method: "ዘዴ", submit: "አስገባ",
+    recentTx: "የቅርብ ጊዜ ግብይቶች", noTx: "እስካሁን ግብይት የለም።",
+    profile: "መገለጫ", announcements: "ማስታወቂያዎች",
+    gameHistory: "የጨዋታ ታሪክ",
+    classicBingo: "ክላሲክ ቢንጎ", instantBingo: "ፈጣን ቢንጎ", specialBingo: "ልዩ ቢንጎ",
+    stakeLabel: "ውርርድ", prizeLabel: "ሽልማት",
+    card: "ካርድ", cardsSelected: "ካርዶች ተመርጠዋል",
+    confirmReady: "ዝግጁ",
+    watching: "በመመልከት ላይ",
+    win: "አሸናፊነት", loss: "ኪሳራ",
+    dark: "ጨለማ", light: "ብርሃን",
   }
 };
 
@@ -127,4 +157,6 @@ window.applyBingoLanguage = function (language, persist) {
     if (pack[key] != null) el.setAttribute("placeholder", pack[key]);
   });
   document.documentElement.setAttribute("lang", lang === "am" ? "am" : "en");
+  var sel = document.getElementById("languageSelect");
+  if (sel) sel.value = lang;
 };
