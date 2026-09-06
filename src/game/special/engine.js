@@ -989,14 +989,35 @@ async function adminUpdate(body) {
 function attachSpecialGame(io) {
   ensureSchema()
     .then(() => loadSettings())
-    .then(() => {
-      if (settings.visible && countdownEndsAt && countdownEndsAt > Date.now()) {
-        phase = 'COUNTDOWN';
-      } else if (settings.visible && countdownEndsAt && countdownEndsAt <= Date.now() && phase === 'IDLE') {
-        phase = 'OPEN';
+    .then(async () => {
+      // Server restart must NOT resume a half-finished joining/playing state.
+      // In-memory entries/timers are gone; resuming OPEN/SELECTING leaves clients stuck on "starting".
+      // Always boot IDLE. Admin starts a new countdown when ready.
+      phase = 'IDLE';
+      selectionEndsAt = 0;
+      currentSessionId = null;
+      entries.clear();
+      cardOwners.clear();
+      claimLockedCards.clear();
+      claimWindow = null;
+      winnerPayload = null;
+      drawn.clear();
+      drawOrder = [];
+      drawIndex = 0;
+      lastNumber = null;
+      clearDrawTimer();
+      // Clear any leftover schedule so publicState/tick cannot auto-open joining from a past timestamp
+      countdownEndsAt = 0;
+      try {
+        await pool.query(
+          `UPDATE special_event_settings SET countdown_ends_at = NULL, updated_at = NOW() WHERE id = 1`
+        );
+      } catch (e) {
+        console.error('special clear countdown on boot', e.message);
       }
+      // Keep visible/settings as admin set them; only the live schedule is reset.
       ensurePhaseTimer();
-      console.log('Special Event Bingo ready');
+      console.log('Special Event Bingo ready (IDLE after restart)');
     })
     .catch((e) => console.error('special boot', e));
 
