@@ -1033,6 +1033,41 @@ async function fetchHistory(username, reset = true) {
             return;
         }
         let games = data.history || [];
+        // Merge Special into the same History tab (players hidden for special)
+        if (reset) {
+            try {
+                const sr = await fetch('/api/special/history?username=' + encodeURIComponent(username) + '&limit=30&offset=0', { cache: 'no-store' });
+                const sd = await sr.json();
+                if (sd.success && sd.rows && sd.rows.length) {
+                    const mapped = sd.rows.map(function (row) {
+                        const iWon = !!row.won;
+                        const winners = row.winners || [];
+                        const prizeVal = Number(iWon ? (row.wonAmount || row.prize) : row.prize) || 0;
+                        return {
+                            gameId: 'special-' + row.sessionId,
+                            date: row.date,
+                            won: iWon,
+                            winner: row.winner || (winners[0] && winners[0].username) || null,
+                            winners: winners,
+                            winnerCount: row.winnerCount || winners.length || 0,
+                            players: row.players || 0,
+                            stake: row.stake,
+                            prize: prizeVal,
+                            prizePool: prizeVal,
+                            winningCardNumber: row.winningCardNumber || null,
+                            special: true,
+                            tag: '⭐ Special',
+                            cards: row.cards,
+                            paid: row.paid,
+                            pattern: row.pattern,
+                            winnerPayload: row.winnerPayload,
+                        };
+                    });
+                    games = games.concat(mapped);
+                    games.sort(function (a, b) { return new Date(b.date) - new Date(a.date); });
+                }
+            } catch (_) {}
+        }
 
         renderHistory(games, reset);
         historyOffset += (data.history || []).length;
@@ -3132,61 +3167,6 @@ function startSpecialSelTick() {
   }, 250);
 }
 
-
-async function openSpecialHistory() {
-  hide('specialBox');
-  show('specialHistoryBox');
-  await renderSpecialHistoryPage();
-}
-function closeSpecialHistory() {
-  hide('specialHistoryBox');
-  show('specialBox');
-}
-async function renderSpecialHistoryPage() {
-  const list = document.getElementById('specialHistoryList');
-  if (!list) return;
-  if (!currentUsername) {
-    list.innerHTML = '<p class="small">Login required.</p>';
-    return;
-  }
-  list.innerHTML = '<p class="small">Loading…</p>';
-  try {
-    const r = await fetch('/api/special/history?username=' + encodeURIComponent(currentUsername) + '&limit=40&offset=0', { cache: 'no-store' });
-    const d = await r.json();
-    if (!d.success) {
-      list.innerHTML = '<p class="small">' + escapeHtml(d.message || 'Could not load') + '</p>';
-      return;
-    }
-    const rows = d.rows || [];
-    if (!rows.length) {
-      list.innerHTML = '<p class="small">No special games yet.</p>';
-      return;
-    }
-    list.innerHTML = rows.map(function (row) {
-      const iWon = !!row.won;
-      const outcome = iWon ? '🏆 You Won' : (row.winner ? '❌ You Lost' : '➖ No Winner');
-      const outcomeClass = iWon ? 'won' : 'lost';
-      const prizeVal = Number(iWon ? (row.wonAmount || row.prize) : row.prize) || 0;
-      const dateStr = row.date ? new Date(row.date).toLocaleString() : '';
-      const cardNum = row.winningCardNumber;
-      const cardCell = cardNum
-        ? '<strong class="card-link" onclick="viewWinningCard(\'special-' + row.sessionId + '\')">#' + cardNum + '</strong>'
-        : '<strong>—</strong>';
-      const winnerLabel = row.winner || (row.winners && row.winners[0] && row.winners[0].username) || '—';
-      return '<div class="history-card ' + outcomeClass + '">' +
-        '<div class="history-top"><span class="history-outcome">' + outcome + ' <span class="status-pill">⭐ Special</span></span>' +
-        '<span class="history-date">' + dateStr + '</span></div>' +
-        '<div class="info-grid" style="margin:10px 0 0;">' +
-        '<div class="info-box"><span>WINNER</span><strong>' + escapeHtml(String(winnerLabel)) + '</strong></div>' +
-        '<div class="info-box"><span>PRIZE</span><strong>' + prizeVal.toFixed(2) + ' Birr</strong></div>' +
-        '<div class="info-box"><span>STAKE</span><strong>' + Number(row.stake || 0).toFixed(0) + ' Birr</strong></div>' +
-        '<div class="info-box"><span>WINNING CARD</span>' + cardCell + '</div>' +
-        '</div></div>';
-    }).join('');
-  } catch (_) {
-    list.innerHTML = '<p class="small">Could not load history.</p>';
-  }
-}
 
 async function openSpecialEvent() {
   connectSpecialSocket();

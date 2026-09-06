@@ -458,6 +458,7 @@ table.data tr:hover td { background: var(--card-hover); }
     <button class="nav-item" data-panel="instantrounds"><span class="icon">🔁</span> Instant Rounds</button>
     <div class="nav-section">Special Event</div>
     <button class="nav-item" data-panel="specialevent"><span class="icon">🏆</span> Special Room</button>
+    <button class="nav-item" data-panel="specialhistory"><span class="icon">📋</span> Special History</button>
   </nav>
 </aside>
 <div class="main">
@@ -1087,9 +1088,16 @@ table.data tr:hover td { background: var(--card-hover); }
           </div>
         </div>
         <div id="spAdminMsg" class="muted" style="margin-top:10px;font-size:12px;"></div>
-        <div class="inst-card" style="margin-top:14px;">
-          <h3>Session history</h3>
-          <div class="toolbar" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+      </div>
+    </section>
+
+    <section class="panel" id="panel-specialhistory">
+      <div class="card">
+        <div class="card-header">
+          <h2><span class="emoji">📋</span> Special History</h2>
+          <span class="muted" style="font-size:12px;">Sessions, winners, volume &amp; house · filter by day / week / month</span>
+        </div>
+        <div class="toolbar" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">
             <select id="spHistPeriod" onchange="loadSpecialHistory()">
               <option value="day" selected>By day</option>
               <option value="week">By week</option>
@@ -1103,7 +1111,6 @@ table.data tr:hover td { background: var(--card-hover); }
           <div id="spHistoryTotals" class="inst-kpi" style="margin-bottom:12px;"></div>
           <div id="spHistory" class="empty">—</div>
           <div id="spHistoryDetail" style="margin-top:12px;"></div>
-        </div>
       </div>
     </section>
 <section class="panel" id="panel-houseprofit">
@@ -1214,7 +1221,8 @@ const TITLES = {
   instantcontrol: '⚡ Instant Control',
   instanthistory: '⚡ Instant History',
   instantrounds: '⚡ Instant Rounds',
-  specialevent: '🏆 Special Room'
+  specialevent: '🏆 Special Room',
+  specialhistory: '📋 Special History'
 };
 let usersPage = 1;
 let usersLimit = 10;
@@ -1363,6 +1371,7 @@ function showPanel(name) {
     if (name === 'instanthistory') loadInstantHistory(true);
     if (name === 'instantrounds') loadInstantRounds(true);
     if (name === 'specialevent') loadSpecialAdmin();
+    if (name === 'specialhistory') loadSpecialHistory();
   }
 }
 document.querySelectorAll('.nav-item').forEach(btn => {
