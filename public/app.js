@@ -2958,7 +2958,16 @@ function connectSpecialSocket() {
       });
       specialSocket.on('special_game_started', function (st) {
         specialState = st;
-        openSpecialPlayScreen(st);
+        // Only players who pressed READY go into the live game (same as traditional)
+        if (window._specialReady && specialMyCards && specialMyCards.length) {
+          goSpecialGamePage();
+        } else {
+          // Spectator / not ready → home with late message
+          alertUser((st && st.lateMessage) || 'Game started. Come back next time!');
+          leaveSpecialSelection();
+          showHome();
+          refreshSpecialHome();
+        }
       });
       specialSocket.on('special_number', function (p) {
         specialCalled = p.drawn || specialCalled.concat([p.number]);
@@ -2973,22 +2982,14 @@ function connectSpecialSocket() {
       });
       specialSocket.on('special_ended', function (st) {
         specialState = st;
-        const msg = document.getElementById('specialPlayMsg');
-        if (msg) {
-          if (st.winner && st.winner.winners && st.winner.winners.length) {
-            msg.textContent = 'Winner(s): ' + st.winner.winners.map(function (w) { return w.username; }).join(', ') +
-              ' · Prize ' + (st.winner.prizeEach || st.prize);
-          } else {
-            msg.textContent = st.endedMessage || 'Game ended.';
-          }
-        }
-        setTimeout(function () {
-          leaveSpecialPlay();
-          leaveSpecialSelection();
-          showHome();
-          alert(st.endedMessage || 'Game ended for today. Enjoy other bingo games until next time!');
-          refreshSpecialHome();
-        }, 2500);
+        const endedMsg = st.endedMessage || 'Game ended for today. Enjoy other bingo games until next time!';
+        try { alert(endedMsg); } catch (_) {}
+        window._specialReady = false;
+        specialMyCards = [];
+        leaveSpecialPlay();
+        leaveSpecialSelection();
+        showHome();
+        refreshSpecialHome();
       });
     } else if (!specialSocket.connected) specialSocket.connect();
     else specialSocket.emit('special_sync');
@@ -3046,6 +3047,9 @@ async function openSpecialEvent() {
   show('specialBox');
   specialSelected.clear();
   specialMyCards = [];
+  window._specialReady = false;
+  const sbtn = document.getElementById('specialJoinBtn');
+  if (sbtn) { sbtn.disabled = false; sbtn.textContent = 'READY'; }
   await loadSpecialCards();
   applySpecialState(d);
 }
@@ -3087,6 +3091,7 @@ function filterSpecialCards() {
 }
 
 function toggleSpecialCard(n) {
+  if (window._specialReady) return;
   n = Number(n);
   if (specialSelected.has(n)) specialSelected.delete(n);
   else specialSelected.add(n);
@@ -3105,6 +3110,7 @@ function updateSpecialSelCost() {
 
 async function confirmSpecialJoin() {
   if (!currentUsername) return alertUser('Login required');
+  if (window._specialReady) return alertUser('You are already READY. Cards are locked.');
   if (!specialSelected.size) return alertUser('Select at least one card');
   const btn = document.getElementById('specialJoinBtn');
   if (btn) btn.disabled = true;
@@ -3117,18 +3123,36 @@ async function confirmSpecialJoin() {
     const d = await r.json();
     if (!d.success) {
       if (btn) btn.disabled = false;
-      return alertUser(d.message || 'Join failed');
+      return alertUser(d.message || 'Ready failed');
     }
+    window._specialReady = true;
     specialMyCards = d.cards || [...specialSelected];
-    specialClaimCard = specialMyCards[0] || null;
+    // Lock grid like traditional
+    document.querySelectorAll('#specialCardGrid .card-item').forEach(function (el) {
+      el.onclick = null;
+      el.style.pointerEvents = 'none';
+      el.style.opacity = specialSelected.has(Number(el.getAttribute('data-card'))) ? '1' : '0.45';
+    });
+    if (btn) { btn.disabled = true; btn.textContent = 'READY — Waiting…'; }
     const msg = document.getElementById('specialSelMsg');
-    if (msg) msg.textContent = 'Cards locked. Waiting for game start…';
+    if (msg) msg.textContent = 'READY. Waiting for game start…';
     if (typeof loadUserData === 'function') loadUserData(currentUsername);
-    if (d.state && d.state.phase === 'PLAYING') openSpecialPlayScreen(d.state);
+    if (d.state && d.state.phase === 'PLAYING') goSpecialGamePage();
   } catch (_) {
     if (btn) btn.disabled = false;
     alertUser('Network error');
   }
+}
+
+function goSpecialGamePage() {
+  try {
+    localStorage.setItem('bingoSpecialActive', JSON.stringify({
+      username: currentUsername,
+      cards: specialMyCards || [],
+      at: Date.now()
+    }));
+  } catch (_) {}
+  window.location.href = '/game.html?special=1';
 }
 
 async function openSpecialPlayScreen(st) {

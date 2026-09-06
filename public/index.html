@@ -941,7 +941,7 @@ body.instant-immersive .instant-sticky-play{display:none;}
     <input type="search" id="specialCardSearch" placeholder="Search card #" style="width:100%;margin-bottom:8px;padding:8px;border-radius:8px;border:1px solid var(--card-border,#333);background:var(--card);color:var(--text);" oninput="filterSpecialCards()">
     <div id="specialCardGrid" class="instant-pick-grid" style="display:grid;grid-template-columns:repeat(8,1fr);gap:4px;max-height:45vh;overflow:auto;"></div>
     <div class="small" id="specialSelCost" style="margin:8px 0;">Selected 0 · Cost 0</div>
-    <button class="btn-play" id="specialJoinBtn" onclick="confirmSpecialJoin()" style="width:100%;">Confirm cards</button>
+    <button class="btn-play" id="specialJoinBtn" onclick="confirmSpecialJoin()" style="width:100%;">READY</button>
     <p id="specialSelMsg" class="small" style="margin-top:8px;"></p>
   </div>
 
@@ -1172,6 +1172,6 @@ body.instant-immersive .instant-sticky-play{display:none;}
   <div class="nav-item" onclick="switchTab('tabWallet',this)">💰<br><span data-i18n="navWallet">Wallet</span></div>
   <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
 </div>
-<script src="app.js?v=20260906-special-fix2"></script>
+<script src="app.js?v=20260906-special-fix3"></script>
 </body>
 </html>

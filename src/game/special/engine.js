@@ -301,9 +301,9 @@ function publicState() {
     patternName: PATTERN_NAMES[settings.winningPattern] || settings.winningPattern,
     drawIntervalSeconds: settings.drawIntervalSeconds,
     selectionSeconds: settings.selectionSeconds,
-    countdownEndsAt: countdownEndsAt || null,
+    countdownEndsAt: countdownEndsAt ? new Date(countdownEndsAt).toISOString() : null,
     countdownLeft,
-    selectionEndsAt: selectionEndsAt || null,
+    selectionEndsAt: selectionEndsAt ? new Date(selectionEndsAt).toISOString() : null,
     selectionLeft,
     sessionId: currentSessionId,
     playerCount: entries.size,
@@ -359,12 +359,10 @@ function tickLoop() {
     return;
   }
   if ((phase === 'OPEN' || phase === 'SELECTING') && selectionEndsAt && now >= selectionEndsAt) {
-    // Joining window over
+    // Joining window over — freeze so we don't re-enter every tick
+    selectionEndsAt = 0;
     if (entries.size === 0) {
-      phase = 'ENDED';
-      winnerPayload = null;
-      broadcast('special_ended', publicState());
-      broadcast('special_state', publicState());
+      endWithNoPlayers().catch((e) => console.error('special endWithNoPlayers', e));
     } else {
       beginPlaying().catch((e) => console.error('special beginPlaying', e));
     }
@@ -375,7 +373,27 @@ function tickLoop() {
   }
 }
 
+async function endWithNoPlayers() {
+  if (phase === 'ENDED' || phase === 'PLAYING') return;
+  stopTimers();
+  phase = 'ENDED';
+  winnerPayload = null;
+  try {
+    await pool.query(
+      `INSERT INTO special_event_sessions
+        (status, stake, prize, winning_pattern, draw_interval_seconds, player_count, card_count, total_paid, house_profit, started_at, completed_at)
+       VALUES ('COMPLETED',$1,$2,$3,$4,0,0,0,0,NOW(),NOW())`,
+      [settings.stake, settings.prize, settings.winningPattern, settings.drawIntervalSeconds]
+    );
+  } catch (e) {
+    console.error('special empty session', e.message);
+  }
+  broadcast('special_ended', publicState());
+  broadcast('special_state', publicState());
+}
+
 async function beginPlaying() {
+
   if (phase === 'PLAYING') return;
   stopTimers();
 
@@ -512,11 +530,16 @@ async function joinWithCards({ username, cardNumbers }) {
     err.code = 'CLOSED';
     throw err;
   }
+  // Already READY — no more card changes (same as traditional)
+  if (entries.has(username)) {
+    const err = new Error('You are already READY. Cards are locked.');
+    err.code = 'LOCKED';
+    throw err;
+  }
   const cards = [...new Set((cardNumbers || []).map(Number))].filter((n) => n > 0);
   if (!cards.length) throw new Error('Select at least one card.');
   if (cards.length > 50) throw new Error('Too many cards.');
 
-  // Card availability
   for (const c of cards) {
     const owner = cardOwners.get(c);
     if (owner && owner !== username) throw new Error('Card #' + c + ' is taken.');
@@ -531,14 +554,7 @@ async function joinWithCards({ username, cardNumbers }) {
     if (!user.rowCount) throw new Error('User not found.');
     const userId = user.rows[0].id;
 
-    // Refund previous selection if re-selecting
-    if (entries.has(username)) {
-      const prev = entries.get(username);
-      await client.query(`UPDATE users SET balance = balance + $1 WHERE id=$2`, [prev.paid, userId]);
-      await client.query(`INSERT INTO transactions(user_id,amount,type) VALUES ($1,$2,'SPECIAL_EVENT_REFUND')`, [userId, prev.paid]);
-      (prev.cards || []).forEach((c) => { if (cardOwners.get(c) === username) cardOwners.delete(c); });
-    }
-
+    // Charge on READY — no refund (same as traditional once ready)
     const charge = await client.query(
       `UPDATE users SET balance = balance - $1 WHERE id=$2 AND balance >= $1 RETURNING balance`,
       [totalCost, userId]
@@ -547,13 +563,11 @@ async function joinWithCards({ username, cardNumbers }) {
     await client.query(`INSERT INTO transactions(user_id,amount,type) VALUES ($1,$2,'SPECIAL_EVENT_BUY')`, [userId, -totalCost]);
     await client.query('COMMIT');
 
-    entries.set(username, { userId, cards, paid: totalCost });
+    entries.set(username, { userId, cards, paid: totalCost, ready: true });
     cards.forEach((c) => cardOwners.set(c, username));
 
-    // Selection deadline was set when home countdown ended — do not restart it
     if (phase === 'OPEN') phase = 'SELECTING';
     if (!selectionEndsAt) {
-      // Safety: if somehow missing, start from now
       selectionEndsAt = Date.now() + (Number(settings.selectionSeconds) || 60) * 1000;
     }
 

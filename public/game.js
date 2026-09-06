@@ -1,6 +1,9 @@
-const socket=io();
 const params=new URLSearchParams(location.search),active=JSON.parse(localStorage.getItem('bingoActiveGame')||'{}');
-const stake=Number(params.get('stake')||active.stake),username=active.username||localStorage.getItem('bingoUser')||'';
+const specialActive=JSON.parse(localStorage.getItem('bingoSpecialActive')||'{}');
+const isSpecial=params.get('special')==='1'||!!specialActive.cards;
+const stake=Number(params.get('stake')||active.stake)||0;
+const username=(isSpecial?specialActive.username:null)||active.username||localStorage.getItem('bingoUser')||'';
+const socket=isSpecial?io('/special',{transports:['websocket','polling']}):io();
 let cards=[],drawn=new Set(),autoMark=true,showBlink=true,ended=false,locked=new Set(),room={},winnerTimer=null,manualMarks=new Map();
 let voicePack='john',soundEnabled=true;
 let audioCtx=null,audioBuffers={},currentSource=null,audioCutTimer=null,audioUnlocked=false;
@@ -45,7 +48,65 @@ function confirmAction(message){
     });
 }
 
-async function state(){try{const r=await fetch(`/api/game-state?stake=${encodeURIComponent(stake)}&username=${encodeURIComponent(username)}`,{cache:'no-store'}),d=await r.json();if(!d.success){goBack();return}room=d.room||{};cards=d.cards||[];drawn=new Set(room.drawn||[]);locked=new Set(cards.filter(c=>c.locked).map(c=>Number(c.cardNumber)));header();render();if(d.winnerPayload){ended=true;showWinner(d.winnerPayload)}}catch{}}
+async function state(){
+  try{
+    if(isSpecial){
+      const r=await fetch('/api/special/status?_='+Date.now(),{cache:'no-store'});
+      const d=await r.json();
+      if(!d.success){goBack();return}
+      room={
+        prizePool:d.prize,
+        winningPattern:d.winningPattern,
+        patternName:d.patternName||d.gameTypeLabel,
+        playersPlaying:d.playerCount||0,
+        totalCards:d.cardCount||0,
+        drawn:d.drawn||[],
+        lastNumber:d.lastNumber,
+        status:d.phase
+      };
+      drawn=new Set(room.drawn||[]);
+      // Load my cards from specialActive + grids
+      const myNums=(specialActive.cards||[]).map(Number);
+      const loaded=[];
+      for(const cn of myNums){
+        try{
+          const cr=await fetch('/api/special/card/'+cn);
+          const cd=await cr.json();
+          if(cd.success&&cd.grid) loaded.push({cardNumber:cn,grid:cd.grid,locked:false});
+        }catch(_){}
+      }
+      cards=loaded;
+      header();render();
+      if(d.phase==='ENDED'){
+        ended=true;
+        if(d.winner&&d.winner.winners&&d.winner.winners.length){
+          showWinner({
+            winners:d.winner.winners.map(w=>({
+              winner:w.username,
+              winnerDisplay:w.username,
+              prize:d.winner.prizeEach||d.prize,
+              cardNumber:w.cardNumber,
+              winningCells:w.cells
+            })),
+            prize:d.winner.prizeEach||d.prize
+          });
+        }else{
+          setTimeout(goBack,800);
+        }
+      }
+      return;
+    }
+    const r=await fetch(`/api/game-state?stake=${encodeURIComponent(stake)}&username=${encodeURIComponent(username)}`,{cache:'no-store'});
+    const d=await r.json();
+    if(!d.success){goBack();return}
+    room=d.room||{};
+    cards=d.cards||[];
+    drawn=new Set(room.drawn||[]);
+    locked=new Set(cards.filter(c=>c.locked).map(c=>Number(c.cardNumber)));
+    header();render();
+    if(d.winnerPayload){ended=true;showWinner(d.winnerPayload)}
+  }catch{}
+}
 function header(){patternName.textContent=room.patternName||'Any One Line';playersPlaying.textContent=`Players | ${room.totalCards||0}`;calledCount.textContent=`${drawn.size} / 75`;lastNumber.textContent=room.lastNumber?`${letter(room.lastNumber)} ${room.lastNumber}`:'--';prizePool.textContent=Number(room.prizePool||0).toFixed(2);renderLastCalled()}
 function renderLastCalled(){
     const el=document.getElementById('lastCalledBalls');
@@ -65,7 +126,24 @@ function card(c){const close=showBlink?near(c.grid):new Set(),marks=manualMarks.
 // so letting a player freely tap cells here can never create a false win.
 window.manualMark=(card,n)=>{if(autoMark||!n||locked.has(card))return;const set=manualMarks.get(card)||new Set();set.has(n)?set.delete(n):set.add(n);manualMarks.set(card,set);render()}
 
-function claim(cardNumber){if(ended||locked.has(cardNumber))return;socket.emit('claim_bingo',{stake,username,cardNumber},res=>{if(!res?.success){if(res?.locked){locked.add(cardNumber);render()}toast(res?.message||'BINGO claim failed.')}})}
+function claim(cardNumber){
+  if(ended||locked.has(cardNumber))return;
+  if(isSpecial){
+    fetch('/api/special/claim',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,cardNumber})})
+      .then(r=>r.json()).then(res=>{
+        if(!res?.success){toast(res?.message||'BINGO claim failed.');return}
+        ended=true;
+        const st=res.state||{};
+        const w=st.winner||{};
+        showWinner({
+          winners:(w.winners||[]).map(x=>({winner:x.username,winnerDisplay:x.username,prize:w.prizeEach||st.prize,cardNumber:x.cardNumber,winningCells:x.cells})),
+          prize:w.prizeEach||st.prize
+        });
+      }).catch(()=>toast('BINGO claim failed.'));
+    return;
+  }
+  socket.emit('claim_bingo',{stake,username,cardNumber},res=>{if(!res?.success){if(res?.locked){locked.add(cardNumber);render()}toast(res?.message||'BINGO claim failed.')}});
+}
 
 // ---- modern top-right toggles: Auto/Manual (label flips) + Blink (static label) ----
 const autoMarkToggleEl=document.getElementById('autoMarkToggle');
@@ -82,16 +160,59 @@ syncToggleUI();
 // ---- leave mid-game: warn (no refund), then send back to the stake list ----
 async function leaveGame(){
     const ok=await confirmAction('Leaving now forfeits your stake for this round — you will NOT get a refund. Leave the game?');
-    if(!ok)return;
+    if(!ok) return;
+    if(isSpecial){
+        try{localStorage.removeItem('bingoSpecialActive')}catch(_){}
+        location.href='/index.html';
+        return;
+    }
     socket.emit('leave_room',{stake,username},res=>{
-        if(!res?.success){toast(res?.message||'Could not leave the game.');return}
         localStorage.removeItem('bingoActiveGame');
         location.href='/index.html?view=rooms';
     });
 }
 
-function subscribe(){if(stake&&username)socket.emit('subscribe_room',{stake,username},()=>state())}
-socket.on('connect',subscribe);socket.on('number_drawn',d=>{if(Number(d.stake)!==stake||ended)return;drawn.add(Number(d.number));room.lastNumber=Number(d.number);header();render();playNumberAudio(Number(d.number))});socket.on('room_state',d=>{if(Number(d.stake)===stake){room={...room,...d};header();}});socket.on('card_locked',d=>{if(Number(d.stake)===stake){locked.add(Number(d.cardNumber));render();toast(d.message)}});socket.on('game_won',d=>{if(Number(d.stake)===stake){ended=true;showWinner(d)}});socket.on('game_ended',d=>{if(Number(d.stake)===stake){ended=true;setTimeout(goBack,300)}});
+
+function subscribe(){
+  if(isSpecial){state();return}
+  if(stake&&username)socket.emit('subscribe_room',{stake,username},()=>state())
+}
+socket.on('connect',subscribe);
+if(isSpecial){
+  socket.on('special_number',d=>{
+    if(ended)return;
+    const n=Number(d.number);
+    drawn.add(n);
+    room.lastNumber=n;
+    room.drawn=[...(d.drawn||[...drawn])];
+    header();render();playNumberAudio(n);
+  });
+  socket.on('special_state',d=>{
+    if(!d)return;
+    room.prizePool=d.prize;
+    room.patternName=d.patternName||d.gameTypeLabel;
+    room.playersPlaying=d.playerCount||0;
+    header();
+  });
+  socket.on('special_ended',d=>{
+    ended=true;
+    const st=d||{};
+    if(st.winner&&st.winner.winners&&st.winner.winners.length){
+      showWinner({
+        winners:st.winner.winners.map(w=>({winner:w.username,winnerDisplay:w.username,prize:st.winner.prizeEach||st.prize,cardNumber:w.cardNumber,winningCells:w.cells})),
+        prize:st.winner.prizeEach||st.prize
+      });
+    }else{
+      setTimeout(goBack,500);
+    }
+  });
+}else{
+  socket.on('number_drawn',d=>{if(Number(d.stake)!==stake||ended)return;drawn.add(Number(d.number));room.lastNumber=Number(d.number);header();render();playNumberAudio(Number(d.number))});
+  socket.on('room_state',d=>{if(Number(d.stake)===stake){room={...room,...d};header();}});
+  socket.on('card_locked',d=>{if(Number(d.stake)===stake){locked.add(Number(d.cardNumber));render();toast(d.message)}});
+  socket.on('game_won',d=>{if(Number(d.stake)===stake){ended=true;showWinner(d)}});
+  socket.on('game_ended',d=>{if(Number(d.stake)===stake){ended=true;setTimeout(goBack,300)}});
+}
 function showWinner(d){
     if(winnerTimer)return;
     const winners=d.winners||[{winner:d.winner,winnerDisplay:d.winnerDisplay,prize:d.prize,cardNumber:d.cardNumber,grid:d.grid,winningCells:d.winningCells}];
@@ -124,7 +245,7 @@ function showWinner(d){
     winnerOverlay.classList.add('show');
     winnerTimer=setTimeout(goBack,5000);
 }
-function goBack(){localStorage.removeItem('bingoActiveGame');location.href=`/index.html?returnStake=${encodeURIComponent(stake)}`}
+function goBack(){if(isSpecial){try{localStorage.removeItem('bingoSpecialActive')}catch(_){}location.href='/index.html';return}localStorage.removeItem('bingoActiveGame');location.href=`/index.html?returnStake=${encodeURIComponent(stake)}`}
 
 // ---- number-call audio: every player picks their own pack in Account
 // Settings, so this is entirely client-side — the server just says which
