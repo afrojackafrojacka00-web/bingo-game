@@ -11,7 +11,10 @@
 // `markAppBooted()`), we stop intercepting — later runtime errors are
 // handled locally by whichever feature hit them, same as before.
 let appBooted = false;
-function markAppBooted() { appBooted = true; }
+function markAppBooted() {
+    appBooted = true;
+    try { hide('bootSplash'); } catch (_) {}
+}
 function showBootError(message) {
     if (appBooted) return;
     let box = document.getElementById('bootErrorBox');
@@ -716,6 +719,14 @@ function updateCalledNumbers() {
 
 // ---------------- AUTH / USER ----------------
 window.addEventListener('DOMContentLoaded', async () => {
+    // Never flash the login form while we still have a session / Telegram auth in flight
+    try {
+        hide('authBox');
+        hide('headerBar');
+        hide('bottomNav');
+        show('bootSplash');
+    } catch (_) {}
+
     // Referral capture: a link like yoursite.com/index.html?ref=CODE should
     // only ever be consumed once, by whoever registers next on this device —
     // stash it and strip the param immediately so it can't leak into a later
@@ -805,6 +816,7 @@ function showTelegramAuthError(message) {
 }
 
 function showAuthBox() {
+    hide('bootSplash');
     show('authBox');
     hide('headerBar'); hide('bottomNav');
     document.querySelectorAll('.tab-content').forEach(t => hide(t.id));
@@ -817,6 +829,7 @@ async function showHomeScreen(username) {
     safeStorage.set('bingoUser', username);
     touchWebSession();
     document.getElementById('playerDisplay').innerText = username;
+    hide('bootSplash');
     hide('authBox'); show('headerBar'); show('bottomNav');
     markAppBooted();
     applyLanguage(safeStorage.get('bingoLang') || 'am', false);

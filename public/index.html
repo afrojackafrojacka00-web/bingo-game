@@ -871,7 +871,11 @@ body.instant-immersive .instant-sticky-play{display:none;}
  </div>
 </div>
 
-<div id="authBox" class="card">
+<div id="bootSplash" class="card" style="text-align:center;padding:28px 16px;">
+  <div style="font-size:22px;font-weight:800;margin-bottom:8px;">Bingo</div>
+  <p class="small" style="margin:0;opacity:.8;">Loading…</p>
+</div>
+<div id="authBox" class="card hidden">
  <div id="loginForm">
    <h2>Welcome Back 👋</h2>
    <input id="loginUsername" placeholder="Username" autocomplete="username">
@@ -1173,6 +1177,6 @@ body.instant-immersive .instant-sticky-play{display:none;}
   <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
 </div>
 <script src="i18n.js?v=3""></script>
-<script src="app.js?v=20260906-i18n-am3"></script>
+<script src="app.js?v=20260906-auth-noflicker"></script>
 </body>
 </html>
