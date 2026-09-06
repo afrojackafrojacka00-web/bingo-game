@@ -548,39 +548,43 @@ async function goToGameScreen() {
 
 
 function refreshToHome() {
+    const splash = document.getElementById('bootSplash');
     try {
-        // Leave special selection/play if open
-        if (typeof leaveSpecialSelection === 'function') {
-            try { leaveSpecialSelection(); } catch (_) {}
+        if (splash) {
+            splash.classList.remove('hidden');
+            splash.style.display = '';
         }
-        if (typeof closeSpecialPlay === 'function') {
-            try { closeSpecialPlay(); } catch (_) {}
+    } catch (_) {}
+
+    const finish = () => {
+        try {
+            if (typeof leaveSpecialSelection === 'function') try { leaveSpecialSelection(); } catch (_) {}
+            if (typeof closeSpecialPlay === 'function') try { closeSpecialPlay(); } catch (_) {}
+            if (typeof leaveInstantPlay === 'function') try { leaveInstantPlay(); } catch (_) {}
+            if (typeof leaveInstantSelection === 'function') try { leaveInstantSelection(); } catch (_) {}
+            if (typeof leaveCurrentRoom === 'function' && currentStake) try { leaveCurrentRoom(); } catch (_) {}
+            if (typeof returnToRooms === 'function') try { returnToRooms(); } catch (_) {}
+            showHome();
+            switchTab('tabGames', document.querySelector('.nav-item'));
+            if (currentUsername && typeof loadUserData === 'function') {
+                loadUserData(currentUsername).catch(() => {});
+            }
+            try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) { window.scrollTo(0, 0); }
+        } catch (e) {
+            console.error('refreshToHome', e);
         }
-        // Instant
-        if (typeof leaveInstantPlay === 'function') {
-            try { leaveInstantPlay(); } catch (_) {}
-        }
-        if (typeof leaveInstantSelection === 'function') {
-            try { leaveInstantSelection(); } catch (_) {}
-        }
-        // Classic room
-        if (typeof leaveCurrentRoom === 'function' && currentStake) {
-            try { leaveCurrentRoom(); } catch (_) {}
-        }
-        if (typeof returnToRooms === 'function') {
-            try { returnToRooms(); } catch (_) {}
-        }
-        showHome();
-        switchTab('tabGames', document.querySelector('.nav-item'));
-        // Soft reload of user balance/data
-        if (currentUsername && typeof loadUserData === 'function') {
-            loadUserData(currentUsername).catch(() => {});
-        }
-        try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) { window.scrollTo(0, 0); }
-    } catch (e) {
-        console.error('refreshToHome', e);
-        location.href = '/index.html';
-    }
+        setTimeout(() => {
+            try {
+                if (splash) {
+                    splash.classList.add('hidden');
+                    splash.style.display = 'none';
+                }
+            } catch (_) {}
+        }, 650);
+    };
+
+    // Let the eye see Kal Bingo loading briefly
+    setTimeout(finish, 280);
 }
 window.refreshToHome = refreshToHome;
 
@@ -589,27 +593,46 @@ function setDepositChipVisible(on) {
     if (!chip) return;
     if (on) {
         chip.style.display = 'inline-flex';
-        // next frame for slide-in
         requestAnimationFrame(() => chip.classList.add('show'));
+        // collapsed by default — only +
+        chip.classList.remove('expanded');
     } else {
-        chip.classList.remove('show');
+        chip.classList.remove('show', 'expanded');
         setTimeout(() => {
             if (!chip.classList.contains('show')) chip.style.display = 'none';
-        }, 280);
+        }, 200);
     }
 }
 
-async function openQuickDeposit() {
+let _depositExpandTimer = null;
+async function openQuickDeposit(ev) {
+    try { if (ev) { ev.preventDefault(); ev.stopPropagation(); } } catch (_) {}
+    const chip = document.getElementById('depositFloatChip');
+    if (!chip) {
+        if (typeof openDepositModal === 'function') return openDepositModal();
+        return;
+    }
+    // First click expands (+ becomes + Wallet), second / after brief delay opens modal
+    if (!chip.classList.contains('expanded')) {
+        chip.classList.add('expanded');
+        clearTimeout(_depositExpandTimer);
+        _depositExpandTimer = setTimeout(async () => {
+            try {
+                if (typeof openDepositModal === 'function') await openDepositModal();
+            } catch (e) { console.error(e); }
+            // auto collapse back to + only
+            setTimeout(() => { try { chip.classList.remove('expanded'); } catch (_) {} }, 400);
+        }, 380);
+        return;
+    }
+    clearTimeout(_depositExpandTimer);
     try {
-        // Ensure wallet context, then open deposit modal
-        if (typeof openDepositModal === 'function') {
-            await openDepositModal();
-        }
+        if (typeof openDepositModal === 'function') await openDepositModal();
     } catch (e) {
         console.error(e);
-        // Fallback: go to wallet tab
         switchTab('tabWallet', document.querySelectorAll('.nav-item')[2]);
     }
+    setTimeout(() => { try { chip.classList.remove('expanded'); } catch (_) {} }, 300);
 }
 window.openQuickDeposit = openQuickDeposit;
 
