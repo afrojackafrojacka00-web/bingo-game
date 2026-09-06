@@ -225,7 +225,9 @@ if(isSpecial){
     }
   });
   socket.on('special_card_locked',d=>{
-    if(d&&d.cardNumber!=null){locked.add(Number(d.cardNumber));render();toast(d.message||'Card locked')}
+    if(!d||d.cardNumber==null)return;
+    if(d.username&&String(d.username).toLowerCase()!==String(username).toLowerCase())return;
+    locked.add(Number(d.cardNumber));render();toast(d.message||'Card locked');
   });
 }else{
   socket.on('number_drawn',d=>{if(Number(d.stake)!==stake||ended)return;drawn.add(Number(d.number));room.lastNumber=Number(d.number);header();render();playNumberAudio(Number(d.number))});

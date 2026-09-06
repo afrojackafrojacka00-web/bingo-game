@@ -1042,6 +1042,7 @@ async function fetchHistory(username, reset = true) {
                     const mapped = sd.rows.map(function (row) {
                         const iWon = !!row.won;
                         const winners = row.winners || [];
+                        const prizeVal = Number(iWon ? (row.wonAmount || row.prize) : row.prize) || 0;
                         return {
                             gameId: 'special-' + row.sessionId,
                             date: row.date,
@@ -1051,7 +1052,8 @@ async function fetchHistory(username, reset = true) {
                             winnerCount: row.winnerCount || winners.length || 0,
                             players: row.players || 0,
                             stake: row.stake,
-                            prize: iWon ? (row.wonAmount || row.prize) : row.prize,
+                            prize: prizeVal,
+                            prizePool: prizeVal,
                             winningCardNumber: row.winningCardNumber || null,
                             special: true,
                             tag: '⭐ Special',
@@ -1110,7 +1112,9 @@ function renderHistory(games, reset = true) {
             : escapeHtml(game.winner || 'None');
 
         const cardCell = (game.winningCardNumber || split)
-            ? `<strong class="card-link" onclick="viewWinningCard(${Number(game.gameId)})">${split ? 'View Winning Cards' : '#' + Number(game.winningCardNumber)}</strong>`
+            ? (game.special
+                ? `<strong class="card-link" onclick="viewWinningCard('${String(game.gameId)}')">${split ? 'View Winning Cards' : '#' + Number(game.winningCardNumber)}</strong>`
+                : `<strong class="card-link" onclick="viewWinningCard(${Number(game.gameId)})">${split ? 'View Winning Cards' : '#' + Number(game.winningCardNumber)}</strong>`)
             : `<strong>—</strong>`;
 
         const specialTag = game.special ? '<span class="status-pill" style="margin-left:6px;">⭐ Special</span>' : '';
@@ -3097,9 +3101,21 @@ function applySpecialState(st) {
     }
     tim.textContent = left > 0 ? (left + 's') : 'Starting…';
   }
-  // Refresh taken cards while selecting
+  // Update taken cards in-place (full re-render steals clicks on web)
   if (onSelPage && !window._specialReady && (st.phase === 'SELECTING' || st.phase === 'OPEN')) {
-    renderSpecialCardGrid((document.getElementById('specialCardSearch') || {}).value || '');
+    const taken = new Set((st.takenCards || []).map(Number));
+    document.querySelectorAll('#specialCardGrid .card-item').forEach(function (el) {
+      const n = Number(el.getAttribute('data-card'));
+      const isTaken = taken.has(n) && !specialSelected.has(n);
+      el.classList.toggle('taken', isTaken);
+      if (isTaken) {
+        el.onclick = null;
+        el.style.pointerEvents = 'none';
+      } else if (!window._specialReady) {
+        el.style.pointerEvents = '';
+        el.setAttribute('onclick', 'toggleSpecialCard(' + n + ')');
+      }
+    });
   }
   // Joining ended → PLAYING: only READY players enter game page (never hijack home)
   if (st.phase === 'PLAYING' && onSelPage && window._specialReady && specialMyCards && specialMyCards.length) {
@@ -3200,11 +3216,14 @@ function filterSpecialCards() {
 function toggleSpecialCard(n) {
   if (window._specialReady) return;
   n = Number(n);
+  if (!n) return;
+  if (specialState && Array.isArray(specialState.takenCards) && specialState.takenCards.map(Number).indexOf(n) !== -1 && !specialSelected.has(n)) {
+    return;
+  }
   if (specialSelected.has(n)) specialSelected.delete(n);
   else specialSelected.add(n);
-  document.querySelectorAll('#specialCardGrid .card-item').forEach(function (el) {
-    el.classList.toggle('selected', specialSelected.has(Number(el.getAttribute('data-card'))));
-  });
+  const el = document.querySelector('#specialCardGrid .card-item[data-card="' + n + '"]');
+  if (el) el.classList.toggle('selected', specialSelected.has(n));
   updateSpecialSelCost();
 }
 

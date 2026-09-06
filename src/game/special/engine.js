@@ -451,7 +451,26 @@ async function beginPlaying() {
     }
   } catch (e) {
     console.error('special session insert', e.message);
-    currentSessionId = Date.now();
+    try {
+      const ins2 = await pool.query(
+        `INSERT INTO special_event_sessions
+          (status, stake, prize, winning_pattern, draw_interval_seconds, player_count, card_count, total_paid, house_profit, started_at)
+         VALUES ('PLAYING',$1,$2,$3,$4,$5,$6,$7,$8,NOW()) RETURNING id`,
+        [Number(settings.stake), Number(settings.prize), settings.winningPattern, settings.drawIntervalSeconds,
+          entries.size, cardCount, totalPaid, house]
+      );
+      currentSessionId = ins2.rows[0].id;
+      for (const [username, ent] of entries.entries()) {
+        await pool.query(
+          `INSERT INTO special_event_entries (session_id, user_id, username, cards, card_count, amount_paid)
+           VALUES ($1,$2,$3,$4,$5,$6)`,
+          [currentSessionId, ent.userId, username, ent.cards, (ent.cards || []).length, ent.paid]
+        );
+      }
+    } catch (e2) {
+      console.error('special session insert retry', e2.message);
+      currentSessionId = null;
+    }
   }
 
   drawOrder = shuffledNumbers();
@@ -534,12 +553,16 @@ async function endGame(winners) {
           [ent.userId, each]
         );
       }
+      let pCount = entries.size;
+      let cCount = 0;
+      for (const ent of entries.values()) cCount += (ent.cards || []).length;
       await client.query(
         `UPDATE special_event_sessions
          SET status='COMPLETED', winners=$1::jsonb, drawn_numbers=$2::jsonb,
-             house_profit=$3, completed_at=NOW()
+             house_profit=$3, player_count=$5, card_count=$6, total_paid=$7, completed_at=NOW()
          WHERE id=$4`,
-        [JSON.stringify(winnerPayload), JSON.stringify([...drawn]), houseNet, currentSessionId]
+        [JSON.stringify(winnerPayload), JSON.stringify([...drawn]), houseNet, currentSessionId,
+         pCount, cCount, totalPaid]
       );
       await client.query('COMMIT');
     } catch (e) {
@@ -550,12 +573,16 @@ async function endGame(winners) {
     }
   } else if (currentSessionId) {
     try {
+      let pCount = entries.size;
+      let cCount = 0;
+      for (const ent of entries.values()) cCount += (ent.cards || []).length;
       await pool.query(
         `UPDATE special_event_sessions
          SET status='COMPLETED', winners=$1::jsonb, drawn_numbers=$2::jsonb,
-             house_profit=$3, completed_at=NOW()
+             house_profit=$3, player_count=$5, card_count=$6, total_paid=$7, completed_at=NOW()
          WHERE id=$4`,
-        [JSON.stringify(winnerPayload), JSON.stringify([...drawn]), totalPaid, currentSessionId]
+        [JSON.stringify(winnerPayload), JSON.stringify([...drawn]), totalPaid, currentSessionId,
+         pCount, cCount, totalPaid]
       );
     } catch (_) {}
   }
@@ -670,7 +697,6 @@ async function claimWin({ username, cardNumber }) {
   const result = winningClaim(grid, drawn, settings.winningPattern, lastNumber);
   if (!result.ok) {
     claimLockedCards.add(cn);
-    broadcast('special_card_locked', { cardNumber: cn, username: uname, message: 'Wrong BINGO — card locked.' });
     const err = new Error('Not a valid win on the latest number. Card locked.');
     err.locked = true;
     throw err;
