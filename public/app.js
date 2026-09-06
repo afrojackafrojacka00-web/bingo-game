@@ -15,27 +15,20 @@ let appBooted = false;
 function applyTelegramChrome() {
     const tg = window.Telegram && window.Telegram.WebApp;
     if (!tg) return;
-    // Native X / title / ⋮ are drawn by Telegram — we can only theme colors & expand.
-    // Brand: deep navy header + warm gold accent background.
-    const header = '#0f172a';
-    const bg = '#0b0f14';
-    try { tg.setHeaderColor && tg.setHeaderColor(header); } catch (_) {}
-    try { tg.setBackgroundColor && tg.setBackgroundColor(bg); } catch (_) {}
-    try { tg.setBottomBarColor && tg.setBottomBarColor(header); } catch (_) {}
-    try {
-        // Some clients accept themeParams-like secondary bg
-        if (tg.themeParams) {
-            document.documentElement.style.setProperty('--tg-header', header);
-        }
-    } catch (_) {}
+    // Native X / title / menu are Telegram UI. True alpha transparency is not supported.
+    // Use theme "bg_color" so the header blends with the page (modern seamless look).
+    try { tg.setHeaderColor && tg.setHeaderColor('bg_color'); } catch (_) {
+        try { tg.setHeaderColor && tg.setHeaderColor('#0b0f14'); } catch (__) {}
+    }
+    try { tg.setBackgroundColor && tg.setBackgroundColor('#0b0f14'); } catch (_) {}
+    try { tg.setBottomBarColor && tg.setBottomBarColor('#0b0f14'); } catch (_) {}
     try { tg.ready && tg.ready(); } catch (_) {}
     try { tg.expand && tg.expand(); } catch (_) {}
-    // Keep colors after theme changes inside Telegram
     try {
         if (tg.onEvent) {
             tg.onEvent('themeChanged', function () {
-                try { tg.setHeaderColor && tg.setHeaderColor(header); } catch (_) {}
-                try { tg.setBackgroundColor && tg.setBackgroundColor(bg); } catch (_) {}
+                try { tg.setHeaderColor && tg.setHeaderColor('bg_color'); } catch (_) {}
+                try { tg.setBackgroundColor && tg.setBackgroundColor('#0b0f14'); } catch (_) {}
             });
         }
     } catch (_) {}
