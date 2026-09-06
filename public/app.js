@@ -11,6 +11,36 @@
 // `markAppBooted()`), we stop intercepting — later runtime errors are
 // handled locally by whichever feature hit them, same as before.
 let appBooted = false;
+
+function applyTelegramChrome() {
+    const tg = window.Telegram && window.Telegram.WebApp;
+    if (!tg) return;
+    // Native X / title / ⋮ are drawn by Telegram — we can only theme colors & expand.
+    // Brand: deep navy header + warm gold accent background.
+    const header = '#0f172a';
+    const bg = '#0b0f14';
+    try { tg.setHeaderColor && tg.setHeaderColor(header); } catch (_) {}
+    try { tg.setBackgroundColor && tg.setBackgroundColor(bg); } catch (_) {}
+    try { tg.setBottomBarColor && tg.setBottomBarColor(header); } catch (_) {}
+    try {
+        // Some clients accept themeParams-like secondary bg
+        if (tg.themeParams) {
+            document.documentElement.style.setProperty('--tg-header', header);
+        }
+    } catch (_) {}
+    try { tg.ready && tg.ready(); } catch (_) {}
+    try { tg.expand && tg.expand(); } catch (_) {}
+    // Keep colors after theme changes inside Telegram
+    try {
+        if (tg.onEvent) {
+            tg.onEvent('themeChanged', function () {
+                try { tg.setHeaderColor && tg.setHeaderColor(header); } catch (_) {}
+                try { tg.setBackgroundColor && tg.setBackgroundColor(bg); } catch (_) {}
+            });
+        }
+    } catch (_) {}
+}
+
 function markAppBooted() {
     appBooted = true;
     try { hide('bootSplash'); } catch (_) {}
@@ -747,6 +777,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     // Only real Mini App sessions have non-empty initData.
     // Loading telegram-web-app.js in a normal browser must NOT block web login.
     if (tg) {
+        try { applyTelegramChrome(); } catch (_) {}
         try { tg.ready(); } catch (_) {}
         try { tg.expand(); } catch (_) {}
     }

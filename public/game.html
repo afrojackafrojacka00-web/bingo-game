@@ -11,6 +11,21 @@
   <link rel="stylesheet" href="game.css">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="/socket.io/socket.io.js"></script>
+
+<script>
+(function(){
+  try{
+    var tg=window.Telegram&&window.Telegram.WebApp;
+    if(!tg)return;
+    var header='#0f172a', bg='#0b0f14';
+    try{tg.setHeaderColor&&tg.setHeaderColor(header);}catch(e){}
+    try{tg.setBackgroundColor&&tg.setBackgroundColor(bg);}catch(e){}
+    try{tg.setBottomBarColor&&tg.setBottomBarColor(header);}catch(e){}
+    try{tg.ready&&tg.ready();}catch(e){}
+    try{tg.expand&&tg.expand();}catch(e){}
+  }catch(e){}
+})();
+</script>
 </head>
 <body>
 <header>
