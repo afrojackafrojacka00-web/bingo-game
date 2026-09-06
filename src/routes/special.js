@@ -1,9 +1,29 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const { requireAdmin } = require('../middleware/adminAuth');
-const { moneyLimiter, gameActionLimiter } = require('../middleware/rateLimiters');
 const special = require('../game/special/engine');
 const pool = require('../db/pool');
+const config = require('../config');
+
+// Optional limiters — never break Special admin if package missing
+let moneyLimiter = (req, res, next) => next();
+let gameActionLimiter = (req, res, next) => next();
+try {
+  const rl = require('../middleware/rateLimiters');
+  if (typeof rl.moneyLimiter === 'function') moneyLimiter = rl.moneyLimiter;
+  if (typeof rl.gameActionLimiter === 'function') gameActionLimiter = rl.gameActionLimiter;
+} catch (e) {
+  console.warn('special routes: rateLimiters unavailable, continuing without them:', e.message);
+}
+
+let multer = null;
+try {
+  multer = require('multer');
+} catch (e) {
+  console.warn('special routes: multer unavailable:', e.message);
+}
 
 function registerSpecialRoutes(app) {
   app.get('/api/special/status', async (req, res) => {
@@ -80,13 +100,13 @@ function registerSpecialRoutes(app) {
     }
   });
 
-  // Admin
   app.get('/api/admin/special', async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
       res.json({ success: true, ...(await special.adminGet()) });
     } catch (err) {
-      res.status(500).json({ success: false, message: 'Server error.' });
+      console.error('admin special get', err);
+      res.status(500).json({ success: false, message: err.message || 'Server error.' });
     }
   });
 
@@ -96,6 +116,7 @@ function registerSpecialRoutes(app) {
       const data = await special.adminUpdate(req.body || {});
       res.json({ success: true, ...data });
     } catch (err) {
+      console.error('admin special update', err);
       res.status(400).json({ success: false, message: err.message || 'Failed.' });
     }
   });
@@ -108,8 +129,14 @@ function registerSpecialRoutes(app) {
       const to = req.query.to ? String(req.query.to) : null;
       const params = [];
       let where = 'WHERE 1=1';
-      if (from) { params.push(from); where += ` AND COALESCE(completed_at, started_at, created_at) >= $${params.length}::date`; }
-      if (to) { params.push(to); where += ` AND COALESCE(completed_at, started_at, created_at) < ($${params.length}::date + INTERVAL '1 day')`; }
+      if (from) {
+        params.push(from);
+        where += ` AND COALESCE(completed_at, started_at, created_at) >= $${params.length}::date`;
+      }
+      if (to) {
+        params.push(to);
+        where += ` AND COALESCE(completed_at, started_at, created_at) < ($${params.length}::date + INTERVAL '1 day')`;
+      }
       params.push(limit);
       const r = await pool.query(
         `SELECT id, status, stake, prize, player_count, card_count, total_paid, house_profit, winners, created_at, started_at, completed_at
@@ -140,7 +167,6 @@ function registerSpecialRoutes(app) {
     }
   });
 
-  // Player-facing session detail (winning card)
   app.get('/api/special/session/:id', async (req, res) => {
     try {
       const id = Number(req.params.id);
@@ -155,32 +181,9 @@ function registerSpecialRoutes(app) {
       res.status(500).json({ success: false, message: 'Server error.' });
     }
   });
-}
 
-
-  // ---- Special notify image management (local public/uploads) ----
-  const fs = require('fs');
-  const path = require('path');
-  const multer = require('multer');
-  const uploadsDir = path.join(require('../config').publicDir, 'uploads');
+  const uploadsDir = path.join(config.publicDir, 'uploads');
   try { fs.mkdirSync(uploadsDir, { recursive: true }); } catch (_) {}
-
-  const specialUpload = multer({
-    storage: multer.diskStorage({
-      destination: function (_req, _file, cb) { cb(null, uploadsDir); },
-      filename: function (_req, file, cb) {
-        const safe = String(file.originalname || 'special.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
-        cb(null, safe.toLowerCase().endsWith('.jpg') || safe.toLowerCase().endsWith('.jpeg') || safe.toLowerCase().endsWith('.png') || safe.toLowerCase().endsWith('.webp')
-          ? safe
-          : (safe + '.jpg'));
-      }
-    }),
-    limits: { fileSize: 5 * 1024 * 1024 },
-    fileFilter: function (_req, file, cb) {
-      if (/^image\//.test(file.mimetype)) cb(null, true);
-      else cb(new Error('Images only'));
-    }
-  });
 
   app.get('/api/admin/special/uploads', async (req, res) => {
     if (!requireAdmin(req, res)) return;
@@ -198,21 +201,42 @@ function registerSpecialRoutes(app) {
     }
   });
 
-  app.post('/api/admin/special/uploads', (req, res) => {
-    if (!requireAdmin(req, res)) return;
-    specialUpload.single('image')(req, res, async (err) => {
-      if (err) return res.status(400).json({ success: false, message: err.message });
-      if (!req.file) return res.status(400).json({ success: false, message: 'No file' });
-      const url = '/uploads/' + req.file.filename;
-      // optional: set as active notify image
-      if (req.body && (req.body.setActive === '1' || req.body.setActive === true || req.body.setActive === 'true')) {
-        try {
-          await special.adminUpdate({ notifyImage: url });
-        } catch (_) {}
+  if (multer) {
+    const specialUpload = multer({
+      storage: multer.diskStorage({
+        destination: function (_req, _file, cb) { cb(null, uploadsDir); },
+        filename: function (_req, file, cb) {
+          const safe = String(file.originalname || 'special.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+          const lower = safe.toLowerCase();
+          const ok = lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.png') || lower.endsWith('.webp');
+          cb(null, ok ? safe : safe + '.jpg');
+        }
+      }),
+      limits: { fileSize: 5 * 1024 * 1024 },
+      fileFilter: function (_req, file, cb) {
+        if (/^image\//.test(file.mimetype)) cb(null, true);
+        else cb(new Error('Images only'));
       }
-      res.json({ success: true, url, name: req.file.filename });
     });
-  });
+
+    app.post('/api/admin/special/uploads', (req, res) => {
+      if (!requireAdmin(req, res)) return;
+      specialUpload.single('image')(req, res, async (err) => {
+        if (err) return res.status(400).json({ success: false, message: err.message });
+        if (!req.file) return res.status(400).json({ success: false, message: 'No file' });
+        const url = '/uploads/' + req.file.filename;
+        if (req.body && (req.body.setActive === '1' || req.body.setActive === true || req.body.setActive === 'true')) {
+          try { await special.adminUpdate({ notifyImage: url }); } catch (_) {}
+        }
+        res.json({ success: true, url, name: req.file.filename });
+      });
+    });
+  } else {
+    app.post('/api/admin/special/uploads', (req, res) => {
+      if (!requireAdmin(req, res)) return;
+      res.status(500).json({ success: false, message: 'Upload not available (multer missing).' });
+    });
+  }
 
   app.delete('/api/admin/special/uploads/:name', async (req, res) => {
     if (!requireAdmin(req, res)) return;
@@ -232,13 +256,12 @@ function registerSpecialRoutes(app) {
     if (!requireAdmin(req, res)) return;
     try {
       const kind = req.body && req.body.kind === 'joining' ? 'joining' : 'countdown';
-      // force by clearing dedupe key via temporary override
       const result = await special.notifySpecialEvent(kind, { force: true });
       res.json({ success: true, result });
     } catch (err) {
       res.status(500).json({ success: false, message: err.message });
     }
   });
-
+}
 
 module.exports = { registerSpecialRoutes };
