@@ -11,6 +11,9 @@ const { requireAdmin } = require('../../middleware/adminAuth');
 let ioNamespace = null;
 let phaseTimer = null;
 let drawTimer = null;
+let lastNotifyCountdownKey = null;
+let lastNotifyJoiningKey = null;
+let notifyBusy = false;
 
 /** @type {'IDLE'|'COUNTDOWN'|'OPEN'|'SELECTING'|'PLAYING'|'ENDED'} */
 let phase = 'IDLE';
@@ -40,6 +43,10 @@ const DEFAULTS = {
   drawIntervalSeconds: 4,
   selectionSeconds: 60,
   endedMessage: 'Game ended for today. Enjoy Classic & Instant Bingo until next time!',
+  notifyEnabled: true,
+  notifyCountdownText: '🏆 Special Bingo countdown started! Open the app and get ready — big prize coming.',
+  notifyJoiningText: '🟢 Special Bingo is OPEN! Join now, pick your cards and press READY before time runs out.',
+  notifyImage: '/uploads/special.jpg',
 };
 
 let settings = { ...DEFAULTS };
@@ -174,6 +181,12 @@ async function ensureSchema() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )`,
     `INSERT INTO special_event_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`,
+    `ALTER TABLE special_event_settings ADD COLUMN IF NOT EXISTS notify_enabled BOOLEAN DEFAULT TRUE`,
+    `ALTER TABLE special_event_settings ADD COLUMN IF NOT EXISTS notify_countdown_text TEXT`,
+    `ALTER TABLE special_event_settings ADD COLUMN IF NOT EXISTS notify_joining_text TEXT`,
+    `ALTER TABLE special_event_settings ADD COLUMN IF NOT EXISTS notify_image TEXT DEFAULT '/uploads/special.jpg'`,
+    `ALTER TABLE special_event_settings ADD COLUMN IF NOT EXISTS last_notify_countdown_key TEXT`,
+    `ALTER TABLE special_event_settings ADD COLUMN IF NOT EXISTS last_notify_joining_key TEXT`,
     `CREATE TABLE IF NOT EXISTS special_event_sessions (
       id SERIAL PRIMARY KEY,
       status TEXT NOT NULL,
@@ -226,10 +239,16 @@ async function loadSettings() {
       drawIntervalSeconds: Number(row.draw_interval_seconds) || DEFAULTS.drawIntervalSeconds,
       selectionSeconds: Number(row.selection_seconds) || DEFAULTS.selectionSeconds,
       endedMessage: row.ended_message || DEFAULTS.endedMessage,
+      notifyEnabled: row.notify_enabled != null ? !!row.notify_enabled : DEFAULTS.notifyEnabled,
+      notifyCountdownText: row.notify_countdown_text || DEFAULTS.notifyCountdownText,
+      notifyJoiningText: row.notify_joining_text || DEFAULTS.notifyJoiningText,
+      notifyImage: row.notify_image || DEFAULTS.notifyImage,
     };
     if (row.countdown_ends_at) {
       countdownEndsAt = new Date(row.countdown_ends_at).getTime();
     }
+    if (row.last_notify_countdown_key) lastNotifyCountdownKey = row.last_notify_countdown_key;
+    if (row.last_notify_joining_key) lastNotifyJoiningKey = row.last_notify_joining_key;
   } catch (e) {
     console.error('special loadSettings', e.message);
   }
@@ -241,7 +260,9 @@ async function saveSettings(patch) {
     `UPDATE special_event_settings SET
       visible=$1, stake=$2, prize=$3, game_type_label=$4, promo_text=$5,
       winning_pattern=$6, draw_interval_seconds=$7, selection_seconds=$8,
-      countdown_ends_at=$9, ended_message=$10, updated_at=NOW()
+      countdown_ends_at=$9, ended_message=$10,
+      notify_enabled=$11, notify_countdown_text=$12, notify_joining_text=$13, notify_image=$14,
+      updated_at=NOW()
      WHERE id=1`,
     [
       !!settings.visible,
@@ -254,12 +275,114 @@ async function saveSettings(patch) {
       settings.selectionSeconds,
       countdownEndsAt ? new Date(countdownEndsAt) : null,
       settings.endedMessage,
+      !!settings.notifyEnabled,
+      settings.notifyCountdownText,
+      settings.notifyJoiningText,
+      settings.notifyImage || DEFAULTS.notifyImage,
     ]
   );
 }
 
 function broadcast(event, payload) {
   if (ioNamespace) ioNamespace.emit(event, payload || publicState());
+}
+
+
+function publicImageUrl(imagePath) {
+  if (!imagePath) return null;
+  if (/^https?:\/\//i.test(imagePath)) return imagePath;
+  const base = (process.env.PUBLIC_BASE_URL || process.env.APP_URL || process.env.BASE_URL || '').replace(/\/$/, '');
+  if (!base) return null;
+  const path = imagePath.startsWith('/') ? imagePath : '/' + imagePath;
+  return base + path;
+}
+
+async function telegramSendAll(message, imagePath) {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.BOT_TOKEN || '';
+  if (!botToken) return { sent: 0, failed: 0, skipped: true };
+  const users = await pool.query('SELECT telegram_id FROM users WHERE telegram_id IS NOT NULL');
+  const photo = publicImageUrl(imagePath);
+  let sent = 0, failed = 0;
+  for (const row of users.rows) {
+    try {
+      const chatId = row.telegram_id;
+      if (photo) {
+        await fetch('https://api.telegram.org/bot' + botToken + '/sendPhoto', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, photo, caption: message || '' }),
+        });
+      } else {
+        await fetch('https://api.telegram.org/bot' + botToken + '/sendMessage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, text: message || '' }),
+        });
+      }
+      sent += 1;
+      // gentle pacing so Telegram does not rate-limit a blast
+      await new Promise((r) => setTimeout(r, 35));
+    } catch (_) {
+      failed += 1;
+    }
+  }
+  return { sent, failed };
+}
+
+/**
+ * kind: 'countdown' | 'joining'
+ * Deduped so the same event is not spammed if tick/admin fires twice.
+ */
+async function notifySpecialEvent(kind, opts) {
+  opts = opts || {};
+  if (!settings.notifyEnabled && !opts.force) return { ok: false, reason: 'disabled' };
+  if (notifyBusy) return { ok: false, reason: 'busy' };
+  const key = kind === 'countdown'
+    ? String(countdownEndsAt || '')
+    : String(selectionEndsAt || countdownEndsAt || Date.now());
+  if (!opts.force) {
+    if (kind === 'countdown' && lastNotifyCountdownKey === key) return { ok: false, reason: 'dup' };
+    if (kind === 'joining' && lastNotifyJoiningKey === key) return { ok: false, reason: 'dup' };
+  } else {
+    // allow test re-send
+    if (kind === 'countdown') lastNotifyCountdownKey = null;
+    else lastNotifyJoiningKey = null;
+  }
+
+  const message = kind === 'countdown'
+    ? (settings.notifyCountdownText || DEFAULTS.notifyCountdownText)
+    : (settings.notifyJoiningText || DEFAULTS.notifyJoiningText);
+  const imagePath = settings.notifyImage || DEFAULTS.notifyImage;
+
+  notifyBusy = true;
+  try {
+    // In-app notification (web + mini app bell)
+    try {
+      await pool.query(
+        'INSERT INTO notifications (message, image_url) VALUES ($1, $2)',
+        [message, imagePath]
+      );
+    } catch (e) {
+      console.error('special notify app insert', e.message);
+    }
+
+    const tg = await telegramSendAll(message, imagePath);
+    if (kind === 'countdown') {
+      lastNotifyCountdownKey = key;
+      try {
+        await pool.query('UPDATE special_event_settings SET last_notify_countdown_key=$1 WHERE id=1', [key]);
+      } catch (_) {}
+    } else {
+      lastNotifyJoiningKey = key;
+      try {
+        await pool.query('UPDATE special_event_settings SET last_notify_joining_key=$1 WHERE id=1', [key]);
+      } catch (_) {}
+    }
+    console.log('special notify', kind, 'tg', tg);
+    return { ok: true, telegram: tg };
+  } finally {
+    notifyBusy = false;
+  }
 }
 
 function openJoiningPhase() {
@@ -273,6 +396,8 @@ function openJoiningPhase() {
     // Already past joining window
     selectionEndsAt = Date.now(); // tick will end immediately
   }
+  // Notify users: joining is open (async, non-blocking)
+  notifySpecialEvent('joining').catch((e) => console.error('special notify joining', e.message));
 }
 
 function publicState() {
@@ -328,6 +453,10 @@ function publicState() {
     joinedPlayers: entries.size,
     takenCards: [...cardOwners.keys()].map(Number),
     serverNow: now,
+    notifyEnabled: !!settings.notifyEnabled,
+    notifyCountdownText: settings.notifyCountdownText,
+    notifyJoiningText: settings.notifyJoiningText,
+    notifyImage: settings.notifyImage,
   };
 }
 
@@ -796,6 +925,10 @@ async function adminUpdate(body) {
   if (body.drawIntervalSeconds != null) patch.drawIntervalSeconds = Math.max(1, Math.min(30, Number(body.drawIntervalSeconds)));
   if (body.selectionSeconds != null) patch.selectionSeconds = Math.max(15, Math.min(300, Number(body.selectionSeconds)));
   if (body.endedMessage != null) patch.endedMessage = String(body.endedMessage).slice(0, 240);
+  if (body.notifyEnabled != null) patch.notifyEnabled = !!body.notifyEnabled;
+  if (body.notifyCountdownText != null) patch.notifyCountdownText = String(body.notifyCountdownText).slice(0, 500);
+  if (body.notifyJoiningText != null) patch.notifyJoiningText = String(body.notifyJoiningText).slice(0, 500);
+  if (body.notifyImage != null) patch.notifyImage = String(body.notifyImage).slice(0, 300);
 
   // Schedule countdown: hours + minutes from now
   if (body.countdownHours != null || body.countdownMinutes != null || body.countdownEndsAt != null) {
@@ -812,6 +945,7 @@ async function adminUpdate(body) {
       cardOwners.clear();
       clearDrawTimer();
       _startingGame = false;
+      lastNotifyCountdownKey = null; // allow notify for new schedule
     }
   }
 
@@ -841,6 +975,13 @@ async function adminUpdate(body) {
 
   ensurePhaseTimer();
   await saveSettings(patch);
+  // If admin just scheduled a countdown, notify users (web + Telegram)
+  if (body.countdownHours != null || body.countdownMinutes != null || body.countdownEndsAt != null) {
+    notifySpecialEvent('countdown').catch((e) => console.error('special notify countdown', e.message));
+  }
+  if (body.startOpenNow) {
+    notifySpecialEvent('joining').catch((e) => console.error('special notify joining', e.message));
+  }
   broadcast('special_state', publicState());
   return adminGet();
 }
@@ -876,5 +1017,6 @@ module.exports = {
   historyForUser,
   adminGet,
   adminUpdate,
+  notifySpecialEvent,
   PATTERN_NAMES,
 };

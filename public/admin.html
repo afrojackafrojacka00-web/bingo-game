@@ -1079,6 +1079,37 @@ table.data tr:hover td { background: var(--card-hover); }
           </div>
         </div>
         <div class="inst-card" style="margin-top:14px;">
+          <h3>📣 Notifications (Web + Telegram)</h3>
+          <p class="hint">When countdown starts and when joining opens, users get an in-app notification and a Telegram message (if they linked Telegram). Set <code>PUBLIC_BASE_URL</code> on the server so Telegram can load the image (e.g. https://yourdomain.com).</p>
+          <div class="switch-row">
+            <div class="switch-label">Send notifications</div>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span class="switch-state off" id="spNotifyState">OFF</span>
+              <label class="switch"><input type="checkbox" id="spNotifyEnabled"><span class="switch-slider"></span></label>
+            </div>
+          </div>
+          <label class="muted" style="font-size:12px;display:block;margin-top:8px;">Countdown started message
+            <textarea id="spNotifyCdText" rows="2" style="width:100%;margin-top:4px;font-size:13px;"></textarea>
+          </label>
+          <label class="muted" style="font-size:12px;display:block;margin-top:8px;">Joining opened message
+            <textarea id="spNotifyJoinText" rows="2" style="width:100%;margin-top:4px;font-size:13px;"></textarea>
+          </label>
+          <div style="margin-top:10px;">
+            <div class="muted" style="font-size:12px;margin-bottom:6px;">Notify image (default <code>/uploads/special.jpg</code>)</div>
+            <div id="spNotifyImagePreview" class="muted" style="font-size:12px;margin-bottom:8px;">—</div>
+            <div class="row-actions">
+              <input type="file" id="spNotifyFile" accept="image/*" style="font-size:12px;">
+              <button type="button" class="btn btn-ghost btn-sm" onclick="uploadSpecialNotifyImage()">Upload &amp; use</button>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="loadSpecialUploads()">Refresh images</button>
+            </div>
+            <div id="spUploadsList" style="margin-top:10px;"></div>
+          </div>
+          <div class="row-actions" style="margin-top:10px;">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="testSpecialNotify('countdown')">Test countdown msg</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="testSpecialNotify('joining')">Test joining msg</button>
+          </div>
+        </div>
+        <div class="inst-card" style="margin-top:14px;">
           <h3>Actions</h3>
           <p class="hint">Save all settings above, schedule countdown, or reset the room after a game.</p>
           <div class="row-actions">
@@ -2630,6 +2661,19 @@ async function loadSpecialAdmin() {
     document.getElementById('spDrawGap').value = d.drawIntervalSeconds || 4;
     document.getElementById('spSelSec').value = d.selectionSeconds || 60;
     document.getElementById('spEndedMsg').value = d.endedMessage || '';
+    const nEn = document.getElementById('spNotifyEnabled');
+    if (nEn) {
+      nEn.checked = d.notifyEnabled !== false;
+      syncSwitchLabel(nEn, 'spNotifyState');
+    }
+    const nCd = document.getElementById('spNotifyCdText');
+    if (nCd) nCd.value = d.notifyCountdownText || (d.settings && d.settings.notifyCountdownText) || '';
+    const nJn = document.getElementById('spNotifyJoinText');
+    if (nJn) nJn.value = d.notifyJoiningText || (d.settings && d.settings.notifyJoiningText) || '';
+    const img = d.notifyImage || (d.settings && d.settings.notifyImage) || '/uploads/special.jpg';
+    const prev = document.getElementById('spNotifyImagePreview');
+    if (prev) prev.innerHTML = 'Active: <code>' + esc(img) + '</code> <img src="' + esc(img) + '" alt="" style="max-height:48px;vertical-align:middle;margin-left:8px;border-radius:6px;">';
+    loadSpecialUploads();
     document.getElementById('spAdminMsg').textContent = 'Phase: ' + (d.phase || '—') + (d.canJoin ? ' · joining open' : '') + ' · Joined players are only users who paid for cards (not spectators).';
     const cdHint = document.getElementById('spCdHint');
     if (cdHint) {
@@ -2670,7 +2714,99 @@ function specialPeriodKey(dateStr, period) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
+async function loadSpecialUploads() {
+  if (!getSecret()) return;
+  const box = document.getElementById('spUploadsList');
+  if (!box) return;
+  try {
+    const r = await fetch('/api/admin/special/uploads', { headers: adminSecretHeader() });
+    const d = await r.json();
+    if (!d.success) { box.innerHTML = '<div class="empty">Could not list uploads</div>'; return; }
+    const files = d.files || [];
+    if (!files.length) {
+      box.innerHTML = '<div class="empty">No images in /uploads — upload <b>special.jpg</b> or any image</div>';
+      return;
+    }
+    box.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:10px;">' + files.map(function (f) {
+      return '<div style="border:1px solid var(--line,#333);border-radius:8px;padding:8px;width:120px;text-align:center;">' +
+        '<img src="' + esc(f.url) + '" alt="" style="width:100%;height:72px;object-fit:cover;border-radius:6px;">' +
+        '<div class="muted" style="font-size:11px;margin-top:4px;overflow:hidden;text-overflow:ellipsis;">' + esc(f.name) + '</div>' +
+        '<button type="button" class="btn btn-ghost btn-sm" style="margin-top:4px;width:100%;" onclick="setSpecialNotifyImage(\'' + esc(f.url) + '\')">Use</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" style="margin-top:4px;width:100%;" onclick="deleteSpecialUpload(\'' + esc(f.name) + '\')">Delete</button>' +
+        '</div>';
+    }).join('') + '</div>';
+  } catch (e) {
+    box.innerHTML = '<div class="empty">Network error</div>';
+  }
+}
+
+async function uploadSpecialNotifyImage() {
+  if (!requireSecret()) return;
+  const input = document.getElementById('spNotifyFile');
+  if (!input || !input.files || !input.files[0]) return alert('Choose an image first');
+  const fd = new FormData();
+  fd.append('image', input.files[0]);
+  fd.append('setActive', '1');
+  fd.append('adminSecret', getSecret());
+  try {
+    const r = await fetch('/api/admin/special/uploads', {
+      method: 'POST',
+      headers: adminSecretHeader(),
+      body: fd
+    });
+    const d = await r.json();
+    if (!d.success) return alert(d.message || 'Upload failed');
+    document.getElementById('spAdminMsg').textContent = 'Image uploaded: ' + (d.url || '');
+    loadSpecialAdmin();
+  } catch (e) { alert('Network error'); }
+}
+
+async function setSpecialNotifyImage(url) {
+  if (!requireSecret()) return;
+  try {
+    const r = await fetch('/api/admin/special', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminSecretHeader() },
+      body: JSON.stringify({ adminSecret: getSecret(), notifyImage: url })
+    });
+    const d = await r.json();
+    if (!d.success) return alert(d.message || 'Failed');
+    loadSpecialAdmin();
+  } catch (e) { alert('Network error'); }
+}
+
+async function deleteSpecialUpload(name) {
+  if (!requireSecret()) return;
+  if (!confirm('Delete image ' + name + '?')) return;
+  try {
+    const r = await fetch('/api/admin/special/uploads/' + encodeURIComponent(name), {
+      method: 'DELETE',
+      headers: adminSecretHeader()
+    });
+    const d = await r.json();
+    if (!d.success) return alert(d.message || 'Delete failed');
+    loadSpecialUploads();
+  } catch (e) { alert('Network error'); }
+}
+
+async function testSpecialNotify(kind) {
+  if (!requireSecret()) return;
+  if (!confirm('Send test "' + kind + '" notification to all users (app + Telegram)?')) return;
+  // save texts first
+  await saveSpecialEvent(false);
+  try {
+    const r = await fetch('/api/admin/special/notify-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminSecretHeader() },
+      body: JSON.stringify({ adminSecret: getSecret(), kind: kind })
+    });
+    const d = await r.json();
+    alert(d.success ? 'Sent (check Telegram / in-app bell)' : (d.message || 'Failed'));
+  } catch (e) { alert('Network error'); }
+}
+
 async function loadSpecialHistory() {
+
   if (!getSecret()) return;
   const box = document.getElementById('spHistory');
   const detail = document.getElementById('spHistoryDetail');
@@ -2825,7 +2961,10 @@ async function saveSpecialEvent(withCountdown) {
     winningPattern: document.getElementById('spPattern').value,
     drawIntervalSeconds: Number(document.getElementById('spDrawGap').value),
     selectionSeconds: Number(document.getElementById('spSelSec').value),
-    endedMessage: document.getElementById('spEndedMsg').value
+    endedMessage: document.getElementById('spEndedMsg').value,
+    notifyEnabled: !!(document.getElementById('spNotifyEnabled') && document.getElementById('spNotifyEnabled').checked),
+    notifyCountdownText: (document.getElementById('spNotifyCdText') || {}).value || '',
+    notifyJoiningText: (document.getElementById('spNotifyJoinText') || {}).value || ''
   };
   if (withCountdown) {
     body.countdownHours = Number(document.getElementById('spHours').value) || 0;

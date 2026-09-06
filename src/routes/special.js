@@ -157,4 +157,88 @@ function registerSpecialRoutes(app) {
   });
 }
 
+
+  // ---- Special notify image management (local public/uploads) ----
+  const fs = require('fs');
+  const path = require('path');
+  const multer = require('multer');
+  const uploadsDir = path.join(require('../config').publicDir, 'uploads');
+  try { fs.mkdirSync(uploadsDir, { recursive: true }); } catch (_) {}
+
+  const specialUpload = multer({
+    storage: multer.diskStorage({
+      destination: function (_req, _file, cb) { cb(null, uploadsDir); },
+      filename: function (_req, file, cb) {
+        const safe = String(file.originalname || 'special.jpg').replace(/[^a-zA-Z0-9._-]/g, '_');
+        cb(null, safe.toLowerCase().endsWith('.jpg') || safe.toLowerCase().endsWith('.jpeg') || safe.toLowerCase().endsWith('.png') || safe.toLowerCase().endsWith('.webp')
+          ? safe
+          : (safe + '.jpg'));
+      }
+    }),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: function (_req, file, cb) {
+      if (/^image\//.test(file.mimetype)) cb(null, true);
+      else cb(new Error('Images only'));
+    }
+  });
+
+  app.get('/api/admin/special/uploads', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const files = fs.readdirSync(uploadsDir)
+        .filter((f) => /\.(jpe?g|png|webp|gif)$/i.test(f))
+        .map((f) => {
+          const st = fs.statSync(path.join(uploadsDir, f));
+          return { name: f, url: '/uploads/' + f, size: st.size, mtime: st.mtime };
+        })
+        .sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
+      res.json({ success: true, files });
+    } catch (err) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post('/api/admin/special/uploads', (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    specialUpload.single('image')(req, res, async (err) => {
+      if (err) return res.status(400).json({ success: false, message: err.message });
+      if (!req.file) return res.status(400).json({ success: false, message: 'No file' });
+      const url = '/uploads/' + req.file.filename;
+      // optional: set as active notify image
+      if (req.body && (req.body.setActive === '1' || req.body.setActive === true || req.body.setActive === 'true')) {
+        try {
+          await special.adminUpdate({ notifyImage: url });
+        } catch (_) {}
+      }
+      res.json({ success: true, url, name: req.file.filename });
+    });
+  });
+
+  app.delete('/api/admin/special/uploads/:name', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const name = path.basename(String(req.params.name || ''));
+      if (!name || name.startsWith('.')) return res.status(400).json({ success: false, message: 'Invalid name' });
+      const fp = path.join(uploadsDir, name);
+      if (!fp.startsWith(uploadsDir)) return res.status(400).json({ success: false, message: 'Invalid path' });
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post('/api/admin/special/notify-test', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const kind = req.body && req.body.kind === 'joining' ? 'joining' : 'countdown';
+      // force by clearing dedupe key via temporary override
+      const result = await special.notifySpecialEvent(kind, { force: true });
+      res.json({ success: true, result });
+    } catch (err) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+
 module.exports = { registerSpecialRoutes };
