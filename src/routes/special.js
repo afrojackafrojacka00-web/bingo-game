@@ -1,6 +1,7 @@
 'use strict';
 
 const { requireAdmin } = require('../middleware/adminAuth');
+const { moneyLimiter, gameActionLimiter } = require('../middleware/rateLimiters');
 const special = require('../game/special/engine');
 const pool = require('../db/pool');
 
@@ -26,7 +27,7 @@ function registerSpecialRoutes(app) {
     }
   });
 
-  app.post('/api/special/join', async (req, res) => {
+  app.post('/api/special/join', moneyLimiter, gameActionLimiter, async (req, res) => {
     try {
       const username = String(req.body?.username || '').trim();
       const cardNumbers = req.body?.cardNumbers || [];
@@ -53,7 +54,7 @@ function registerSpecialRoutes(app) {
     }
   });
 
-  app.post('/api/special/claim', async (req, res) => {
+  app.post('/api/special/claim', gameActionLimiter, async (req, res) => {
     try {
       const username = String(req.body?.username || '').trim();
       const cardNumber = Number(req.body?.cardNumber);

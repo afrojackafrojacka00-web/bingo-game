@@ -3046,7 +3046,7 @@ async function refreshSpecialHome() {
 function startSpecialHomePoll() {
   if (specialHomeTimer) clearInterval(specialHomeTimer);
   refreshSpecialHome();
-  specialHomeTimer = setInterval(refreshSpecialHome, 1000);
+  specialHomeTimer = setInterval(refreshSpecialHome, 2000);
 }
 
 function connectSpecialSocket() {

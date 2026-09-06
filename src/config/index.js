@@ -9,7 +9,10 @@ const config = {
 
   databaseUrl: process.env.DATABASE_URL,
   databaseSsl: process.env.DATABASE_SSL === 'true',
-  pgPoolMax: Number(process.env.PG_POOL_MAX || 30),
+  pgPoolMax: Number(process.env.PG_POOL_MAX || 40),
+  pgPoolIdleMs: Number(process.env.PG_POOL_IDLE_MS || 30000),
+  pgPoolConnectionTimeoutMs: Number(process.env.PG_POOL_CONN_TIMEOUT_MS || 5000),
+  pgStatementTimeoutMs: Number(process.env.PG_STATEMENT_TIMEOUT_MS || 15000),
 
   adminSecret: process.env.ADMIN_SECRET || '',
   botToken: process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '',
@@ -22,7 +25,7 @@ const config = {
   defaultGamePattern: 'any_one_line',
   defaultDrawIntervalSeconds: Number(process.env.DEFAULT_DRAW_INTERVAL_SECONDS || 4),
   drawIntervalMs: Number(process.env.DRAW_INTERVAL_MS || 2500),
-  roomBroadcastMs: 250,
+  roomBroadcastMs: Number(process.env.ROOM_BROADCAST_MS || 300),
 
   minWithdrawAmount: 21,
 

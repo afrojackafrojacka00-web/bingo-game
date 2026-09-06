@@ -27,7 +27,7 @@ function attachGameEngine({ app, io, STAKES, ROUND_SECONDS, MIN_PLAYERS, splitPo
 const DEFAULT_GAME_PATTERN = 'any_one_line';
 const DEFAULT_DRAW_INTERVAL_SECONDS = Number(process.env.DEFAULT_DRAW_INTERVAL_SECONDS || 4);
 const DRAW_INTERVAL_MS = Number(process.env.DRAW_INTERVAL_MS || 2500); // legacy fallback
-const ROOM_BROADCAST_MS = 250;
+const ROOM_BROADCAST_MS = Number((require('../config').roomBroadcastMs) || 300);
 const MAX_CARDS_PER_PLAYER = Number(process.env.MAX_CARDS_PER_PLAYER || 500);
 
 function createRoom(stake) {
@@ -348,16 +348,22 @@ function winningClaim(grid,drawn,pattern,latest){const wins=completedPatterns(gr
 function isWinningGrid(grid,drawn,pattern=DEFAULT_GAME_PATTERN){return completedPatterns(grid,drawn,pattern).length>0;}
 
 const cardGridCache = new Map();
+const CARD_GRID_CACHE_MAX = 6000;
 
 async function getCardGrid(cardNumber) {
-    if (cardGridCache.has(cardNumber)) return cardGridCache.get(cardNumber);
+    const key = Number(cardNumber);
+    if (cardGridCache.has(key)) return cardGridCache.get(key);
     const result = await pool.query(
         'SELECT grid FROM bingo_cards WHERE card_number=$1',
-        [cardNumber]
+        [key]
     );
     if (!result.rowCount) return null;
     const grid = result.rows[0].grid;
-    cardGridCache.set(cardNumber, grid);
+    if (cardGridCache.size >= CARD_GRID_CACHE_MAX) {
+      const first = cardGridCache.keys().next().value;
+      cardGridCache.delete(first);
+    }
+    cardGridCache.set(key, grid);
     return grid;
 }
 

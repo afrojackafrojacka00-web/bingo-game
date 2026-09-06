@@ -207,14 +207,34 @@ async function ensureSchema() {
   }
 }
 
+const instantGridCache = new Map();
+let catalogCache = null;
+let catalogCacheAt = 0;
+
 async function getCardGrid(cardNumber) {
-  const r = await pool.query('SELECT grid FROM bingo_cards WHERE card_number = $1', [cardNumber]);
-  return r.rows[0]?.grid || null;
+  const key = Number(cardNumber);
+  if (instantGridCache.has(key)) return instantGridCache.get(key);
+  const r = await pool.query('SELECT grid FROM bingo_cards WHERE card_number = $1', [key]);
+  const grid = r.rows[0]?.grid || null;
+  if (grid) {
+    if (instantGridCache.size > 6000) {
+      const first = instantGridCache.keys().next().value;
+      instantGridCache.delete(first);
+    }
+    instantGridCache.set(key, grid);
+  }
+  return grid;
 }
 async function listCatalog(limit) {
   const size = limit || cfg().catalogSize || 200;
+  // Catalog numbers change rarely — cache 60s
+  if (catalogCache && catalogCache.length >= size && (Date.now() - catalogCacheAt) < 60000) {
+    return catalogCache.slice(0, size);
+  }
   const r = await pool.query(`SELECT card_number FROM bingo_cards ORDER BY card_number ASC LIMIT $1`, [size]);
-  return r.rows.map((row) => Number(row.card_number));
+  catalogCache = r.rows.map((row) => Number(row.card_number));
+  catalogCacheAt = Date.now();
+  return catalogCache.slice(0, size);
 }
 
 function publicState() {
