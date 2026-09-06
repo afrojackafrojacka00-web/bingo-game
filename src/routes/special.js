@@ -84,11 +84,38 @@ function registerSpecialRoutes(app) {
   app.get('/api/admin/special/history', async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
+      const limit = Math.min(Number(req.query.limit) || 50, 100);
+      const from = req.query.from ? String(req.query.from) : null;
+      const to = req.query.to ? String(req.query.to) : null;
+      const params = [];
+      let where = 'WHERE 1=1';
+      if (from) { params.push(from); where += ` AND COALESCE(completed_at, started_at, created_at) >= $${params.length}::date`; }
+      if (to) { params.push(to); where += ` AND COALESCE(completed_at, started_at, created_at) < ($${params.length}::date + INTERVAL '1 day')`; }
+      params.push(limit);
       const r = await pool.query(
         `SELECT id, status, stake, prize, player_count, card_count, total_paid, house_profit, winners, created_at, started_at, completed_at
-         FROM special_event_sessions ORDER BY id DESC LIMIT 30`
+         FROM special_event_sessions ${where}
+         ORDER BY id DESC LIMIT $${params.length}`,
+        params
       );
       res.json({ success: true, rows: r.rows });
+    } catch (err) {
+      console.error('special history', err);
+      res.status(500).json({ success: false, message: 'Server error.' });
+    }
+  });
+
+  app.get('/api/admin/special/session/:id', async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    try {
+      const id = Number(req.params.id);
+      const s = await pool.query(`SELECT * FROM special_event_sessions WHERE id=$1`, [id]);
+      if (!s.rowCount) return res.status(404).json({ success: false, message: 'Not found' });
+      const e = await pool.query(
+        `SELECT id, username, cards, card_count, amount_paid, created_at FROM special_event_entries WHERE session_id=$1 ORDER BY id ASC`,
+        [id]
+      );
+      res.json({ success: true, session: s.rows[0], entries: e.rows });
     } catch (err) {
       res.status(500).json({ success: false, message: 'Server error.' });
     }

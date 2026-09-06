@@ -2885,6 +2885,7 @@ let specialMyCards = [];
 let specialCalled = [];
 let specialClaimCard = null;
 let specialHomeTimer = null;
+let specialSelTickTimer = null;
 
 function formatSpecialCd(sec) {
   sec = Math.max(0, Number(sec) || 0);
@@ -3000,7 +3001,13 @@ function applySpecialState(st) {
   if (meta) meta.textContent = 'Prize ' + st.prize + ' · Stake ' + st.stake + ' Birr · ' + (st.patternName || st.gameTypeLabel || '');
   const tim = document.getElementById('specialSelTimer');
   if (tim && (st.phase === 'SELECTING' || st.phase === 'OPEN')) {
-    tim.textContent = st.selectionLeft ? (st.selectionLeft + 's') : 'Open';
+    let left = Number(st.selectionLeft) || 0;
+    // Prefer absolute deadline for same time for everyone
+    if (st.selectionEndsAt) {
+      const end = new Date(st.selectionEndsAt).getTime();
+      if (!isNaN(end)) left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+    }
+    tim.textContent = left > 0 ? (left + 's') : 'Starting…';
   }
   if (st.phase === 'PLAYING' && !document.getElementById('specialPlayBox')?.classList.contains('hidden')) {
     // keep playing
@@ -3009,8 +3016,25 @@ function applySpecialState(st) {
   }
 }
 
+function startSpecialSelTick() {
+  if (specialSelTickTimer) clearInterval(specialSelTickTimer);
+  specialSelTickTimer = setInterval(function () {
+    if (!specialState) return;
+    applySpecialState(specialState);
+    // Recompute left from absolute end
+    if (specialState.selectionEndsAt) {
+      const end = new Date(specialState.selectionEndsAt).getTime();
+      const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+      specialState.selectionLeft = left;
+      const tim = document.getElementById('specialSelTimer');
+      if (tim) tim.textContent = left > 0 ? (left + 's') : 'Starting…';
+    }
+  }, 250);
+}
+
 async function openSpecialEvent() {
   connectSpecialSocket();
+  startSpecialSelTick();
   const r = await fetch('/api/special/status?_=' + Date.now(), { cache: 'no-store' });
   const d = await r.json();
   specialState = d;
@@ -3147,6 +3171,7 @@ async function claimSpecialWin() {
 }
 
 function leaveSpecialSelection() {
+  if (specialSelTickTimer) { clearInterval(specialSelTickTimer); specialSelTickTimer = null; }
   hide('specialBox');
   show('homeBox');
   refreshSpecialHome();

@@ -259,12 +259,24 @@ function broadcast(event, payload) {
   if (ioNamespace) ioNamespace.emit(event, payload || publicState());
 }
 
+function openJoiningPhase() {
+  // Home countdown finished → joining/selection timer starts for everyone (even 0 players)
+  phase = 'SELECTING';
+  const sec = Math.max(15, Number(settings.selectionSeconds) || 60);
+  // Anchor to scheduled end so all clients share the same deadline
+  const base = countdownEndsAt && countdownEndsAt > 0 ? countdownEndsAt : Date.now();
+  selectionEndsAt = base + sec * 1000;
+  if (selectionEndsAt < Date.now()) {
+    // Already past joining window
+    selectionEndsAt = Date.now(); // tick will end immediately
+  }
+}
+
 function publicState() {
   const now = Date.now();
-  // Auto-open when countdown has finished (even if tick was delayed)
+  // Auto-open when event countdown has finished (absolute DB timestamp)
   if (phase === 'COUNTDOWN' && countdownEndsAt && now >= countdownEndsAt) {
-    phase = 'OPEN';
-    selectionEndsAt = 0;
+    openJoiningPhase();
   }
   let countdownLeft = 0;
   if (phase === 'COUNTDOWN' && countdownEndsAt) {
@@ -310,6 +322,8 @@ function publicState() {
         : settings.endedMessage)
       : null,
     players,
+    joinedPlayers: entries.size,
+    serverNow: now,
   };
 }
 
@@ -329,10 +343,9 @@ function shuffledNumbers() {
 }
 
 function tickLoop() {
-  if (phase === 'COUNTDOWN' && countdownEndsAt && Date.now() >= countdownEndsAt) {
-    // Room opens for card selection
-    phase = 'OPEN';
-    selectionEndsAt = 0;
+  const now = Date.now();
+  if (phase === 'COUNTDOWN' && countdownEndsAt && now >= countdownEndsAt) {
+    // Event countdown done → joining window starts (with or without players)
     entries.clear();
     cardOwners.clear();
     drawn.clear();
@@ -341,11 +354,20 @@ function tickLoop() {
     lastNumber = null;
     winnerPayload = null;
     currentSessionId = null;
+    openJoiningPhase();
     broadcast('special_state', publicState());
     return;
   }
-  if ((phase === 'OPEN' || phase === 'SELECTING') && selectionEndsAt && Date.now() >= selectionEndsAt) {
-    beginPlaying().catch((e) => console.error('special beginPlaying', e));
+  if ((phase === 'OPEN' || phase === 'SELECTING') && selectionEndsAt && now >= selectionEndsAt) {
+    // Joining window over
+    if (entries.size === 0) {
+      phase = 'ENDED';
+      winnerPayload = null;
+      broadcast('special_ended', publicState());
+      broadcast('special_state', publicState());
+    } else {
+      beginPlaying().catch((e) => console.error('special beginPlaying', e));
+    }
     return;
   }
   if (phase === 'COUNTDOWN' || phase === 'OPEN' || phase === 'SELECTING') {
@@ -528,9 +550,10 @@ async function joinWithCards({ username, cardNumbers }) {
     entries.set(username, { userId, cards, paid: totalCost });
     cards.forEach((c) => cardOwners.set(c, username));
 
-    // First joiner starts selection countdown
-    if (phase === 'OPEN' || !selectionEndsAt) {
-      phase = 'SELECTING';
+    // Selection deadline was set when home countdown ended — do not restart it
+    if (phase === 'OPEN') phase = 'SELECTING';
+    if (!selectionEndsAt) {
+      // Safety: if somehow missing, start from now
       selectionEndsAt = Date.now() + (Number(settings.selectionSeconds) || 60) * 1000;
     }
 
@@ -616,13 +639,12 @@ async function adminUpdate(body) {
   }
 
   if (body.startOpenNow) {
-    phase = 'OPEN';
     countdownEndsAt = Date.now();
-    selectionEndsAt = 0;
     entries.clear();
     cardOwners.clear();
     drawn.clear();
     winnerPayload = null;
+    openJoiningPhase();
   }
 
   if (body.resetEnded) {

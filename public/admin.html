@@ -986,7 +986,7 @@ table.data tr:hover td { background: var(--card-hover); }
         <div class="inst-kpi" style="margin-bottom:14px;">
           <div class="stat"><div class="label">Phase</div><div class="value" id="spPhase">—</div></div>
           <div class="stat"><div class="label">Visible</div><div class="value" id="spVisible">—</div></div>
-          <div class="stat"><div class="label">Players</div><div class="value" id="spPlayers">0</div></div>
+          <div class="stat"><div class="label">Joined (cards paid)</div><div class="value" id="spPlayers">0</div></div>
           <div class="stat"><div class="label">Countdown</div><div class="value" id="spCd">—</div></div>
         </div>
         <div class="inst-grid">
@@ -1060,13 +1060,17 @@ table.data tr:hover td { background: var(--card-hover); }
           </div>
           <div class="inst-card">
             <h3>Schedule countdown</h3>
-            <p class="hint">Users wait until this hits 0, then Play opens. Latecomers after draw starts are blocked.</p>
+            <p class="hint">Saved as an exact end time in the database (UTC). Every user sees the same remaining time from the server — not from their phone clock alone.</p>
             <label class="muted" style="font-size:12px;">Hours
               <input type="number" id="spHours" min="0" max="168" value="0" style="width:70px;margin-left:6px;">
             </label>
             <label class="muted" style="font-size:12px;margin-left:10px;">Minutes
               <input type="number" id="spMins" min="0" max="59" value="30" style="width:70px;margin-left:6px;">
             </label>
+            <div class="row-actions">
+              <button class="btn btn-primary btn-sm" onclick="saveSpecialEvent(true)">Save &amp; start countdown</button>
+            </div>
+            <p class="hint" id="spCdHint" style="margin-top:8px;"></p>
           </div>
           <div class="inst-card">
             <h3>Ended message</h3>
@@ -1077,7 +1081,6 @@ table.data tr:hover td { background: var(--card-hover); }
           <h3>Actions</h3>
           <p class="hint">Save all settings above, schedule countdown, or reset the room after a game.</p>
           <div class="row-actions">
-            <button class="btn btn-primary btn-sm" onclick="saveSpecialEvent(true)">Save &amp; start countdown</button>
             <button class="btn btn-primary btn-sm" onclick="saveSpecialEvent(false)">Save settings</button>
             <button class="btn btn-ghost btn-sm" onclick="specialResetIdle()">Reset to idle</button>
             <button class="btn btn-ghost btn-sm" onclick="loadSpecialAdmin()">Refresh</button>
@@ -1085,8 +1088,14 @@ table.data tr:hover td { background: var(--card-hover); }
         </div>
         <div id="spAdminMsg" class="muted" style="margin-top:10px;font-size:12px;"></div>
         <div class="inst-card" style="margin-top:14px;">
-          <h3>Recent sessions</h3>
+          <h3>Session history</h3>
+          <div class="toolbar" style="margin-bottom:10px;">
+            <input id="spHistFrom" type="date">
+            <input id="spHistTo" type="date">
+            <button class="btn btn-ghost btn-sm" onclick="loadSpecialHistory()">Filter</button>
+          </div>
           <div id="spHistory" class="empty">—</div>
+          <div id="spHistoryDetail" style="margin-top:12px;"></div>
         </div>
       </div>
     </section>
@@ -2605,25 +2614,78 @@ async function loadSpecialAdmin() {
     document.getElementById('spDrawGap').value = d.drawIntervalSeconds || 4;
     document.getElementById('spSelSec').value = d.selectionSeconds || 60;
     document.getElementById('spEndedMsg').value = d.endedMessage || '';
-    document.getElementById('spAdminMsg').textContent = 'Phase: ' + (d.phase || '—') + (d.canJoin ? ' · joins open' : '');
-    // history
-    const hr = await fetch('/api/admin/special/history', { headers: adminSecretHeader() });
-    const hd = await hr.json();
-    const box = document.getElementById('spHistory');
-    if (hd.success && hd.rows && hd.rows.length) {
-      box.innerHTML = '<div class="inst-table-wrap"><table class="inst-table"><thead><tr><th>ID</th><th>Status</th><th>Stake</th><th>Prize</th><th>Players</th><th>Volume</th><th>House</th><th>When</th></tr></thead><tbody>' +
-        hd.rows.map(function(row) {
-          return '<tr><td>#' + row.id + '</td><td>' + esc(row.status) + '</td><td>' + fmtMoney(row.stake) + '</td><td>' + fmtMoney(row.prize) +
-            '</td><td>' + (row.player_count||0) + '</td><td>' + fmtMoney(row.total_paid) + '</td><td>' + fmtMoney(row.house_profit) +
-            '</td><td>' + fmtDate(row.completed_at || row.started_at || row.created_at) + '</td></tr>';
-        }).join('') + '</tbody></table></div>';
-    } else box.innerHTML = '<div class="empty">No sessions yet</div>';
+    document.getElementById('spAdminMsg').textContent = 'Phase: ' + (d.phase || '—') + (d.canJoin ? ' · joining open' : '') + ' · Joined players are only users who paid for cards (not spectators).';
+    const cdHint = document.getElementById('spCdHint');
+    if (cdHint) {
+      if (d.countdownEndsAt) cdHint.textContent = 'DB end time: ' + fmtDate(d.countdownEndsAt) + (d.countdownLeft != null ? (' · left ' + d.countdownLeft + 's') : '');
+      else cdHint.textContent = 'No countdown scheduled.';
+    }
+
+    loadSpecialHistory();
   } catch (e) {
     document.getElementById('spAdminMsg').textContent = 'Network error';
   }
 }
 
+async function loadSpecialHistory() {
+  if (!getSecret()) return;
+  const box = document.getElementById('spHistory');
+  const detail = document.getElementById('spHistoryDetail');
+  if (detail) detail.innerHTML = '';
+  const from = (document.getElementById('spHistFrom') || {}).value || '';
+  const to = (document.getElementById('spHistTo') || {}).value || '';
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  params.set('limit', '50');
+  try {
+    const hr = await fetch('/api/admin/special/history?' + params, { headers: adminSecretHeader() });
+    const hd = await hr.json();
+    if (!box) return;
+    if (hd.success && hd.rows && hd.rows.length) {
+      box.innerHTML = '<div class="inst-table-wrap"><table class="inst-table"><thead><tr><th>ID</th><th>Status</th><th>Stake</th><th>Prize</th><th>Players</th><th>Cards</th><th>Volume</th><th>House</th><th>When</th><th></th></tr></thead><tbody>' +
+        hd.rows.map(function(row) {
+          return '<tr><td>#' + row.id + '</td><td>' + esc(row.status) + '</td><td>' + fmtMoney(row.stake) + '</td><td>' + fmtMoney(row.prize) +
+            '</td><td>' + (row.player_count||0) + '</td><td>' + (row.card_count||0) + '</td><td>' + fmtMoney(row.total_paid) + '</td><td>' + fmtMoney(row.house_profit) +
+            '</td><td>' + fmtDate(row.completed_at || row.started_at || row.created_at) +
+            '</td><td><button class="btn btn-ghost btn-sm" onclick="loadSpecialSessionDetail(' + row.id + ')">Detail</button></td></tr>';
+        }).join('') + '</tbody></table></div>';
+    } else box.innerHTML = '<div class="empty">No sessions yet</div>';
+  } catch (e) {
+    if (box) box.innerHTML = '<div class="empty">Network error</div>';
+  }
+}
+
+async function loadSpecialSessionDetail(id) {
+  if (!getSecret()) return;
+  const detail = document.getElementById('spHistoryDetail');
+  if (!detail) return;
+  detail.innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    const r = await fetch('/api/admin/special/session/' + id, { headers: adminSecretHeader() });
+    const d = await r.json();
+    if (!d.success) { detail.innerHTML = '<div class="empty">' + esc(d.message || 'Failed') + '</div>'; return; }
+    const s = d.session || {};
+    const entries = d.entries || [];
+    let html = '<div class="inst-card"><h3>Session #' + s.id + '</h3>';
+    html += '<div class="muted" style="font-size:13px;margin-bottom:8px;">Status <b>' + esc(s.status) + '</b> · Stake ' + fmtMoney(s.stake) +
+      ' · Prize ' + fmtMoney(s.prize) + ' · Players ' + (s.player_count||0) + ' · Cards ' + (s.card_count||0) +
+      ' · Volume ' + fmtMoney(s.total_paid) + ' · House ' + fmtMoney(s.house_profit) + '</div>';
+    if (s.winners) html += '<div class="muted" style="font-size:12px;margin-bottom:8px;">Winners: ' + esc(typeof s.winners === 'string' ? s.winners : JSON.stringify(s.winners)) + '</div>';
+    html += '<div class="inst-table-wrap"><table class="inst-table"><thead><tr><th>User</th><th>Cards</th><th>Count</th><th>Paid</th></tr></thead><tbody>';
+    html += entries.map(function(e) {
+      return '<tr><td>' + esc(e.username) + '</td><td>' + esc(Array.isArray(e.cards) ? e.cards.join(', ') : String(e.cards||'')) +
+        '</td><td>' + (e.card_count||0) + '</td><td>' + fmtMoney(e.amount_paid) + '</td></tr>';
+    }).join('') || '<tr><td colspan="4" class="muted">No entries</td></tr>';
+    html += '</tbody></table></div></div>';
+    detail.innerHTML = html;
+  } catch (e) {
+    detail.innerHTML = '<div class="empty">Network error</div>';
+  }
+}
+
 async function toggleSpecialVisible(el) {
+
   if (!requireSecret()) { el.checked = !el.checked; return; }
   const want = !!el.checked;
   const ok = confirm(want
