@@ -941,7 +941,7 @@ async function loadUserData(username) {
             const profilePhone = document.getElementById('profilePhone');
             if (profilePhone) profilePhone.innerText = data.user.phone_number || 'Not set';
 
-            const lang = data.user.preferred_language || 'en';
+            const lang = data.user.preferred_language || safeStorage.get('bingoLang') || 'am';
             const langSelect = document.getElementById('languageSelect');
             if (langSelect) langSelect.value = lang;
             applyLanguage(lang, false);
@@ -1020,7 +1020,7 @@ async function fetchHistory(username, reset = true) {
         historyOffset = 0;
         historyHasMore = true;
         removeInfiniteScroll('historySentinel');
-        container.innerHTML = '<p class="small">Loading your game history…</p>';
+        container.innerHTML = '<p class="small">' + t('historyLoading') + '</p>';
     }
     if (!historyHasMore || historyLoading) return;
     historyLoading = true;
@@ -1029,7 +1029,7 @@ async function fetchHistory(username, reset = true) {
         const res = await fetch(`/api/history?username=${encodeURIComponent(username)}&limit=${HISTORY_PAGE_SIZE}&offset=${historyOffset}`, { cache: 'no-store' });
         const data = await res.json();
         if (!data.success) {
-            if (reset) container.innerHTML = '<p class="small">Could not load history.</p>';
+            if (reset) container.innerHTML = '<p class="small">' + t('historyFail') + '</p>';
             return;
         }
         let games = data.history || [];
@@ -1075,7 +1075,7 @@ async function fetchHistory(username, reset = true) {
         if (historyHasMore) attachInfiniteScroll(container, 'historySentinel', () => fetchHistory(username, false));
     } catch (err) {
         console.error('History fetch error:', err);
-        if (reset) container.innerHTML = '<p class="small">Could not load history.</p>';
+        if (reset) container.innerHTML = '<p class="small">' + t('historyFail') + '</p>';
     } finally {
         historyLoading = false;
     }
@@ -1093,7 +1093,7 @@ function renderHistory(games, reset = true) {
 
     if (reset) container.innerHTML = '';
     if (!games.length) {
-        if (reset) container.innerHTML = '<p class="small">You haven\'t completed a game yet. Your finished games will show up here.</p>';
+        if (reset) container.innerHTML = '<p class="small">' + t('historyEmpty') + '</p>';
         return;
     }
 
@@ -1101,7 +1101,7 @@ function renderHistory(games, reset = true) {
         const won = !!game.won;
         const split = Number(game.winnerCount) > 1;
         const outcomeClass = won ? 'won' : 'lost';
-        const outcomeLabel = won ? '🏆 You Won' : ((game.winner || split) ? '❌ You Lost' : '➖ No Winner');
+        const outcomeLabel = won ? t('youWon') : ((game.winner || split) ? t('youLost') : t('noWinner'));
         const dateStr = new Date(game.date).toLocaleString();
 
         const winners = Array.isArray(game.winners) ? game.winners : [];
@@ -1113,8 +1113,8 @@ function renderHistory(games, reset = true) {
 
         const cardCell = (game.winningCardNumber || split)
             ? (game.special
-                ? `<strong class="card-link" onclick="viewWinningCard('${String(game.gameId)}')">${split ? 'View Winning Cards' : '#' + Number(game.winningCardNumber)}</strong>`
-                : `<strong class="card-link" onclick="viewWinningCard(${Number(game.gameId)})">${split ? 'View Winning Cards' : '#' + Number(game.winningCardNumber)}</strong>`)
+                ? `<strong class="card-link" onclick="viewWinningCard('${String(game.gameId)}')">${split ? t('viewWinningCards') : '#' + Number(game.winningCardNumber)}</strong>`
+                : `<strong class="card-link" onclick="viewWinningCard(${Number(game.gameId)})">${split ? t('viewWinningCards') : '#' + Number(game.winningCardNumber)}</strong>`)
             : `<strong>—</strong>`;
 
         const specialTag = game.special ? '<span class="status-pill" style="margin-left:6px;">⭐ Special</span>' : '';
@@ -1124,13 +1124,13 @@ function renderHistory(games, reset = true) {
                 <span class="history-date">${dateStr}</span>
             </div>
             <div class="info-grid" style="margin:10px 0 0;">
-                ${game.special ? '' : `<div class="info-box"><span>PLAYERS</span><strong>${Number(game.players) || 0}</strong></div>`}
-                <div class="info-box"><span>WINNER${split ? 'S' : ''}</span><strong>${split ? 'Split × ' + Number(game.winnerCount) : winnerNames}</strong>
+                ${game.special ? '' : `<div class="info-box"><span>${t('players')}</span><strong>${Number(game.players) || 0}</strong></div>`}
+                <div class="info-box"><span>${split ? t('winners') : t('winner')}</span><strong>${split ? t('split') + ' × ' + Number(game.winnerCount) : winnerNames}</strong>
                     ${split ? `<div class="small" style="margin-top:5px;line-height:1.45;">${winnerNames}</div>` : ''}
                 </div>
-                <div class="info-box"><span>PRIZE</span><strong>${Number(game.prizePool || 0).toFixed(2)} Birr</strong></div>
-                <div class="info-box"><span>STAKE</span><strong>${Number(game.stake || 0).toFixed(0)} Birr</strong></div>
-                <div class="info-box"><span>WINNING CARD${split ? 'S' : ''}</span>${cardCell}</div>
+                <div class="info-box"><span>${t('prize')}</span><strong>${Number(game.prizePool || 0).toFixed(2)} ${t('birr')}</strong></div>
+                <div class="info-box"><span>${t('stake')}</span><strong>${Number(game.stake || 0).toFixed(0)} ${t('birr')}</strong></div>
+                <div class="info-box"><span>${split ? t('winningCards') : t('winningCard')}</span>${cardCell}</div>
             </div>
         </div>`;
     }).join('');
@@ -1547,26 +1547,10 @@ async function changeLanguage(language) {
 }
 
 // ---------------- LANGUAGE (EN / AM) ----------------
-const translations = {
-    en: {
-        navGames: 'Games', navHistory: 'History', navWallet: 'Wallet', navAccount: 'Account',
-        readyTitle: 'Ready to Play? 🎲', readyBody: 'Choose a stake, join a room, select your cards and play.', playBtn: 'Play Bingo 🚀',
-        walletTitle: '💰 My Wallet', walletSub: 'Your current balance', walletTxTitle: 'Recent Transactions',
-        historyTitle: '🏆 Game History',
-        accountTitle: 'Account Settings ⚙️', accountBody: 'Set a password for website login (min 6 characters). Confirm password below.', accountSaveBtn: 'Save username & password 🔒', accountUsernameLabel: 'Username', accountUsernameHint: 'Keep this username or change it. Used for web login.', accountWebPasswordNote: 'Password can only be set or changed inside the Telegram Mini App for security.',
-        profileTitle: '👤 Profile', profileUsernameLbl: 'USERNAME', profilePhoneLbl: 'PHONE', profileLangLbl: 'Language',
-        announcementsTitle: '📢 Announcements'
-    },
-    am: {
-        navGames: 'ጨዋታዎች', navHistory: 'ታሪክ', navWallet: 'ዋሌት', navAccount: 'መለያ',
-        readyTitle: 'ለመጫወት ተዘጋጅተዋል? 🎲', readyBody: 'ውርርድ ይምረጡ፣ ክፍል ይቀላቀሉ፣ ካርድዎን ይምረጡ እና ይጫወቱ።', playBtn: 'ቢንጎ ይጫወቱ 🚀',
-        walletTitle: '💰 የኔ ዋሌት', walletSub: 'የአሁኑ ቀሪ ሂሳብዎ', walletTxTitle: 'የቅርብ ጊዜ ግብይቶች',
-        historyTitle: '🏆 የጨዋታ ታሪክ',
-        accountTitle: 'የመለያ ቅንብሮች ⚙️', accountBody: 'ለድር መግቢያ የይለፍ ቃል ያዘጋጁ (ቢያንስ 6 ቁምፊ)። ከታች ያረጋግጡ።', accountSaveBtn: 'መጠቀሚያ ስም እና የይለፍ ቃል አስቀምጥ 🔒', accountUsernameLabel: 'መጠቀሚያ ስም', accountUsernameHint: 'ይህን መጠቀሚያ ስም ይጠብቁ ወይም ይቀይሩ። ለድር መግቢያ ያገለግላል።', accountWebPasswordNote: 'የይለፍ ቃል ማስተካከል የሚቻለው በቴሌግራም Mini App ውስጥ ብቻ ነው።',
-        profileTitle: '👤 መገለጫ', profileUsernameLbl: 'የተጠቃሚ ስም', profilePhoneLbl: 'ስልክ', profileLangLbl: 'ቋንቋ',
-        announcementsTitle: '📢 ማስታወቂያዎች'
-    }
-};
+const translations = (window.BINGO_I18N || { en: {}, am: {} });
+function t(key, fallback) {
+    return (typeof window.t === 'function') ? window.t(key, fallback) : (fallback != null ? fallback : key);
+}
 
 function applyTheme(theme) {
     const t = theme === 'light' ? 'light' : 'dark';
@@ -1592,15 +1576,20 @@ async function saveDisplayName() {
     } catch { alertUser('Failed to save'); }
 }
 function applyLanguage(language, persistLocally = true) {
-    const lang = translations[language] ? language : 'en';
-    const t = translations[lang];
-
-    document.querySelectorAll('[data-i18n]').forEach(el => {
-        const key = el.dataset.i18n;
-        if (t[key]) el.innerText = t[key];
-    });
-
-    if (persistLocally) safeStorage.set('bingoLang', lang);
+    const lang = (language === 'en') ? 'en' : 'am';
+    if (typeof window.applyBingoLanguage === 'function') {
+        window.applyBingoLanguage(lang, persistLocally);
+    } else {
+        if (persistLocally) safeStorage.set('bingoLang', lang);
+        const pack = translations[lang] || translations.am || {};
+        document.querySelectorAll('[data-i18n]').forEach(el => {
+            const key = el.dataset.i18n;
+            if (pack[key]) el.innerText = pack[key];
+        });
+    }
+    // Keep language select in sync
+    const sel = document.getElementById('languageSelect');
+    if (sel) sel.value = lang;
 }
 
 function switchTab(tabId, navElement) {
@@ -1626,7 +1615,7 @@ function switchTab(tabId, navElement) {
             renderInstantHistoryTab();
         } else {
             const title = document.querySelector('#tabHistory .page-title h2');
-            if (title) title.textContent = '🏆 Game History';
+            if (title) title.textContent = t('historyTitle');
             const list = document.getElementById('historyList');
             if (list) list.innerHTML = '';
             fetchHistory(currentUsername);

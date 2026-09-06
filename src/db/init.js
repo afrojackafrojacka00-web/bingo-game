@@ -85,7 +85,7 @@ const initDB = async () => {
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS wins INT DEFAULT 0;');
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_number TEXT;');
         await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT FALSE;');
-        await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_language VARCHAR(5) DEFAULT 'en';");
+        await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_language VARCHAR(5) DEFAULT 'am';");
         await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS preferred_theme VARCHAR(10) DEFAULT 'dark';");
         await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(50);");
 

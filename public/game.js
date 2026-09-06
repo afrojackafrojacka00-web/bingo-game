@@ -1,3 +1,4 @@
+function t(k,f){return (typeof window.t==='function')?window.t(k,f):(f!=null?f:k);}
 const params=new URLSearchParams(location.search),active=JSON.parse(localStorage.getItem('bingoActiveGame')||'{}');
 const specialActive=JSON.parse(localStorage.getItem('bingoSpecialActive')||'{}');
 const isSpecial=params.get('special')==='1'||!!specialActive.cards;
@@ -264,7 +265,7 @@ function showWinner(d){
     const raw=d.winners||[{winner:d.winner,winnerDisplay:d.winnerDisplay,prize:d.prize,cardNumber:d.cardNumber,grid:d.grid,winningCells:d.winningCells}];
     ensureWinnerGrids(raw).then(winners=>{
         const iWon=winners.some(w=>String(w.winner).toLowerCase()===String(username).toLowerCase());
-        winnerTitle.textContent=iWon?'YOU WON!':'BINGO!';
+        winnerTitle.textContent=iWon?t('youWonOverlay','YOU WON!'):t('bingoOverlay','BINGO!');
         const pattern=d.patternName||room.patternName||'';
         if(winners.length===1){
             const w=winners[0];

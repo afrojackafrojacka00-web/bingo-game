@@ -848,8 +848,8 @@ body.instant-immersive .instant-sticky-play{display:none;}
   </div>
   <label class="small" style="display:block;text-align:left;margin-top:14px;" data-i18n="profileLangLbl">Language</label>
   <select id="languageSelect" onchange="changeLanguage(this.value)">
+   <option value="am" selected>አማርኛ</option>
    <option value="en">English</option>
-   <option value="am">አማርኛ (Amharic)</option>
   </select>
   <label class="small" style="display:block;text-align:left;margin-top:14px;">Theme</label>
   <select id="themeSelect" onchange="changeTheme(this.value)">
@@ -896,7 +896,7 @@ body.instant-immersive .instant-sticky-play{display:none;}
     <div id="specialHomeCd" style="font-size:22px;font-weight:800;letter-spacing:.02em;margin-bottom:6px;">--:--:--</div>
     <div id="specialHomeText" style="font-size:14px;font-weight:700;margin-bottom:4px;">—</div>
     <div id="specialHomeStake" class="small" style="margin-bottom:10px;">Stake —</div>
-    <button type="button" class="btn-play" id="specialHomePlayBtn" onclick="openSpecialEvent()" style="margin:0;background:linear-gradient(135deg,#8b5cf6,#6366f1);">Play</button>
+    <button type="button" class="btn-play" id="specialHomePlayBtn" data-i18n="specialPlay" onclick="openSpecialEvent()" style="margin:0;background:linear-gradient(135deg,#8b5cf6,#6366f1);">Play</button>
     <p id="specialHomeMsg" class="small" style="margin:8px 0 0;"></p>
   </div>
   <button class="btn-play" onclick="goToGameScreen()" data-i18n="playBtn">Play Classic Bingo 🚀</button>
@@ -938,7 +938,7 @@ body.instant-immersive .instant-sticky-play{display:none;}
     </div>
     <div class="small" id="specialSelMeta" style="margin:6px 0 8px;"></div>
     <div id="specialSelTimer" style="font-size:20px;font-weight:800;margin-bottom:8px;">—</div>
-    <input type="search" id="specialCardSearch" placeholder="Search card #" style="width:100%;margin-bottom:8px;padding:8px;border-radius:8px;border:1px solid var(--card-border,#333);background:var(--card);color:var(--text);" oninput="filterSpecialCards()">
+    <input type="search" id="specialCardSearch" placeholder="Search card #" data-i18n-placeholder="searchCards" style="width:100%;margin-bottom:8px;padding:8px;border-radius:8px;border:1px solid var(--card-border,#333);background:var(--card);color:var(--text);" oninput="filterSpecialCards()">
     <div id="specialCardGrid" class="instant-pick-grid" style="display:grid;grid-template-columns:repeat(8,1fr);gap:4px;max-height:45vh;overflow:auto;"></div>
     <div class="small" id="specialSelCost" style="margin:8px 0;">Selected 0 · Cost 0</div>
     <button class="btn-play" id="specialJoinBtn" onclick="confirmSpecialJoin()" style="width:100%;">READY</button>
@@ -1172,6 +1172,7 @@ body.instant-immersive .instant-sticky-play{display:none;}
   <div class="nav-item" onclick="switchTab('tabWallet',this)">💰<br><span data-i18n="navWallet">Wallet</span></div>
   <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
 </div>
-<script src="app.js?v=20260906-perf1"></script>
+<script src="i18n.js"></script>
+<script src="app.js?v=20260906-i18n-am"></script>
 </body>
 </html>
