@@ -2958,15 +2958,13 @@ function connectSpecialSocket() {
       });
       specialSocket.on('special_game_started', function (st) {
         specialState = st;
-        // Only players who pressed READY go into the live game (same as traditional)
+        const onSel = document.getElementById('specialBox') && !document.getElementById('specialBox').classList.contains('hidden');
+        if (!onSel) return; // never hijack home or other pages
         if (window._specialReady && specialMyCards && specialMyCards.length) {
           goSpecialGamePage();
         } else {
-          // Spectator / not ready → home with late message
           alertUser((st && st.lateMessage) || 'Game started. Come back next time!');
           leaveSpecialSelection();
-          showHome();
-          refreshSpecialHome();
         }
       });
       specialSocket.on('special_number', function (p) {
@@ -2982,14 +2980,19 @@ function connectSpecialSocket() {
       });
       specialSocket.on('special_ended', function (st) {
         specialState = st;
+        const onSel = document.getElementById('specialBox') && !document.getElementById('specialBox').classList.contains('hidden');
+        const onPlay = document.getElementById('specialPlayBox') && !document.getElementById('specialPlayBox').classList.contains('hidden');
+        if (!onSel && !onPlay) {
+          // Home only refreshes status quietly
+          refreshSpecialHome();
+          return;
+        }
         const endedMsg = st.endedMessage || 'Game ended for today. Enjoy other bingo games until next time!';
         try { alert(endedMsg); } catch (_) {}
         window._specialReady = false;
         specialMyCards = [];
         leaveSpecialPlay();
         leaveSpecialSelection();
-        showHome();
-        refreshSpecialHome();
       });
     } else if (!specialSocket.connected) specialSocket.connect();
     else specialSocket.emit('special_sync');
@@ -2998,37 +3001,54 @@ function connectSpecialSocket() {
 
 function applySpecialState(st) {
   if (!st) return;
+  specialState = st;
   const meta = document.getElementById('specialSelMeta');
   if (meta) meta.textContent = 'Prize ' + st.prize + ' · Stake ' + st.stake + ' Birr · ' + (st.patternName || st.gameTypeLabel || '');
+  const onSelPage = document.getElementById('specialBox') && !document.getElementById('specialBox').classList.contains('hidden');
   const tim = document.getElementById('specialSelTimer');
-  if (tim && (st.phase === 'SELECTING' || st.phase === 'OPEN')) {
+  if (tim && onSelPage && (st.phase === 'SELECTING' || st.phase === 'OPEN')) {
     let left = Number(st.selectionLeft) || 0;
-    // Prefer absolute deadline for same time for everyone
     if (st.selectionEndsAt) {
       const end = new Date(st.selectionEndsAt).getTime();
       if (!isNaN(end)) left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
     }
     tim.textContent = left > 0 ? (left + 's') : 'Starting…';
   }
-  if (st.phase === 'PLAYING' && !document.getElementById('specialPlayBox')?.classList.contains('hidden')) {
-    // keep playing
-  } else if (st.phase === 'PLAYING' && specialMyCards.length) {
-    openSpecialPlayScreen(st);
+  // Refresh taken cards while selecting
+  if (onSelPage && !window._specialReady && (st.phase === 'SELECTING' || st.phase === 'OPEN')) {
+    renderSpecialCardGrid((document.getElementById('specialCardSearch') || {}).value || '');
+  }
+  // Joining ended → PLAYING: only READY players enter game page (never hijack home)
+  if (st.phase === 'PLAYING' && onSelPage && window._specialReady && specialMyCards && specialMyCards.length) {
+    goSpecialGamePage();
+    return;
+  }
+  if (st.phase === 'ENDED' && onSelPage) {
+    window._specialReady = false;
+    leaveSpecialSelection();
   }
 }
 
 function startSpecialSelTick() {
   if (specialSelTickTimer) clearInterval(specialSelTickTimer);
+  let _poll = 0;
   specialSelTickTimer = setInterval(function () {
     if (!specialState) return;
     applySpecialState(specialState);
-    // Recompute left from absolute end
     if (specialState.selectionEndsAt) {
       const end = new Date(specialState.selectionEndsAt).getTime();
       const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
       specialState.selectionLeft = left;
       const tim = document.getElementById('specialSelTimer');
       if (tim) tim.textContent = left > 0 ? (left + 's') : 'Starting…';
+    }
+    // Poll server every ~1s so PLAYING / ENDED is never missed
+    _poll += 1;
+    if (_poll % 4 === 0) {
+      fetch('/api/special/status?_=' + Date.now(), { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { if (d && d.success) applySpecialState(d); })
+        .catch(function () {});
     }
   }, 250);
 }
@@ -3074,12 +3094,16 @@ async function loadSpecialCards() {
 function renderSpecialCardGrid(filter) {
   const grid = document.getElementById('specialCardGrid');
   if (!grid) return;
+  const taken = new Set((specialState && specialState.takenCards) || []);
   const q = String(filter || '').trim();
   const list = q ? specialCatalog.filter(function (n) { return String(n).indexOf(q) !== -1; }) : specialCatalog;
   const show = list.slice(0, 500);
   grid.innerHTML = show.map(function (n) {
-    const sel = specialSelected.has(n) ? ' selected' : '';
-    return '<div class="card-item' + sel + '" data-card="' + n + '" onclick="toggleSpecialCard(' + n + ')">' + n + '</div>';
+    const isTaken = taken.has(Number(n)) && !specialSelected.has(Number(n));
+    const sel = specialSelected.has(Number(n)) ? ' selected' : '';
+    const takenCls = isTaken ? ' taken' : '';
+    const click = (isTaken || window._specialReady) ? '' : (' onclick="toggleSpecialCard(' + n + ')"');
+    return '<div class="card-item' + sel + takenCls + '" data-card="' + n + '"' + click + '>' + n + (isTaken ? '' : '') + '</div>';
   }).join('');
   if (list.length > 500) grid.innerHTML += '<div class="small" style="grid-column:1/-1;">Showing 500 of ' + list.length + ' — search to find more</div>';
   updateSpecialSelCost();
@@ -3196,6 +3220,13 @@ async function claimSpecialWin() {
 
 function leaveSpecialSelection() {
   if (specialSelTickTimer) { clearInterval(specialSelTickTimer); specialSelTickTimer = null; }
+  try {
+    if (specialSocket) {
+      specialSocket.removeAllListeners();
+      specialSocket.disconnect();
+      specialSocket = null;
+    }
+  } catch (_) {}
   hide('specialBox');
   show('homeBox');
   refreshSpecialHome();

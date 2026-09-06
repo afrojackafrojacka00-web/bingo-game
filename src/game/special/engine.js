@@ -323,6 +323,7 @@ function publicState() {
       : null,
     players,
     joinedPlayers: entries.size,
+    takenCards: [...cardOwners.keys()].map(Number),
     serverNow: now,
   };
 }
@@ -342,10 +343,11 @@ function shuffledNumbers() {
   return bag;
 }
 
+let _startingGame = false;
+
 function tickLoop() {
   const now = Date.now();
   if (phase === 'COUNTDOWN' && countdownEndsAt && now >= countdownEndsAt) {
-    // Event countdown done → joining window starts (with or without players)
     entries.clear();
     cardOwners.clear();
     drawn.clear();
@@ -354,17 +356,27 @@ function tickLoop() {
     lastNumber = null;
     winnerPayload = null;
     currentSessionId = null;
+    _startingGame = false;
     openJoiningPhase();
     broadcast('special_state', publicState());
     return;
   }
-  if ((phase === 'OPEN' || phase === 'SELECTING') && selectionEndsAt && now >= selectionEndsAt) {
-    // Joining window over — freeze so we don't re-enter every tick
+  // Joining window over (or stuck "Starting…" with deadline already cleared)
+  const joiningOver = (phase === 'OPEN' || phase === 'SELECTING') && (
+    (selectionEndsAt && now >= selectionEndsAt) ||
+    (!selectionEndsAt && phase === 'SELECTING' && !_startingGame && !drawTimer)
+  );
+  if (joiningOver && !_startingGame) {
     selectionEndsAt = 0;
+    _startingGame = true;
     if (entries.size === 0) {
-      endWithNoPlayers().catch((e) => console.error('special endWithNoPlayers', e));
+      endWithNoPlayers()
+        .catch((e) => console.error('special endWithNoPlayers', e))
+        .finally(() => { _startingGame = false; });
     } else {
-      beginPlaying().catch((e) => console.error('special beginPlaying', e));
+      beginPlaying()
+        .catch((e) => console.error('special beginPlaying', e))
+        .finally(() => { _startingGame = false; });
     }
     return;
   }
@@ -375,7 +387,7 @@ function tickLoop() {
 
 async function endWithNoPlayers() {
   if (phase === 'ENDED' || phase === 'PLAYING') return;
-  stopTimers();
+  if (drawTimer) { clearInterval(drawTimer); drawTimer = null; }
   phase = 'ENDED';
   winnerPayload = null;
   try {
@@ -406,6 +418,10 @@ async function beginPlaying() {
   }
 
   phase = 'PLAYING';
+  // Stop joining timer only; draw timer started below
+  if (phaseTimer) { clearInterval(phaseTimer); phaseTimer = null; }
+  if (drawTimer) { clearInterval(drawTimer); drawTimer = null; }
+
   let totalPaid = 0;
   let cardCount = 0;
   for (const ent of entries.values()) {
@@ -544,6 +560,13 @@ async function joinWithCards({ username, cardNumbers }) {
     const owner = cardOwners.get(c);
     if (owner && owner !== username) throw new Error('Card #' + c + ' is taken.');
   }
+  // Reserve immediately (sync) so two players cannot take the same card
+  for (const c of cards) {
+    if (cardOwners.has(c) && cardOwners.get(c) !== username) {
+      throw new Error('Card #' + c + ' is taken.');
+    }
+    cardOwners.set(c, username);
+  }
 
   const stake = Number(settings.stake);
   const totalCost = Number((stake * cards.length).toFixed(2));
@@ -554,7 +577,6 @@ async function joinWithCards({ username, cardNumbers }) {
     if (!user.rowCount) throw new Error('User not found.');
     const userId = user.rows[0].id;
 
-    // Charge on READY — no refund (same as traditional once ready)
     const charge = await client.query(
       `UPDATE users SET balance = balance - $1 WHERE id=$2 AND balance >= $1 RETURNING balance`,
       [totalCost, userId]
@@ -564,7 +586,6 @@ async function joinWithCards({ username, cardNumbers }) {
     await client.query('COMMIT');
 
     entries.set(username, { userId, cards, paid: totalCost, ready: true });
-    cards.forEach((c) => cardOwners.set(c, username));
 
     if (phase === 'OPEN') phase = 'SELECTING';
     if (!selectionEndsAt) {
@@ -581,6 +602,8 @@ async function joinWithCards({ username, cardNumbers }) {
     };
   } catch (e) {
     try { await client.query('ROLLBACK'); } catch (_) {}
+    // Release reservation if READY failed
+    cards.forEach((c) => { if (cardOwners.get(c) === username) cardOwners.delete(c); });
     throw e;
   } finally {
     client.release();
