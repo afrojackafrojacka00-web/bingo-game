@@ -130,15 +130,25 @@ function claim(cardNumber){
   if(ended||locked.has(cardNumber))return;
   if(isSpecial){
     fetch('/api/special/claim',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,cardNumber})})
-      .then(r=>r.json()).then(res=>{
-        if(!res?.success){toast(res?.message||'BINGO claim failed.');return}
+      .then(async r=>{
+        const res=await r.json().catch(()=>({}));
+        if(!res?.success){
+          if(res?.locked||/locked/i.test(res?.message||'')){locked.add(Number(cardNumber));render()}
+          toast(res?.message||'BINGO claim failed.');
+          return;
+        }
+        if(res.pending){toast(res.message||'Claim received…');return}
         ended=true;
-        const st=res.state||{};
-        const w=st.winner||{};
-        showWinner({
-          winners:(w.winners||[]).map(x=>({winner:x.username,winnerDisplay:x.username,prize:w.prizeEach||st.prize,cardNumber:x.cardNumber,winningCells:x.cells})),
-          prize:w.prizeEach||st.prize
-        });
+        const payload=res.winnerPayload||(res.state&&res.state.winner)||{};
+        const list=(payload.winners||res.winners||[]).map(x=>({
+          winner:x.username,
+          winnerDisplay:x.username,
+          prize:x.prize!=null?x.prize:(payload.prizeEach||res.state&&res.state.prize),
+          cardNumber:x.cardNumber,
+          winningCells:x.cells||x.winningCells||[],
+          grid:x.grid
+        }));
+        showWinner({winners:list,prize:payload.prizeEach,patternName:payload.patternName||room.patternName});
       }).catch(()=>toast('BINGO claim failed.'));
     return;
   }
@@ -199,12 +209,23 @@ if(isSpecial){
     const st=d||{};
     if(st.winner&&st.winner.winners&&st.winner.winners.length){
       showWinner({
-        winners:st.winner.winners.map(w=>({winner:w.username,winnerDisplay:w.username,prize:st.winner.prizeEach||st.prize,cardNumber:w.cardNumber,winningCells:w.cells})),
-        prize:st.winner.prizeEach||st.prize
+        winners:st.winner.winners.map(w=>({
+          winner:w.username,
+          winnerDisplay:w.username,
+          prize:w.prize!=null?w.prize:(st.winner.prizeEach||st.prize),
+          cardNumber:w.cardNumber,
+          winningCells:w.cells||w.winningCells||[],
+          grid:w.grid
+        })),
+        prize:st.winner.prizeEach||st.prize,
+        patternName:st.winner.patternName||st.patternName||room.patternName
       });
     }else{
-      setTimeout(goBack,500);
+      setTimeout(goBack,1200);
     }
+  });
+  socket.on('special_card_locked',d=>{
+    if(d&&d.cardNumber!=null){locked.add(Number(d.cardNumber));render();toast(d.message||'Card locked')}
   });
 }else{
   socket.on('number_drawn',d=>{if(Number(d.stake)!==stake||ended)return;drawn.add(Number(d.number));room.lastNumber=Number(d.number);header();render();playNumberAudio(Number(d.number))});
@@ -213,37 +234,62 @@ if(isSpecial){
   socket.on('game_won',d=>{if(Number(d.stake)===stake){ended=true;showWinner(d)}});
   socket.on('game_ended',d=>{if(Number(d.stake)===stake){ended=true;setTimeout(goBack,300)}});
 }
+function renderWinnerGridHtml(grid, winningCells){
+    if(!grid||!grid.length)return '<p class="small">Card unavailable</p>';
+    const set=new Set((winningCells||[]).map(x=>Array.isArray(x)?x.join(','):String(x)));
+    return `<div class="winner-grid">${grid.flatMap((row,r)=>row.map((v,c)=>{
+        const free=v==='FREE'||v===0||(r===2&&c===2);
+        const win=set.has(r+','+c);
+        return `<span class="${win?'win':''}">${free?'FREE':v}</span>`;
+    })).join('')}</div>`;
+}
+async function ensureWinnerGrids(winners){
+    for(const w of winners){
+        if(w.grid&&w.grid.length)continue;
+        if(!w.cardNumber)continue;
+        try{
+            const url=isSpecial?('/api/special/card/'+w.cardNumber):('/api/card/'+w.cardNumber);
+            const r=await fetch(url);
+            const d=await r.json();
+            if(d.success&&d.grid)w.grid=d.grid;
+        }catch(_){}
+    }
+    return winners;
+}
 function showWinner(d){
     if(winnerTimer)return;
-    const winners=d.winners||[{winner:d.winner,winnerDisplay:d.winnerDisplay,prize:d.prize,cardNumber:d.cardNumber,grid:d.grid,winningCells:d.winningCells}];
-    const iWon=winners.some(w=>w.winner===username);
-    winnerTitle.textContent=iWon?'YOU WON!':'BINGO!';
-
-    if(winners.length===1){
-        const w=winners[0];
-        winnerText.textContent=`${w.winnerDisplay||w.winner} won ${Number(w.prize).toFixed(2)} Birr · ${d.patternName}`;
-        const set=new Set((w.winningCells||[]).map(x=>x.join(',')));
-        winnerCard.innerHTML=`<div class="winner-grid">${w.grid.flatMap((row,r)=>row.map((v,c)=>`<span class="${set.has([r,c].join(','))?'win':''}">${v==='FREE'?'FREE':v}</span>`)).join('')}</div>`;
-    } else {
-        winnerText.textContent=`Split ${winners.length} ways · ${d.patternName}`;
-        const blocks=winners.map(w=>{
-            const set=new Set((w.winningCells||[]).map(x=>x.join(',')));
-                        const cells=w.grid.flatMap((row,r)=>row.map((v,c)=>{
-                const isFree=v==='FREE'||(r===2&&c===2);
-                const isWin=set.has(`${r},${c}`);
-                return `<span style="display:flex;align-items:center;justify-content:center;aspect-ratio:1;font-size:9px;border-radius:3px;background:${isWin?'#00d26a':'rgba(255,255,255,0.08)'};color:${isWin?'#04210f':'#fff'};font-weight:${isWin?'700':'400'};">${isFree?'★':v}</span>`;
-            })).join('');
-            return `<div style="width:110px;text-align:center;">
-                <div style="font-size:11px;font-weight:600;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${w.winnerDisplay||w.winner}</div>
-                <div style="font-size:10px;opacity:.8;margin-bottom:4px;">${Number(w.prize).toFixed(2)} Birr</div>
-                <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:2px;">${cells}</div>
-                <div style="font-size:9px;opacity:.6;margin-top:3px;">Card #${w.cardNumber}</div>
-            </div>`;
-        }).join('');
-        winnerCard.innerHTML=`<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:8px;max-width:340px;margin:0 auto;">${blocks}</div>`;
-    }
-    winnerOverlay.classList.add('show');
-    winnerTimer=setTimeout(goBack,5000);
+    winnerTimer=1; // prevent re-entry while loading grids
+    const raw=d.winners||[{winner:d.winner,winnerDisplay:d.winnerDisplay,prize:d.prize,cardNumber:d.cardNumber,grid:d.grid,winningCells:d.winningCells}];
+    ensureWinnerGrids(raw).then(winners=>{
+        const iWon=winners.some(w=>String(w.winner).toLowerCase()===String(username).toLowerCase());
+        winnerTitle.textContent=iWon?'YOU WON!':'BINGO!';
+        const pattern=d.patternName||room.patternName||'';
+        if(winners.length===1){
+            const w=winners[0];
+            winnerText.textContent=`${w.winnerDisplay||w.winner} won ${Number(w.prize||d.prize||0).toFixed(2)} Birr${pattern?' · '+pattern:''}`;
+            winnerCard.innerHTML=renderWinnerGridHtml(w.grid,w.winningCells||w.cells);
+        } else {
+            winnerText.textContent=`Split ${winners.length} ways${pattern?' · '+pattern:''}`;
+            const blocks=winners.map(w=>{
+                const set=new Set((w.winningCells||w.cells||[]).map(x=>Array.isArray(x)?x.join(','):String(x)));
+                const grid=w.grid||[];
+                const cells=grid.length?grid.flatMap((row,r)=>row.map((v,c)=>{
+                    const isFree=v==='FREE'||v===0||(r===2&&c===2);
+                    const isWin=set.has(r+','+c);
+                    return `<span style="display:flex;align-items:center;justify-content:center;aspect-ratio:1;font-size:9px;border-radius:3px;background:${isWin?'#00d26a':'rgba(255,255,255,0.08)'};color:${isWin?'#04210f':'#fff'};font-weight:${isWin?'700':'400'};">${isFree?'★':v}</span>`;
+                })).join(''):'';
+                return `<div style="width:110px;text-align:center;">
+                    <div style="font-size:11px;font-weight:600;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${w.winnerDisplay||w.winner}</div>
+                    <div style="font-size:10px;opacity:.8;margin-bottom:4px;">${Number(w.prize||d.prize||0).toFixed(2)} Birr</div>
+                    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:2px;">${cells}</div>
+                    <div style="font-size:9px;opacity:.6;margin-top:3px;">Card #${w.cardNumber}</div>
+                </div>`;
+            }).join('');
+            winnerCard.innerHTML=`<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:8px;max-width:340px;margin:0 auto;">${blocks}</div>`;
+        }
+        winnerOverlay.classList.add('show');
+        winnerTimer=setTimeout(goBack,5000);
+    }).catch(()=>{winnerTimer=null;setTimeout(goBack,800)});
 }
 function goBack(){if(isSpecial){try{localStorage.removeItem('bingoSpecialActive')}catch(_){}location.href='/index.html';return}localStorage.removeItem('bingoActiveGame');location.href=`/index.html?returnStake=${encodeURIComponent(stake)}`}
 

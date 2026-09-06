@@ -61,7 +61,11 @@ function registerSpecialRoutes(app) {
       const result = await special.claimWin({ username, cardNumber });
       res.json(result);
     } catch (err) {
-      res.status(400).json({ success: false, message: err.message || 'Claim failed.' });
+      res.status(400).json({
+        success: false,
+        message: err.message || 'Claim failed.',
+        locked: !!err.locked,
+      });
     }
   });
 
@@ -130,6 +134,22 @@ function registerSpecialRoutes(app) {
         [id]
       );
       res.json({ success: true, session: s.rows[0], entries: e.rows });
+    } catch (err) {
+      res.status(500).json({ success: false, message: 'Server error.' });
+    }
+  });
+
+  // Player-facing session detail (winning card)
+  app.get('/api/special/session/:id', async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const s = await pool.query(
+        `SELECT id, status, stake, prize, player_count, card_count, total_paid, house_profit, winners, winning_pattern, completed_at, started_at
+         FROM special_event_sessions WHERE id=$1`,
+        [id]
+      );
+      if (!s.rowCount) return res.status(404).json({ success: false, message: 'Not found' });
+      res.json({ success: true, session: s.rows[0] });
     } catch (err) {
       res.status(500).json({ success: false, message: 'Server error.' });
     }

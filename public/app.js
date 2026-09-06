@@ -1040,19 +1040,25 @@ async function fetchHistory(username, reset = true) {
                 const sd = await sr.json();
                 if (sd.success && sd.rows && sd.rows.length) {
                     const mapped = sd.rows.map(function (row) {
+                        const iWon = !!row.won;
+                        const winners = row.winners || [];
                         return {
                             gameId: 'special-' + row.sessionId,
                             date: row.date,
-                            won: row.won > 0,
-                            winner: row.won > 0 ? username : null,
-                            players: row.cardCount || 0,
+                            won: iWon,
+                            winner: row.winner || (winners[0] && winners[0].username) || null,
+                            winners: winners,
+                            winnerCount: row.winnerCount || winners.length || 0,
+                            players: row.players || 0,
                             stake: row.stake,
-                            prize: row.won > 0 ? row.won : row.prize,
+                            prize: iWon ? (row.wonAmount || row.prize) : row.prize,
+                            winningCardNumber: row.winningCardNumber || null,
                             special: true,
                             tag: '⭐ Special',
                             cards: row.cards,
                             paid: row.paid,
                             pattern: row.pattern,
+                            winnerPayload: row.winnerPayload,
                         };
                     });
                     games = games.concat(mapped);
@@ -1130,6 +1136,54 @@ function renderHistory(games, reset = true) {
 
 // ---------------- HISTORY: WINNING CARD DETAIL ----------------
 async function viewWinningCard(gameId) {
+    if (String(gameId).indexOf('special-') === 0) {
+        const sid = String(gameId).replace('special-', '');
+        try {
+            const r = await fetch('/api/special/session/' + sid + '?public=1');
+            const d = await r.json();
+            if (!d.success) return alertUser(d.message || 'Could not load card');
+            const winners = (d.session && d.session.winners && d.session.winners.winners) || [];
+            // winners may be string
+            let list = winners;
+            if (typeof d.session.winners === 'string') {
+                try { list = JSON.parse(d.session.winners).winners || []; } catch (_) { list = []; }
+            } else if (d.session.winners && d.session.winners.winners) {
+                list = d.session.winners.winners;
+            }
+            if (!list.length) return alertUser('No winning card data');
+            // Show first winner card (or all in alert-style overlay using existing preview if any)
+            let html = '';
+            for (const w of list) {
+                const gr = w.grid || (await (await fetch('/api/special/card/' + w.cardNumber)).json()).grid;
+                if (!gr) continue;
+                const set = new Set((w.cells || []).map(function (c) { return Array.isArray(c) ? c.join(',') : String(c); }));
+                html += '<div style="margin-bottom:12px;"><b>' + escapeHtml(w.username) + ' · #' + w.cardNumber + '</b><table class="instant-bingo-table" style="margin-top:6px;">';
+                for (let r = 0; r < 5; r++) {
+                    html += '<tr>';
+                    for (let c = 0; c < 5; c++) {
+                        const v = gr[r][c];
+                        const free = v === 'FREE' || v === 0 || (r === 2 && c === 2);
+                        const win = set.has(r + ',' + c);
+                        html += '<td class="' + (win ? 'win-line strike' : '') + '">' + (free ? '★' : v) + '</td>';
+                    }
+                    html += '</tr>';
+                }
+                html += '</table></div>';
+            }
+            const box = document.getElementById('historyList');
+            if (box) {
+                const prev = document.getElementById('specialWinCardView');
+                if (prev) prev.remove();
+                const div = document.createElement('div');
+                div.id = 'specialWinCardView';
+                div.className = 'card';
+                div.innerHTML = '<div class="page-title"><h3 style="margin:0">Winning card</h3><button class="back-btn" type="button" onclick="document.getElementById(\'specialWinCardView\').remove()">✕</button></div>' + html;
+                box.prepend(div);
+            }
+        } catch (_) { alertUser('Could not load winning card'); }
+        return;
+    }
+
     const modal = document.getElementById('historyCardModal');
     const body = document.getElementById('historyCardBody');
     if (!modal || !body) return;

@@ -431,7 +431,7 @@ async function beginPlaying() {
     totalPaid += Number(ent.paid) || 0;
     cardCount += (ent.cards || []).length;
   }
-  const house = Math.max(0, totalPaid - Number(settings.prize));
+  const house = totalPaid; // money collected from players (updated net after payout in endGame)
 
   try {
     const ins = await pool.query(
@@ -495,15 +495,33 @@ async function endGame(winners) {
   ensurePhaseTimer();
 
   const list = Array.isArray(winners) ? winners : [];
+  // Attach grids so clients can highlight winning pattern
+  for (const w of list) {
+    if (!w.grid) {
+      try { w.grid = await getCardGrid(w.cardNumber); } catch (_) {}
+    }
+    if (!w.cells && w.winningCells) w.cells = w.winningCells;
+  }
+  const each = list.length ? Number((settings.prize / list.length).toFixed(2)) : 0;
   winnerPayload = {
-    winners: list,
+    winners: list.map((w) => ({
+      username: w.username,
+      cardNumber: w.cardNumber,
+      cells: w.cells || w.winningCells || [],
+      grid: w.grid || null,
+      prize: each,
+    })),
     prize: settings.prize,
-    prizeEach: list.length ? Number((settings.prize / list.length).toFixed(2)) : 0,
+    prizeEach: each,
+    patternName: PATTERN_NAMES[settings.winningPattern] || settings.winningPattern,
   };
 
-  // Pay winners
+  let totalPaid = 0;
+  for (const ent of entries.values()) totalPaid += Number(ent.paid) || 0;
+  const paidOut = list.length ? each * list.length : 0;
+  const houseNet = Number((totalPaid - paidOut).toFixed(2));
+
   if (list.length && currentSessionId) {
-    const each = Number((settings.prize / list.length).toFixed(2));
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -517,8 +535,11 @@ async function endGame(winners) {
         );
       }
       await client.query(
-        `UPDATE special_event_sessions SET status='COMPLETED', winners=$1::jsonb, drawn_numbers=$2::jsonb, completed_at=NOW() WHERE id=$3`,
-        [JSON.stringify(winnerPayload), JSON.stringify([...drawn]), currentSessionId]
+        `UPDATE special_event_sessions
+         SET status='COMPLETED', winners=$1::jsonb, drawn_numbers=$2::jsonb,
+             house_profit=$3, completed_at=NOW()
+         WHERE id=$4`,
+        [JSON.stringify(winnerPayload), JSON.stringify([...drawn]), houseNet, currentSessionId]
       );
       await client.query('COMMIT');
     } catch (e) {
@@ -530,8 +551,11 @@ async function endGame(winners) {
   } else if (currentSessionId) {
     try {
       await pool.query(
-        `UPDATE special_event_sessions SET status='COMPLETED', winners=$1::jsonb, drawn_numbers=$2::jsonb, completed_at=NOW() WHERE id=$3`,
-        [JSON.stringify(winnerPayload), JSON.stringify([...drawn]), currentSessionId]
+        `UPDATE special_event_sessions
+         SET status='COMPLETED', winners=$1::jsonb, drawn_numbers=$2::jsonb,
+             house_profit=$3, completed_at=NOW()
+         WHERE id=$4`,
+        [JSON.stringify(winnerPayload), JSON.stringify([...drawn]), totalPaid, currentSessionId]
       );
     } catch (_) {}
   }
@@ -621,11 +645,21 @@ async function joinWithCards({ username, cardNumbers }) {
   }
 }
 
+function findEntry(username) {
+  if (entries.has(username)) return { key: username, ent: entries.get(username) };
+  const lower = String(username || '').toLowerCase();
+  for (const [k, ent] of entries.entries()) {
+    if (String(k).toLowerCase() === lower) return { key: k, ent };
+  }
+  return null;
+}
+
 async function claimWin({ username, cardNumber }) {
   if (phase !== 'PLAYING') throw new Error('No active special game.');
   const cn = Number(cardNumber);
-  const ent = entries.get(username);
-  if (!ent || !(ent.cards || []).includes(cn)) throw new Error('Not your card.');
+  const found = findEntry(username);
+  if (!found || !(found.ent.cards || []).includes(cn)) throw new Error('Not your card.');
+  const uname = found.key;
   if (claimLockedCards.has(cn)) {
     const err = new Error('This card is locked.');
     err.locked = true;
@@ -635,17 +669,16 @@ async function claimWin({ username, cardNumber }) {
   if (!grid) throw new Error('Card not found.');
   const result = winningClaim(grid, drawn, settings.winningPattern, lastNumber);
   if (!result.ok) {
-    // Invalid claim locks the card (same idea as classic)
     claimLockedCards.add(cn);
+    broadcast('special_card_locked', { cardNumber: cn, username: uname, message: 'Wrong BINGO — card locked.' });
     const err = new Error('Not a valid win on the latest number. Card locked.');
     err.locked = true;
     throw err;
   }
 
-  // Short claim window: first valid claim opens ~700ms for other real claimants, then settle
   if (!claimWindow) {
     claimWindow = { claimants: new Map(), timer: null };
-    claimWindow.claimants.set(username, { username, cardNumber: cn, cells: result.cells });
+    claimWindow.claimants.set(uname, { username: uname, cardNumber: cn, cells: result.cells, grid });
     claimLockedCards.add(cn);
     await new Promise((resolve) => {
       claimWindow.timer = setTimeout(resolve, 700);
@@ -653,11 +686,10 @@ async function claimWin({ username, cardNumber }) {
     const winners = [...claimWindow.claimants.values()];
     claimWindow = null;
     await endGame(winners);
-    return { success: true, winners, state: publicState() };
+    return { success: true, winners: winnerPayload.winners, state: publicState(), winnerPayload };
   }
 
-  // Window already open — add this claimant
-  claimWindow.claimants.set(username, { username, cardNumber: cn, cells: result.cells });
+  claimWindow.claimants.set(uname, { username: uname, cardNumber: cn, cells: result.cells, grid });
   claimLockedCards.add(cn);
   return { success: true, pending: true, message: 'Claim received — settling…', state: publicState() };
 }
@@ -667,7 +699,8 @@ async function historyForUser(username, limit = 20, offset = 0) {
   const off = Math.max(Number(offset) || 0, 0);
   const r = await pool.query(
     `SELECT e.id, e.session_id, e.cards, e.card_count, e.amount_paid, e.created_at,
-            s.stake, s.prize, s.status, s.winners, s.winning_pattern, s.completed_at, s.started_at
+            s.stake, s.prize, s.status, s.winners, s.winning_pattern, s.completed_at, s.started_at,
+            s.player_count, s.card_count AS session_cards
      FROM special_event_entries e
      JOIN special_event_sessions s ON s.id = e.session_id
      WHERE LOWER(e.username)=LOWER($1)
@@ -675,14 +708,25 @@ async function historyForUser(username, limit = 20, offset = 0) {
     [username, lim, off]
   );
   return r.rows.map((row) => {
-    let won = 0;
+    let wonAmount = 0;
+    let iWon = false;
+    let winningCardNumber = null;
+    let winnerNames = [];
+    let winnerCount = 0;
     let winners = row.winners;
     if (typeof winners === 'string') {
       try { winners = JSON.parse(winners); } catch (_) { winners = null; }
     }
-    if (winners && winners.winners) {
-      const me = winners.winners.find((w) => String(w.username).toLowerCase() === String(username).toLowerCase());
-      if (me) won = Number(winners.prizeEach || row.prize) || 0;
+    const list = (winners && winners.winners) ? winners.winners : [];
+    winnerCount = list.length;
+    winnerNames = list.map((w) => w.username);
+    const me = list.find((w) => String(w.username).toLowerCase() === String(username).toLowerCase());
+    if (me) {
+      iWon = true;
+      wonAmount = Number(me.prize != null ? me.prize : (winners.prizeEach || row.prize)) || 0;
+      winningCardNumber = me.cardNumber;
+    } else if (list.length === 1) {
+      winningCardNumber = list[0].cardNumber;
     }
     return {
       id: row.id,
@@ -694,10 +738,17 @@ async function historyForUser(username, limit = 20, offset = 0) {
       paid: Number(row.amount_paid),
       stake: Number(row.stake),
       prize: Number(row.prize),
-      won,
+      won: iWon,
+      wonAmount,
+      winningCardNumber,
+      winner: winnerNames[0] || null,
+      winners: list.map((w) => ({ username: w.username, displayName: w.username, cardNumber: w.cardNumber })),
+      winnerCount,
+      players: Number(row.player_count) || 0,
       pattern: row.winning_pattern,
       status: row.status,
       date: row.completed_at || row.started_at || row.created_at,
+      winnerPayload: winners,
     };
   });
 }
