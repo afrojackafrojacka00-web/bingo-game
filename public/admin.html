@@ -1089,11 +1089,18 @@ table.data tr:hover td { background: var(--card-hover); }
         <div id="spAdminMsg" class="muted" style="margin-top:10px;font-size:12px;"></div>
         <div class="inst-card" style="margin-top:14px;">
           <h3>Session history</h3>
-          <div class="toolbar" style="margin-bottom:10px;">
-            <input id="spHistFrom" type="date">
-            <input id="spHistTo" type="date">
+          <div class="toolbar" style="margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+            <select id="spHistPeriod" onchange="loadSpecialHistory()">
+              <option value="day" selected>By day</option>
+              <option value="week">By week</option>
+              <option value="month">By month</option>
+              <option value="all">All sessions</option>
+            </select>
+            <input id="spHistFrom" type="date" title="From">
+            <input id="spHistTo" type="date" title="To">
             <button class="btn btn-ghost btn-sm" onclick="loadSpecialHistory()">Filter</button>
           </div>
+          <div id="spHistoryTotals" class="inst-kpi" style="margin-bottom:12px;"></div>
           <div id="spHistory" class="empty">—</div>
           <div id="spHistoryDetail" style="margin-top:12px;"></div>
         </div>
@@ -2627,30 +2634,117 @@ async function loadSpecialAdmin() {
   }
 }
 
+function specialWinnerNames(winners) {
+  let list = [];
+  if (!winners) return '—';
+  if (typeof winners === 'string') {
+    try { winners = JSON.parse(winners); } catch (_) { return '—'; }
+  }
+  if (winners.winners && Array.isArray(winners.winners)) list = winners.winners;
+  else if (Array.isArray(winners)) list = winners;
+  if (!list.length) return '—';
+  return list.map(function (w) { return w.username || w.winner || ''; }).filter(Boolean).join(', ') || '—';
+}
+
+function specialPeriodKey(dateStr, period) {
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return 'unknown';
+  if (period === 'month') return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  if (period === 'week') {
+    const tmp = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const day = tmp.getUTCDay() || 7;
+    tmp.setUTCDate(tmp.getUTCDate() + 4 - day);
+    const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
+    const week = Math.ceil((((tmp - yearStart) / 86400000) + 1) / 7);
+    return tmp.getUTCFullYear() + '-W' + String(week).padStart(2, '0');
+  }
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
 async function loadSpecialHistory() {
   if (!getSecret()) return;
   const box = document.getElementById('spHistory');
   const detail = document.getElementById('spHistoryDetail');
+  const totalsEl = document.getElementById('spHistoryTotals');
   if (detail) detail.innerHTML = '';
   const from = (document.getElementById('spHistFrom') || {}).value || '';
   const to = (document.getElementById('spHistTo') || {}).value || '';
+  const period = (document.getElementById('spHistPeriod') || {}).value || 'day';
   const params = new URLSearchParams();
   if (from) params.set('from', from);
   if (to) params.set('to', to);
-  params.set('limit', '50');
+  params.set('limit', '200');
   try {
     const hr = await fetch('/api/admin/special/history?' + params, { headers: adminSecretHeader() });
     const hd = await hr.json();
     if (!box) return;
-    if (hd.success && hd.rows && hd.rows.length) {
-      box.innerHTML = '<div class="inst-table-wrap"><table class="inst-table"><thead><tr><th>ID</th><th>Status</th><th>Stake</th><th>Prize</th><th>Players</th><th>Cards</th><th>Volume</th><th>House</th><th>When</th><th></th></tr></thead><tbody>' +
-        hd.rows.map(function(row) {
+    if (!hd.success || !hd.rows || !hd.rows.length) {
+      if (totalsEl) totalsEl.innerHTML = '';
+      box.innerHTML = '<div class="empty">No sessions yet</div>';
+      return;
+    }
+    const rows = hd.rows;
+    let tPrize = 0, tCards = 0, tVol = 0, tHouse = 0, tPlayers = 0, tGames = rows.length;
+    rows.forEach(function (row) {
+      tPrize += Number(row.prize) || 0;
+      tCards += Number(row.card_count) || 0;
+      tVol += Number(row.total_paid) || 0;
+      tHouse += Number(row.house_profit) || 0;
+      tPlayers += Number(row.player_count) || 0;
+    });
+    if (totalsEl) {
+      totalsEl.innerHTML =
+        '<div class="stat"><div class="label">Games</div><div class="value">' + tGames + '</div></div>' +
+        '<div class="stat"><div class="label">Prize Σ</div><div class="value">' + fmtMoney(tPrize) + '</div></div>' +
+        '<div class="stat"><div class="label">Cards Σ</div><div class="value">' + tCards + '</div></div>' +
+        '<div class="stat"><div class="label">Volume Σ</div><div class="value">' + fmtMoney(tVol) + '</div></div>' +
+        '<div class="stat"><div class="label">House Σ</div><div class="value">' + fmtMoney(tHouse) + '</div></div>' +
+        '<div class="stat"><div class="label">Players Σ</div><div class="value">' + tPlayers + '</div></div>';
+    }
+
+    if (period === 'all') {
+      box.innerHTML = '<div class="inst-table-wrap"><table class="inst-table"><thead><tr>' +
+        '<th>ID</th><th>Status</th><th>Stake</th><th>Prize</th><th>Winner</th><th>Players</th><th>Cards</th><th>Volume</th><th>House</th><th>When</th><th></th>' +
+        '</tr></thead><tbody>' +
+        rows.map(function(row) {
           return '<tr><td>#' + row.id + '</td><td>' + esc(row.status) + '</td><td>' + fmtMoney(row.stake) + '</td><td>' + fmtMoney(row.prize) +
+            '</td><td>' + esc(specialWinnerNames(row.winners)) +
             '</td><td>' + (row.player_count||0) + '</td><td>' + (row.card_count||0) + '</td><td>' + fmtMoney(row.total_paid) + '</td><td>' + fmtMoney(row.house_profit) +
             '</td><td>' + fmtDate(row.completed_at || row.started_at || row.created_at) +
             '</td><td><button class="btn btn-ghost btn-sm" onclick="loadSpecialSessionDetail(' + row.id + ')">Detail</button></td></tr>';
         }).join('') + '</tbody></table></div>';
-    } else box.innerHTML = '<div class="empty">No sessions yet</div>';
+      return;
+    }
+
+    const groups = {};
+    rows.forEach(function (row) {
+      const when = row.completed_at || row.started_at || row.created_at;
+      const key = specialPeriodKey(when, period);
+      if (!groups[key]) {
+        groups[key] = { key: key, games: 0, prize: 0, cards: 0, volume: 0, house: 0, players: 0, winners: [] };
+      }
+      const g = groups[key];
+      g.games += 1;
+      g.prize += Number(row.prize) || 0;
+      g.cards += Number(row.card_count) || 0;
+      g.volume += Number(row.total_paid) || 0;
+      g.house += Number(row.house_profit) || 0;
+      g.players += Number(row.player_count) || 0;
+      const wn = specialWinnerNames(row.winners);
+      if (wn && wn !== '—') g.winners.push(wn);
+    });
+    const ordered = Object.keys(groups).sort().reverse().map(function (k) { return groups[k]; });
+    const label = period === 'week' ? 'Week' : (period === 'month' ? 'Month' : 'Day');
+    box.innerHTML = '<div class="inst-table-wrap"><table class="inst-table"><thead><tr>' +
+      '<th>' + label + '</th><th>Games</th><th>Prize Σ</th><th>Cards Σ</th><th>Volume Σ</th><th>House Σ</th><th>Players Σ</th><th>Winners</th>' +
+      '</tr></thead><tbody>' +
+      ordered.map(function (g) {
+        const uniq = [...new Set(g.winners)].slice(0, 6).join(', ');
+        return '<tr><td><b>' + esc(g.key) + '</b></td><td>' + g.games + '</td><td>' + fmtMoney(g.prize) +
+          '</td><td>' + g.cards + '</td><td>' + fmtMoney(g.volume) + '</td><td>' + fmtMoney(g.house) +
+          '</td><td>' + g.players + '</td><td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">' + esc(uniq || '—') + '</td></tr>';
+      }).join('') + '</tbody></table></div>' +
+      '<p class="hint" style="margin-top:8px;">Tip: choose <b>All sessions</b> to see each game with Detail / winner / stake.</p>';
   } catch (e) {
     if (box) box.innerHTML = '<div class="empty">Network error</div>';
   }

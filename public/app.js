@@ -1142,49 +1142,64 @@ function renderHistory(games, reset = true) {
 async function viewWinningCard(gameId) {
     if (String(gameId).indexOf('special-') === 0) {
         const sid = String(gameId).replace('special-', '');
+        const modal = document.getElementById('historyCardModal');
+        const body = document.getElementById('historyCardBody');
+        if (!modal || !body) return alertUser('Could not open card view');
+        body.innerHTML = '<p class="small">Loading card…</p>';
+        show('historyCardModal');
         try {
-            const r = await fetch('/api/special/session/' + sid + '?public=1');
+            const r = await fetch('/api/special/session/' + sid + '?public=1', { cache: 'no-store' });
             const d = await r.json();
-            if (!d.success) return alertUser(d.message || 'Could not load card');
-            const winners = (d.session && d.session.winners && d.session.winners.winners) || [];
-            // winners may be string
-            let list = winners;
-            if (typeof d.session.winners === 'string') {
-                try { list = JSON.parse(d.session.winners).winners || []; } catch (_) { list = []; }
-            } else if (d.session.winners && d.session.winners.winners) {
-                list = d.session.winners.winners;
+            if (!d.success) {
+                body.innerHTML = '<p class="small">' + escapeHtml(d.message || 'Could not load card') + '</p>';
+                return;
             }
-            if (!list.length) return alertUser('No winning card data');
-            // Show first winner card (or all in alert-style overlay using existing preview if any)
+            let list = [];
+            const wraw = d.session && d.session.winners;
+            if (typeof wraw === 'string') {
+                try { list = (JSON.parse(wraw).winners) || []; } catch (_) { list = []; }
+            } else if (wraw && Array.isArray(wraw.winners)) {
+                list = wraw.winners;
+            }
+            if (!list.length) {
+                body.innerHTML = '<p class="small">No winning card data.</p>';
+                return;
+            }
             let html = '';
             for (const w of list) {
-                const gr = w.grid || (await (await fetch('/api/special/card/' + w.cardNumber)).json()).grid;
+                let gr = w.grid;
+                if (!gr) {
+                    try {
+                        const cr = await fetch('/api/special/card/' + w.cardNumber, { cache: 'no-store' });
+                        const cd = await cr.json();
+                        if (cd.success) gr = cd.grid;
+                    } catch (_) {}
+                }
                 if (!gr) continue;
-                const set = new Set((w.cells || []).map(function (c) { return Array.isArray(c) ? c.join(',') : String(c); }));
-                html += '<div style="margin-bottom:12px;"><b>' + escapeHtml(w.username) + ' · #' + w.cardNumber + '</b><table class="instant-bingo-table" style="margin-top:6px;">';
+                const set = new Set((w.cells || w.winningCells || []).map(function (c) {
+                    return Array.isArray(c) ? c.join(',') : String(c);
+                }));
+                html += '<div style="margin-bottom:14px;text-align:center;">';
+                html += '<div style="font-weight:700;margin-bottom:6px;">' + escapeHtml(w.username) + ' · Card #' + w.cardNumber;
+                if (w.prize != null) html += ' · ' + Number(w.prize).toFixed(2) + ' Birr';
+                html += '</div>';
+                html += '<table class="instant-bingo-table" style="margin:0 auto;max-width:260px;">';
                 for (let r = 0; r < 5; r++) {
                     html += '<tr>';
                     for (let c = 0; c < 5; c++) {
                         const v = gr[r][c];
                         const free = v === 'FREE' || v === 0 || (r === 2 && c === 2);
                         const win = set.has(r + ',' + c);
-                        html += '<td class="' + (win ? 'win-line strike' : '') + '">' + (free ? '★' : v) + '</td>';
+                        html += '<td class="' + (win ? 'win-line strike' : (free ? 'marked' : '')) + '">' + (free ? '★' : v) + '</td>';
                     }
                     html += '</tr>';
                 }
                 html += '</table></div>';
             }
-            const box = document.getElementById('historyList');
-            if (box) {
-                const prev = document.getElementById('specialWinCardView');
-                if (prev) prev.remove();
-                const div = document.createElement('div');
-                div.id = 'specialWinCardView';
-                div.className = 'card';
-                div.innerHTML = '<div class="page-title"><h3 style="margin:0">Winning card</h3><button class="back-btn" type="button" onclick="document.getElementById(\'specialWinCardView\').remove()">✕</button></div>' + html;
-                box.prepend(div);
-            }
-        } catch (_) { alertUser('Could not load winning card'); }
+            body.innerHTML = html || '<p class="small">No card data.</p>';
+        } catch (_) {
+            body.innerHTML = '<p class="small">Could not load winning card.</p>';
+        }
         return;
     }
 

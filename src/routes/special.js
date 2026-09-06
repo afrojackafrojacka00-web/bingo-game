@@ -102,7 +102,7 @@ function registerSpecialRoutes(app) {
   app.get('/api/admin/special/history', async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
-      const limit = Math.min(Number(req.query.limit) || 50, 100);
+      const limit = Math.min(Number(req.query.limit) || 50, 300);
       const from = req.query.from ? String(req.query.from) : null;
       const to = req.query.to ? String(req.query.to) : null;
       const params = [];
