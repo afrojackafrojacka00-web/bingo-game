@@ -1032,8 +1032,36 @@ async function fetchHistory(username, reset = true) {
             if (reset) container.innerHTML = '<p class="small">Could not load history.</p>';
             return;
         }
+        let games = data.history || [];
+        // Merge Special event history on first page
+        if (reset) {
+            try {
+                const sr = await fetch('/api/special/history?username=' + encodeURIComponent(username) + '&limit=30&offset=0', { cache: 'no-store' });
+                const sd = await sr.json();
+                if (sd.success && sd.rows && sd.rows.length) {
+                    const mapped = sd.rows.map(function (row) {
+                        return {
+                            gameId: 'special-' + row.sessionId,
+                            date: row.date,
+                            won: row.won > 0,
+                            winner: row.won > 0 ? username : null,
+                            players: row.cardCount || 0,
+                            stake: row.stake,
+                            prize: row.won > 0 ? row.won : row.prize,
+                            special: true,
+                            tag: '⭐ Special',
+                            cards: row.cards,
+                            paid: row.paid,
+                            pattern: row.pattern,
+                        };
+                    });
+                    games = games.concat(mapped);
+                    games.sort(function (a, b) { return new Date(b.date) - new Date(a.date); });
+                }
+            } catch (_) {}
+        }
 
-        renderHistory(data.history || [], reset);
+        renderHistory(games, reset);
         historyOffset += (data.history || []).length;
         historyHasMore = !!data.hasMore;
         if (historyHasMore) attachInfiniteScroll(container, 'historySentinel', () => fetchHistory(username, false));
@@ -1079,9 +1107,10 @@ function renderHistory(games, reset = true) {
             ? `<strong class="card-link" onclick="viewWinningCard(${Number(game.gameId)})">${split ? 'View Winning Cards' : '#' + Number(game.winningCardNumber)}</strong>`
             : `<strong>—</strong>`;
 
+        const specialTag = game.special ? '<span class="status-pill" style="margin-left:6px;">⭐ Special</span>' : '';
         return `<div class="history-card ${outcomeClass}">
             <div class="history-top">
-                <span class="history-outcome">${outcomeLabel}</span>
+                <span class="history-outcome">${outcomeLabel}${specialTag}</span>
                 <span class="history-date">${dateStr}</span>
             </div>
             <div class="info-grid" style="margin:10px 0 0;">

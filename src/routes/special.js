@@ -39,6 +39,20 @@ function registerSpecialRoutes(app) {
     }
   });
 
+  app.get('/api/special/history', async (req, res) => {
+    try {
+      const username = String(req.query.username || '').trim();
+      if (!username) return res.status(400).json({ success: false, message: 'Username required.' });
+      const limit = Number(req.query.limit) || 20;
+      const offset = Number(req.query.offset) || 0;
+      const rows = await special.historyForUser(username, limit, offset);
+      res.json({ success: true, rows, hasMore: rows.length >= limit });
+    } catch (err) {
+      console.error('special user history', err);
+      res.status(500).json({ success: false, message: 'Server error.' });
+    }
+  });
+
   app.post('/api/special/claim', async (req, res) => {
     try {
       const username = String(req.body?.username || '').trim();

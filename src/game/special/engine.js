@@ -26,6 +26,9 @@ let winnerPayload = null;
 // players: username -> { userId, cards: number[], paid }
 const entries = new Map();
 const cardOwners = new Map(); // cardNumber -> username
+const gridCache = new Map(); // cardNumber -> grid
+const claimLockedCards = new Set();
+let claimWindow = null; // { until, claimants: Map username -> {cardNumber, cells} }
 
 const DEFAULTS = {
   visible: false,
@@ -328,9 +331,14 @@ function publicState() {
   };
 }
 
-function stopTimers() {
-  if (phaseTimer) { clearInterval(phaseTimer); phaseTimer = null; }
+function clearDrawTimer() {
   if (drawTimer) { clearInterval(drawTimer); drawTimer = null; }
+}
+
+/** Permanent scheduler — must never stay dead after a round or admin action */
+function ensurePhaseTimer() {
+  if (phaseTimer) return;
+  phaseTimer = setInterval(tickLoop, 1000);
 }
 
 function shuffledNumbers() {
@@ -387,9 +395,10 @@ function tickLoop() {
 
 async function endWithNoPlayers() {
   if (phase === 'ENDED' || phase === 'PLAYING') return;
-  if (drawTimer) { clearInterval(drawTimer); drawTimer = null; }
+  clearDrawTimer();
   phase = 'ENDED';
   winnerPayload = null;
+  ensurePhaseTimer();
   try {
     await pool.query(
       `INSERT INTO special_event_sessions
@@ -405,22 +414,16 @@ async function endWithNoPlayers() {
 }
 
 async function beginPlaying() {
-
-  if (phase === 'PLAYING') return;
-  stopTimers();
+  if (phase === 'PLAYING' || phase === 'ENDED') return;
+  ensurePhaseTimer();
 
   if (entries.size === 0) {
-    // Nobody joined — end event
-    phase = 'ENDED';
-    broadcast('special_state', publicState());
-    broadcast('special_ended', publicState());
+    await endWithNoPlayers();
     return;
   }
 
   phase = 'PLAYING';
-  // Stop joining timer only; draw timer started below
-  if (phaseTimer) { clearInterval(phaseTimer); phaseTimer = null; }
-  if (drawTimer) { clearInterval(drawTimer); drawTimer = null; }
+  clearDrawTimer();
 
   let totalPaid = 0;
   let cardCount = 0;
@@ -456,6 +459,9 @@ async function beginPlaying() {
   drawn.clear();
   lastNumber = null;
   winnerPayload = null;
+  claimLockedCards.clear();
+  claimWindow = null;
+  gridCache.clear();
 
   broadcast('special_game_started', publicState());
   broadcast('special_state', publicState());
@@ -484,8 +490,9 @@ async function beginPlaying() {
 
 async function endGame(winners) {
   if (phase === 'ENDED') return;
-  stopTimers();
+  clearDrawTimer();
   phase = 'ENDED';
+  ensurePhaseTimer();
 
   const list = Array.isArray(winners) ? winners : [];
   winnerPayload = {
@@ -534,8 +541,12 @@ async function endGame(winners) {
 }
 
 async function getCardGrid(cardNumber) {
-  const r = await pool.query('SELECT grid FROM bingo_cards WHERE card_number=$1', [cardNumber]);
-  return r.rowCount ? r.rows[0].grid : null;
+  const n = Number(cardNumber);
+  if (gridCache.has(n)) return gridCache.get(n);
+  const r = await pool.query('SELECT grid FROM bingo_cards WHERE card_number=$1', [n]);
+  const grid = r.rowCount ? r.rows[0].grid : null;
+  if (grid) gridCache.set(n, grid);
+  return grid;
 }
 
 async function joinWithCards({ username, cardNumbers }) {
@@ -612,35 +623,87 @@ async function joinWithCards({ username, cardNumbers }) {
 
 async function claimWin({ username, cardNumber }) {
   if (phase !== 'PLAYING') throw new Error('No active special game.');
+  const cn = Number(cardNumber);
   const ent = entries.get(username);
-  if (!ent || !(ent.cards || []).includes(Number(cardNumber))) throw new Error('Not your card.');
-  const grid = await getCardGrid(cardNumber);
+  if (!ent || !(ent.cards || []).includes(cn)) throw new Error('Not your card.');
+  if (claimLockedCards.has(cn)) {
+    const err = new Error('This card is locked.');
+    err.locked = true;
+    throw err;
+  }
+  const grid = await getCardGrid(cn);
   if (!grid) throw new Error('Card not found.');
   const result = winningClaim(grid, drawn, settings.winningPattern, lastNumber);
-  if (!result.ok) throw new Error('Not a valid win on the latest number.');
-
-  // Collect all valid claims on same number within a short window — for simplicity pay this winner;
-  // if multiple claim almost together, split fixed prize among unique usernames who claimed validly.
-  // Simple approach: first valid claim locks; scan all cards of all players for same latest number.
-  const winners = [];
-  for (const [uname, e] of entries.entries()) {
-    for (const cn of e.cards || []) {
-      const g = await getCardGrid(cn);
-      if (!g) continue;
-      const w = winningClaim(g, drawn, settings.winningPattern, lastNumber);
-      if (w.ok) {
-        winners.push({ username: uname, cardNumber: cn, cells: w.cells });
-      }
-    }
+  if (!result.ok) {
+    // Invalid claim locks the card (same idea as classic)
+    claimLockedCards.add(cn);
+    const err = new Error('Not a valid win on the latest number. Card locked.');
+    err.locked = true;
+    throw err;
   }
-  // Unique by username for payout split
-  const byUser = new Map();
-  winners.forEach((w) => { if (!byUser.has(w.username)) byUser.set(w.username, w); });
-  await endGame([...byUser.values()]);
-  return { success: true, winners: [...byUser.values()], state: publicState() };
+
+  // Short claim window: first valid claim opens ~700ms for other real claimants, then settle
+  if (!claimWindow) {
+    claimWindow = { claimants: new Map(), timer: null };
+    claimWindow.claimants.set(username, { username, cardNumber: cn, cells: result.cells });
+    claimLockedCards.add(cn);
+    await new Promise((resolve) => {
+      claimWindow.timer = setTimeout(resolve, 700);
+    });
+    const winners = [...claimWindow.claimants.values()];
+    claimWindow = null;
+    await endGame(winners);
+    return { success: true, winners, state: publicState() };
+  }
+
+  // Window already open — add this claimant
+  claimWindow.claimants.set(username, { username, cardNumber: cn, cells: result.cells });
+  claimLockedCards.add(cn);
+  return { success: true, pending: true, message: 'Claim received — settling…', state: publicState() };
+}
+
+async function historyForUser(username, limit = 20, offset = 0) {
+  const lim = Math.min(Math.max(Number(limit) || 20, 1), 50);
+  const off = Math.max(Number(offset) || 0, 0);
+  const r = await pool.query(
+    `SELECT e.id, e.session_id, e.cards, e.card_count, e.amount_paid, e.created_at,
+            s.stake, s.prize, s.status, s.winners, s.winning_pattern, s.completed_at, s.started_at
+     FROM special_event_entries e
+     JOIN special_event_sessions s ON s.id = e.session_id
+     WHERE LOWER(e.username)=LOWER($1)
+     ORDER BY e.id DESC LIMIT $2 OFFSET $3`,
+    [username, lim, off]
+  );
+  return r.rows.map((row) => {
+    let won = 0;
+    let winners = row.winners;
+    if (typeof winners === 'string') {
+      try { winners = JSON.parse(winners); } catch (_) { winners = null; }
+    }
+    if (winners && winners.winners) {
+      const me = winners.winners.find((w) => String(w.username).toLowerCase() === String(username).toLowerCase());
+      if (me) won = Number(winners.prizeEach || row.prize) || 0;
+    }
+    return {
+      id: row.id,
+      sessionId: row.session_id,
+      type: 'special',
+      tag: '⭐ Special',
+      cards: row.cards,
+      cardCount: row.card_count,
+      paid: Number(row.amount_paid),
+      stake: Number(row.stake),
+      prize: Number(row.prize),
+      won,
+      pattern: row.winning_pattern,
+      status: row.status,
+      date: row.completed_at || row.started_at || row.created_at,
+    };
+  });
 }
 
 // ---- Admin ----
+
 async function adminGet() {
   return { ...publicState(), settings: { ...settings }, patternOptions: PATTERN_NAMES };
 }
@@ -670,8 +733,8 @@ async function adminUpdate(body) {
       phase = 'COUNTDOWN';
       entries.clear();
       cardOwners.clear();
-      stopTimers();
-      if (drawTimer) { clearInterval(drawTimer); drawTimer = null; }
+      clearDrawTimer();
+      _startingGame = false;
     }
   }
 
@@ -681,6 +744,8 @@ async function adminUpdate(body) {
     cardOwners.clear();
     drawn.clear();
     winnerPayload = null;
+    clearDrawTimer();
+    _startingGame = false;
     openJoiningPhase();
   }
 
@@ -693,9 +758,11 @@ async function adminUpdate(body) {
     drawn.clear();
     winnerPayload = null;
     currentSessionId = null;
-    stopTimers();
+    clearDrawTimer();
+    _startingGame = false;
   }
 
+  ensurePhaseTimer();
   await saveSettings(patch);
   broadcast('special_state', publicState());
   return adminGet();
@@ -710,7 +777,7 @@ function attachSpecialGame(io) {
       } else if (settings.visible && countdownEndsAt && countdownEndsAt <= Date.now() && phase === 'IDLE') {
         phase = 'OPEN';
       }
-      phaseTimer = setInterval(tickLoop, 1000);
+      ensurePhaseTimer();
       console.log('Special Event Bingo ready');
     })
     .catch((e) => console.error('special boot', e));
@@ -729,6 +796,7 @@ module.exports = {
   joinWithCards,
   claimWin,
   getCardGrid,
+  historyForUser,
   adminGet,
   adminUpdate,
   PATTERN_NAMES,
