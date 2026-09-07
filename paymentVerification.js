@@ -101,42 +101,64 @@ function parseCbeText(text) {
  * @param {number} expectedAmount      Amount the user says they sent
  * @param {string[]} ourAccountNumbers Full CBE account numbers from payment_methods
  */
+// Every configured account is tried CONCURRENTLY (not one-by-one). With N
+// accounts and a 15s-per-request timeout, a sequential loop could take up to
+// N x 15s in the worst case (see history — this was the main reason deposit
+// submissions sometimes appeared to hang). Running them in parallel bounds
+// the whole CBE check to ~one request's worth of latency regardless of how
+// many receiving accounts are configured.
 async function verifyCbeDeposit({ transactionId, expectedAmount, ourAccountNumbers, ourTelebirrNumbers = [] }) {
     const ref = String(transactionId).trim().toUpperCase().replace(/\s+/g, '');
     if (!/^[A-Z0-9]{8,20}$/.test(ref)) {
         return { verified: false, reason: "That doesn't look like a valid CBE transaction reference." };
     }
-        const suffixSources = [...(ourAccountNumbers || []), ...ourTelebirrNumbers];
+    const suffixSources = [...(ourAccountNumbers || []), ...ourTelebirrNumbers];
     if (!suffixSources.length) {
         return { verified: false, reason: 'No active accounts are configured to verify against.' };
     }
 
-    const attempts = [];
-    for (const accountNumber of suffixSources) {
-        const suffix = String(accountNumber).replace(/\D/g, '').slice(-8);
-        if (suffix.length < 8) continue;
+    const tried = suffixSources
+        .map((accountNumber) => ({ accountNumber, suffix: String(accountNumber).replace(/\D/g, '').slice(-8) }))
+        .filter((t) => t.suffix.length === 8);
+
+    const outcomes = await Promise.all(tried.map(async ({ accountNumber, suffix }) => {
         try {
             const text = await fetchCbeReceiptText(ref, suffix);
             const parsed = parseCbeText(text);
             if (!parsed.amount) {
-                attempts.push(`${suffix}: receipt page did not contain a readable amount`);
-                continue;
+                return { ok: false, detail: `${suffix}: receipt page did not contain a readable amount` };
             }
             if (!amountsMatch(parsed.amount, Number(expectedAmount))) {
                 return {
-                    verified: false,
-                    reason: `CBE receipt found, but the amount on it is ${parsed.amount} ETB, not the ${expectedAmount} ETB entered.`,
-                    parsed
+                    ok: false,
+                    mismatch: true,
+                    parsed,
+                    detail: `${suffix}: receipt found, but amount is ${parsed.amount} ETB, not ${expectedAmount} ETB`
                 };
             }
-            return { verified: true, parsed, matchedAccount: accountNumber };
+            return { ok: true, parsed, matchedAccount: accountNumber };
         } catch (err) {
-            attempts.push(`${suffix}: ${err.message}`);
+            return { ok: false, detail: `${suffix}: ${err.message}` };
         }
+    }));
+
+    const match = outcomes.find((o) => o.ok);
+    if (match) return { verified: true, parsed: match.parsed, matchedAccount: match.matchedAccount };
+
+    // Prefer surfacing a genuine amount-mismatch over generic "not found" —
+    // it's much more actionable for the user/admin reading the reason.
+    const mismatch = outcomes.find((o) => o.mismatch);
+    if (mismatch) {
+        return {
+            verified: false,
+            reason: `CBE receipt found, but the amount on it is ${mismatch.parsed.amount} ETB, not the ${expectedAmount} ETB entered.`,
+            parsed: mismatch.parsed
+        };
     }
+
     return {
         verified: false,
-        reason: `Could not find a matching CBE receipt for reference ${ref}. (${attempts.join('; ')})`
+        reason: `Could not find a matching CBE receipt for reference ${ref}. (${outcomes.map(o => o.detail).join('; ')})`
     };
 }
 
@@ -201,6 +223,14 @@ async function verifyTelebirrDeposit({ transactionId, expectedAmount, ourAccount
     const ref = String(transactionId).trim();
     if (!/^[A-Za-z0-9]{6,20}$/.test(ref)) {
         return { verified: false, reason: "That doesn't look like a valid Telebirr transaction number." };
+    }
+    // Nothing to match a receiver against — skip the network round-trip
+    // entirely rather than fetching a receipt we can never confirm as ours.
+    // (Previously this fired unconditionally, so a deposit could burn its
+    // whole timeout budget on Telebirr even when zero Telebirr/CBE accounts
+    // were configured to check the receiver against.)
+    if (!(ourAccounts || []).length && !(ourCbeAccounts || []).length) {
+        return { verified: false, reason: 'No active accounts are configured to verify against.' };
     }
 
     let html;

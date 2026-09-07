@@ -250,6 +250,16 @@ socket.on('room_reset', async ({ stake, message }) => {
 
 socket.on('error_message', ({ message }) => showNotification(message));
 
+// A deposit that couldn't be verified fast enough to answer inline (see
+// /api/deposit-request) keeps checking in the background. If it turns out
+// verified, this lands after the fact and updates the balance live instead
+// of the person having to reopen the wallet to notice it was credited.
+socket.on('deposit_finalized', ({ username, credited, balance }) => {
+    if (!credited || !currentUsername || String(username).toLowerCase() !== String(currentUsername).toLowerCase()) return;
+    showNotification('Your deposit was verified — balance updated!');
+    loadUserData(currentUsername);
+});
+
 // ---------------- RECONNECT / RESYNC ----------------
 // Everything a player does mid-game lives on the server (readyPlayers,
 // selectedCards, the draw timer) and is keyed by username, not by socket id —
@@ -548,43 +558,39 @@ async function goToGameScreen() {
 
 
 function refreshToHome() {
-    const splash = document.getElementById('bootSplash');
     try {
-        if (splash) {
-            splash.classList.remove('hidden');
-            splash.style.display = '';
+        // Leave special selection/play if open
+        if (typeof leaveSpecialSelection === 'function') {
+            try { leaveSpecialSelection(); } catch (_) {}
         }
-    } catch (_) {}
-
-    const finish = () => {
-        try {
-            if (typeof leaveSpecialSelection === 'function') try { leaveSpecialSelection(); } catch (_) {}
-            if (typeof closeSpecialPlay === 'function') try { closeSpecialPlay(); } catch (_) {}
-            if (typeof leaveInstantPlay === 'function') try { leaveInstantPlay(); } catch (_) {}
-            if (typeof leaveInstantSelection === 'function') try { leaveInstantSelection(); } catch (_) {}
-            if (typeof leaveCurrentRoom === 'function' && currentStake) try { leaveCurrentRoom(); } catch (_) {}
-            if (typeof returnToRooms === 'function') try { returnToRooms(); } catch (_) {}
-            showHome();
-            switchTab('tabGames', document.querySelector('.nav-item'));
-            if (currentUsername && typeof loadUserData === 'function') {
-                loadUserData(currentUsername).catch(() => {});
-            }
-            try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) { window.scrollTo(0, 0); }
-        } catch (e) {
-            console.error('refreshToHome', e);
+        if (typeof closeSpecialPlay === 'function') {
+            try { closeSpecialPlay(); } catch (_) {}
         }
-        setTimeout(() => {
-            try {
-                if (splash) {
-                    splash.classList.add('hidden');
-                    splash.style.display = 'none';
-                }
-            } catch (_) {}
-        }, 650);
-    };
-
-    // Let the eye see Kal Bingo loading briefly
-    setTimeout(finish, 280);
+        // Instant
+        if (typeof leaveInstantPlay === 'function') {
+            try { leaveInstantPlay(); } catch (_) {}
+        }
+        if (typeof leaveInstantSelection === 'function') {
+            try { leaveInstantSelection(); } catch (_) {}
+        }
+        // Classic room
+        if (typeof leaveCurrentRoom === 'function' && currentStake) {
+            try { leaveCurrentRoom(); } catch (_) {}
+        }
+        if (typeof returnToRooms === 'function') {
+            try { returnToRooms(); } catch (_) {}
+        }
+        showHome();
+        switchTab('tabGames', document.querySelector('.nav-item'));
+        // Soft reload of user balance/data
+        if (currentUsername && typeof loadUserData === 'function') {
+            loadUserData(currentUsername).catch(() => {});
+        }
+        try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) { window.scrollTo(0, 0); }
+    } catch (e) {
+        console.error('refreshToHome', e);
+        location.href = '/index.html';
+    }
 }
 window.refreshToHome = refreshToHome;
 
@@ -593,46 +599,27 @@ function setDepositChipVisible(on) {
     if (!chip) return;
     if (on) {
         chip.style.display = 'inline-flex';
+        // next frame for slide-in
         requestAnimationFrame(() => chip.classList.add('show'));
-        // collapsed by default — only +
-        chip.classList.remove('expanded');
     } else {
-        chip.classList.remove('show', 'expanded');
+        chip.classList.remove('show');
         setTimeout(() => {
             if (!chip.classList.contains('show')) chip.style.display = 'none';
-        }, 200);
+        }, 280);
     }
 }
 
-let _depositExpandTimer = null;
-async function openQuickDeposit(ev) {
-    try { if (ev) { ev.preventDefault(); ev.stopPropagation(); } } catch (_) {}
-    const chip = document.getElementById('depositFloatChip');
-    if (!chip) {
-        if (typeof openDepositModal === 'function') return openDepositModal();
-        return;
-    }
-    // First click expands (+ becomes + Wallet), second / after brief delay opens modal
-    if (!chip.classList.contains('expanded')) {
-        chip.classList.add('expanded');
-        clearTimeout(_depositExpandTimer);
-        _depositExpandTimer = setTimeout(async () => {
-            try {
-                if (typeof openDepositModal === 'function') await openDepositModal();
-            } catch (e) { console.error(e); }
-            // auto collapse back to + only
-            setTimeout(() => { try { chip.classList.remove('expanded'); } catch (_) {} }, 400);
-        }, 380);
-        return;
-    }
-    clearTimeout(_depositExpandTimer);
+async function openQuickDeposit() {
     try {
-        if (typeof openDepositModal === 'function') await openDepositModal();
+        // Ensure wallet context, then open deposit modal
+        if (typeof openDepositModal === 'function') {
+            await openDepositModal();
+        }
     } catch (e) {
         console.error(e);
+        // Fallback: go to wallet tab
         switchTab('tabWallet', document.querySelectorAll('.nav-item')[2]);
     }
-    setTimeout(() => { try { chip.classList.remove('expanded'); } catch (_) {} }, 300);
 }
 window.openQuickDeposit = openQuickDeposit;
 
@@ -1533,7 +1520,14 @@ function copyText(text) {
     );
 }
 
+let depositSubmitInFlight = false;
+
 async function submitDepositRequest() {
+    // Guards against double-tap / double-submit — without this, a slow
+    // network could let two requests for the same transaction ID go out
+    // before the first one's button-disable even paints.
+    if (depositSubmitInFlight) return;
+
     const amount = Number(document.getElementById('depositAmount').value);
     const transactionId = document.getElementById('depositTransactionId').value.trim();
     const submittedText = document.getElementById('depositSubmittedText').value.trim();
@@ -1541,13 +1535,21 @@ async function submitDepositRequest() {
     if (!Number.isFinite(amount) || amount <= 0) return alertUser('Enter the amount you sent.');
     if (!transactionId) return alertUser('Enter the transaction ID from your confirmation SMS.');
 
+    const btn = document.getElementById('depositSubmitBtn');
+    const originalLabel = btn ? btn.textContent : '';
+    depositSubmitInFlight = true;
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Submitting…';
+    }
+
     try {
         const res = await fetch('/api/deposit-request', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username: currentUsername, method: selectedDepositMethod, amount, transactionId, submittedText })
         });
-                const data = await res.json();
+        const data = await res.json();
         if (!data.success) return showNotification(data.message || 'Could not submit deposit.');
         document.getElementById('depositAmount').value = '';
         document.getElementById('depositTransactionId').value = '';
@@ -1556,7 +1558,15 @@ async function submitDepositRequest() {
         showNotification(data.autoVerified ? (data.message || 'Deposit verified and credited!') : 'Submitted — your deposit is pending review.');
         if (data.autoVerified) await loadUserData(currentUsername);
         fetchPendingRequests(currentUsername);
-    } catch { alertUser('Could not submit deposit.'); }
+    } catch {
+        alertUser('Could not submit deposit. Check your connection and try again.');
+    } finally {
+        depositSubmitInFlight = false;
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = originalLabel || 'Submit Deposit';
+        }
+    }
 }
 
 function openWithdrawModal() {

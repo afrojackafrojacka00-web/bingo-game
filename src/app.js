@@ -1,39 +1,3 @@
-
-async function ensureTelegramMenuButton() {
-    const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.BOT_TOKEN || '';
-    if (!botToken) return;
-    const appUrl = (
-        process.env.PUBLIC_BASE_URL ||
-        process.env.WEBAPP_URL ||
-        process.env.MINI_APP_URL ||
-        process.env.APP_URL ||
-        ''
-    ).replace(/\/$/, '');
-    if (!appUrl || !/^https:\/\//i.test(appUrl)) {
-        console.warn('Telegram Open menu button skipped: set PUBLIC_BASE_URL to your https Mini App URL');
-        return;
-    }
-    const webAppUrl = /index\.html/i.test(appUrl) ? appUrl : (appUrl + '/index.html');
-    try {
-        const res = await fetch('https://api.telegram.org/bot' + botToken + '/setChatMenuButton', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                menu_button: {
-                    type: 'web_app',
-                    text: 'Open',
-                    web_app: { url: webAppUrl },
-                },
-            }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (data.ok) console.log('Telegram menu button: Open →', webAppUrl);
-        else console.warn('setChatMenuButton failed:', data.description || JSON.stringify(data));
-    } catch (e) {
-        console.warn('setChatMenuButton error:', e.message);
-    }
-}
-
 'use strict';
 
 const express = require('express');
@@ -52,7 +16,7 @@ const { verifyDeposit } = require('../paymentVerification');
 const config = require('./config');
 const pool = require('./db/pool');
 const { initDB } = require('./db/init');
-const { adminAuth, requireAdmin } = require('./middleware/adminAuth');
+const { adminAuth, requireAdmin, timingSafeEqual } = require('./middleware/adminAuth');
 const { generalLimiter, authLimiter, moneyLimiter } = require('./middleware/rateLimiters');
 const cache = require('./cache/memory');
 
@@ -333,53 +297,14 @@ async function sendTelegramWelcomeMessage(telegramId, username, phoneNumber, wel
 
 // -------------------- AUTH & USER ROUTES --------------------
 
-// 1. Web Registration Endpoint
+// 1. Web Registration Endpoint — disabled; accounts are created via the
+// Telegram bot (see /api/telegram-auth). Kept as a stub so old clients that
+// still call this URL get a clear, actionable message instead of a 404.
 app.post('/api/register', authLimiter, async (req, res) => {
     return res.status(403).json({
         success: false,
         message: 'Web registration is disabled. Open our Telegram bot to create an account, set a password there, then log in here.'
     });
-    const { username, password, phoneNumber, referredBy } = req.body;
-    if (!username || !password) {
-        return res.status(400).json({ success: false, message: 'Missing fields.' });
-    }
-
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
-
-        const hashedPassword = await bcrypt.hash(password, 12);
-        const userRes = await client.query(
-            `INSERT INTO users (username, password, telegram_id, phone_number, balance, last_active_at)
-             VALUES ($1, $2, NULL, $3, 0.00, NOW())
-             RETURNING id, username`,
-            [username, hashedPassword, phoneNumber || null]
-        );
-
-        const userId = userRes.rows[0].id;
-
-        await applyReferralIfNew(client, referredBy, userRes.rows[0].username);
-
-        // Old global notifications must not appear for this new account.
-        await createNotificationBaseline(client, userId);
-
-        // This welcome belongs only to this new website account.
-        await createPersonalNotification(
-            client,
-            userId,
-            `Welcome ${userRes.rows[0].username}! 🎉\n\nYour account has been created successfully.\n\nBalance: 0.00 Birr.`,
-            null
-        );
-
-        await client.query('COMMIT');
-        res.json({ success: true, username: userRes.rows[0].username });
-    } catch (err) {
-        await client.query('ROLLBACK');
-        console.error('Registration error:', err);
-        res.status(400).json({ success: false, message: 'Username already taken or registration failed.' });
-    } finally {
-        client.release();
-    }
 });
 
 // 2. Web Login Endpoint
@@ -574,16 +499,13 @@ app.post('/api/save-telegram-phone', async (req, res) => {
     }
 });
 
-// 5. Update Phone Number Endpoint
-app.post('/api/user/phone', async (req, res) => {
-    const { username, phoneNumber } = req.body;
-    try {
-        await pool.query('UPDATE users SET phone_number = $1 WHERE username = $2', [phoneNumber, username]);
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ success: false, message: "Failed to update phone number." });
-    }
-});
+// NOTE: an old, unauthenticated "update phone number" endpoint used to live
+// here (`POST /api/user/phone` — took a bare username + phoneNumber with no
+// verification that the caller controlled that account). It was unused by
+// any current client and let anyone overwrite anyone else's phone number, so
+// it was removed rather than fixed-in-place. Phone numbers are now only ever
+// set via /api/save-telegram-phone, which requires a verified Telegram
+// initData signature tied to the account being updated.
 
 // 6. Get User Details (Balance, Phone, Username, Language)
 app.get('/api/user-details', async (req, res) => {
@@ -666,7 +588,7 @@ app.post('/api/user/display-name', async (req, res) => {
 });
 
 // Update Preferred Voice Pack for number calls
-const VOICE_PACKS = ['john', 'amharic', 'oromifa', 'jerry', 'arada'];
+const VOICE_PACKS = config.voicePacks;
 app.post('/api/user/voice-pack', async (req, res) => {
     const { username, voicePack } = req.body;
     if (!username || !VOICE_PACKS.includes(voicePack)) {
@@ -945,7 +867,7 @@ app.delete('/api/admin/payment-methods/:id', async (req, res) => {
 
 app.get('/api/admin/debug-network', async (req, res) => {
     const secret = req.headers['x-admin-secret'] || req.query.secret;
-    if (!config.adminSecret || secret !== config.adminSecret) {
+    if (!config.adminSecret || !secret || !timingSafeEqual(secret, config.adminSecret)) {
         return res.status(403).json({ success: false, message: 'Unauthorized.' });
     }
     const targets = [
@@ -1247,6 +1169,102 @@ app.post('/api/admin/adjust-balance', async (req, res) => {
 });
 
 // ---------------- WALLET: PAYMENT METHODS (admin-managed) ----------------
+
+// How long we're willing to make the user WAIT for an answer before falling
+// back to "pending review". Verification itself (the CBE/Telebirr network
+// calls) is allowed to keep running in the background past this deadline —
+// see attemptAutoVerification below — this constant only bounds the HTTP
+// response time the person actually sits and watches.
+const DEPOSIT_VERIFY_DEADLINE_MS = Number(process.env.DEPOSIT_VERIFY_DEADLINE_MS || 3500);
+
+// Runs the configured checks (global/user auto-verify flags, then the actual
+// bank/telco lookup) and returns a { verified, reason } result. Pulled out
+// of the route handler so it can be raced against a deadline AND, if it
+// loses that race, still be awaited to completion afterwards in the
+// background instead of being abandoned.
+async function attemptAutoVerification({ txnId, depositAmount, userAutoVerifyEnabled }) {
+    try {
+        const settingsRes = await pool.query('SELECT auto_verify_enabled FROM deposit_verification_settings WHERE id = 1');
+        const globalAutoVerifyEnabled = settingsRes.rows[0] ? settingsRes.rows[0].auto_verify_enabled : true;
+
+        if (!globalAutoVerifyEnabled) {
+            return { verified: false, reason: 'Auto-verification is currently turned off by admin — all deposits go to manual review.' };
+        }
+        if (!userAutoVerifyEnabled) {
+            return { verified: false, reason: 'Auto-verification is disabled for this account by admin — needs manual review.' };
+        }
+
+        const methodsRes = await pool.query(
+            'SELECT method, account_number, account_name FROM payment_methods WHERE active = TRUE'
+        );
+        const cbeAccounts = methodsRes.rows.filter(r => r.method === 'cbe').map(r => ({ number: r.account_number, name: r.account_name }));
+        const telebirrAccounts = methodsRes.rows.filter(r => r.method === 'telebirr').map(r => ({ number: r.account_number, name: r.account_name }));
+        return await verifyDeposit({
+            transactionId: txnId,
+            expectedAmount: depositAmount,
+            cbeAccounts,
+            telebirrAccounts
+        });
+    } catch (verifyErr) {
+        console.error('Payment verification threw:', verifyErr);
+        return { verified: false, reason: 'Verification service error — needs manual review.' };
+    }
+}
+
+// Applies a verification outcome to an already-inserted PENDING row: credits
+// the user and marks APPROVED when verified, otherwise just attaches the
+// reason so an admin has full context. Shared by the fast (in-request) path
+// and the slow (background, after-response) path so both credit money the
+// exact same way.
+async function finalizeDepositRequest({ requestId, userId, username, depositAmount, verification }) {
+    if (verification.verified) {
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            const userUpd = await client.query(
+                'UPDATE users SET balance = balance + $1 WHERE id = $2 RETURNING balance',
+                [depositAmount, userId]
+            );
+            await client.query(
+                'INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',
+                [userId, depositAmount, 'DEPOSIT_APPROVED']
+            );
+            await client.query(
+                "UPDATE deposit_requests SET status = 'APPROVED', credited_amount = $1, reviewed_at = NOW(), verification_note = $2 WHERE id = $3",
+                [depositAmount, 'Auto-verified', requestId]
+            );
+            await client.query('COMMIT');
+            return { credited: true, balance: Number(userUpd.rows[0].balance) };
+        } catch (err) {
+            await client.query('ROLLBACK');
+            // 23505 = unique_violation: another request with this exact
+            // transaction ID got approved first (a race). Don't credit
+            // twice — reject this one instead.
+            if (err.code === '23505') {
+                await pool.query(
+                    "UPDATE deposit_requests SET status = 'REJECTED', reviewed_at = NOW(), verification_note = $1 WHERE id = $2",
+                    ['Duplicate transaction ID — already credited on another request.', requestId]
+                );
+                return { credited: false, duplicate: true };
+            }
+            console.error('Auto-credit error:', err);
+            await pool.query(
+                'UPDATE deposit_requests SET verification_note = $1 WHERE id = $2',
+                ['Crediting failed after verification — needs manual review.', requestId]
+            );
+            return { credited: false };
+        } finally {
+            client.release();
+        }
+    }
+
+    await pool.query(
+        'UPDATE deposit_requests SET verification_note = $1 WHERE id = $2',
+        [verification.reason || 'Not auto-verified.', requestId]
+    );
+    return { credited: false };
+}
+
 app.post('/api/deposit-request', moneyLimiter, async (req, res) => {
     const { username, method, amount, transactionId, submittedText } = req.body;
     const depositAmount = Number(amount);
@@ -1263,19 +1281,32 @@ app.post('/api/deposit-request', moneyLimiter, async (req, res) => {
     }
 
     try {
-                const userRes = await pool.query('SELECT id, auto_verify_enabled FROM users WHERE LOWER(username) = LOWER($1)', [username]);
+        const userRes = await pool.query('SELECT id, auto_verify_enabled FROM users WHERE LOWER(username) = LOWER($1)', [username]);
         if (!userRes.rowCount) return res.status(404).json({ success: false, message: 'User not found.' });
         const userId = userRes.rows[0].id;
         const userAutoVerifyEnabled = userRes.rows[0].auto_verify_enabled;
 
         // A transaction ID that's already been credited can never be reused
         // for a second deposit — block it here before it even gets a row.
-               const already = await pool.query(
+        const already = await pool.query(
             "SELECT id FROM deposit_requests WHERE transaction_id = $1 AND status = 'APPROVED'",
             [txnId]
         );
         if (already.rowCount) {
             return res.status(400).json({ success: false, message: 'This transaction has already been credited.' });
+        }
+
+        // Also guard against the same transaction ID being submitted twice
+        // while the first submission is still pending/being verified (e.g.
+        // a double-tap on Submit, or a retry after a slow response) —
+        // without this, both would independently hit CBE/Telebirr for the
+        // same reference.
+        const alreadyPending = await pool.query(
+            "SELECT id FROM deposit_requests WHERE transaction_id = $1 AND status = 'PENDING'",
+            [txnId]
+        );
+        if (alreadyPending.rowCount) {
+            return res.status(400).json({ success: false, message: 'This transaction is already submitted and awaiting verification.' });
         }
 
         // Insert as PENDING first. Auto-verification below may upgrade it to
@@ -1288,84 +1319,54 @@ app.post('/api/deposit-request', moneyLimiter, async (req, res) => {
         );
         const requestId = inserted.rows[0].id;
 
-        // ---- Attempt automatic verification against the bank/telco ----
-        let verification = { verified: false, reason: 'Verification not attempted.' };
-                        try {
-            const settingsRes = await pool.query('SELECT auto_verify_enabled FROM deposit_verification_settings WHERE id = 1');
-            const globalAutoVerifyEnabled = settingsRes.rows[0] ? settingsRes.rows[0].auto_verify_enabled : true;
+        // ---- Attempt automatic verification, but never make the person
+        // wait more than DEPOSIT_VERIFY_DEADLINE_MS for an answer. CBE/
+        // Telebirr are third-party lookups outside our control (see
+        // paymentVerification.js) and can occasionally take much longer
+        // than that. If the deadline wins the race, we respond immediately
+        // with "pending review" and let verification keep running in the
+        // background — if it resolves as verified a few seconds later, the
+        // deposit still gets auto-credited, just without the person having
+        // had to stare at a spinner for it.
+        const verifyPromise = attemptAutoVerification({ txnId, depositAmount, userAutoVerifyEnabled });
+        const DEADLINE = Symbol('deadline');
+        const raced = await Promise.race([
+            verifyPromise,
+            new Promise((resolve) => setTimeout(() => resolve(DEADLINE), DEPOSIT_VERIFY_DEADLINE_MS))
+        ]);
 
-            if (!globalAutoVerifyEnabled) {
-                verification = { verified: false, reason: 'Auto-verification is currently turned off by admin — all deposits go to manual review.' };
-            } else if (!userAutoVerifyEnabled) {
-                verification = { verified: false, reason: 'Auto-verification is disabled for this account by admin — needs manual review.' };
-            } else {
-                const methodsRes = await pool.query(
-                    'SELECT method, account_number, account_name FROM payment_methods WHERE active = TRUE'
-                );
-                const cbeAccounts = methodsRes.rows.filter(r => r.method === 'cbe').map(r => ({ number: r.account_number, name: r.account_name }));
-                const telebirrAccounts = methodsRes.rows.filter(r => r.method === 'telebirr').map(r => ({ number: r.account_number, name: r.account_name }));
-                verification = await verifyDeposit({
-                    transactionId: txnId,
-                    expectedAmount: depositAmount,
-                    cbeAccounts,
-                    telebirrAccounts
-                });
-            }
-        } catch (verifyErr) {
-            console.error('Payment verification threw:', verifyErr);
-            verification = { verified: false, reason: 'Verification service error — needs manual review.' };
+        if (raced === DEADLINE) {
+            // Let it keep running; finalize whenever it actually finishes.
+            verifyPromise
+                .then((verification) => finalizeDepositRequest({ requestId, userId, username, depositAmount, verification }))
+                .then((result) => {
+                    if (result && result.credited) {
+                        io.emit('deposit_finalized', { username, requestId, credited: true, balance: result.balance });
+                    }
+                })
+                .catch((err) => console.error('Background deposit verification error:', err));
+
+            return res.json({
+                success: true,
+                autoVerified: false,
+                message: 'Submitted — your deposit is pending review.'
+            });
         }
 
-        if (verification.verified) {
-            const client = await pool.connect();
-            try {
-                await client.query('BEGIN');
-                const userUpd = await client.query(
-                    'UPDATE users SET balance = balance + $1 WHERE id = $2 RETURNING balance',
-                    [depositAmount, userId]
-                );
-                await client.query(
-                    'INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',
-                    [userId, depositAmount, 'DEPOSIT_APPROVED']
-                );
-                await client.query(
-                    "UPDATE deposit_requests SET status = 'APPROVED', credited_amount = $1, reviewed_at = NOW(), verification_note = $2 WHERE id = $3",
-                    [depositAmount, 'Auto-verified', requestId]
-                );
-                await client.query('COMMIT');
-                return res.json({
-                    success: true,
-                    autoVerified: true,
-                    message: `Verified — ${depositAmount} Birr has been added to your balance.`,
-                    balance: Number(userUpd.rows[0].balance)
-                });
-            } catch (err) {
-                await client.query('ROLLBACK');
-                // 23505 = unique_violation: another request with this exact
-                // transaction ID got approved first (a race). Don't credit
-                // twice — reject this one instead.
-                if (err.code === '23505') {
-                    await pool.query(
-                        "UPDATE deposit_requests SET status = 'REJECTED', reviewed_at = NOW(), verification_note = $1 WHERE id = $2",
-                        ['Duplicate transaction ID — already credited on another request.', requestId]
-                    );
-                    return res.status(400).json({ success: false, message: 'This transaction has already been credited.' });
-                }
-                console.error('Auto-credit error:', err);
-                verification = { verified: false, reason: 'Crediting failed after verification — needs manual review.' };
-            } finally {
-                client.release();
-            }
-        }
+        const verification = raced;
+        const result = await finalizeDepositRequest({ requestId, userId, username, depositAmount, verification });
 
-        // Not auto-verified (mismatch, network/parsing failure, or the
-        // crediting step above failed) — leave it PENDING for an admin to
-        // approve or reject manually, same as before, but now with the
-        // verification outcome attached so they have full context.
-        await pool.query(
-            'UPDATE deposit_requests SET verification_note = $1 WHERE id = $2',
-            [verification.reason || 'Not auto-verified.', requestId]
-        );
+        if (result.credited) {
+            return res.json({
+                success: true,
+                autoVerified: true,
+                message: `Verified — ${depositAmount} Birr has been added to your balance.`,
+                balance: result.balance
+            });
+        }
+        if (result.duplicate) {
+            return res.status(400).json({ success: false, message: 'This transaction has already been credited.' });
+        }
         return res.json({
             success: true,
             autoVerified: false,
@@ -1480,7 +1481,7 @@ app.post('/api/admin/deposit-requests/:id/reject', async (req, res) => {
 });
 
 // ---------------- WALLET: WITHDRAW REQUESTS ----------------
-const MIN_WITHDRAW_AMOUNT = 21;
+const MIN_WITHDRAW_AMOUNT = config.minWithdrawAmount;
 
 app.post('/api/withdraw-request', moneyLimiter, async (req, res) => {
     const { username, amount, method, destination, accountOwnerName } = req.body;
@@ -2203,7 +2204,7 @@ const upload = multer({ storage });
 app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) => {
     const { message, imageUrl, adminSecret, destination } = req.body;
 
-    if (!config.adminSecret || adminSecret !== config.adminSecret) {
+    if (!config.adminSecret || !adminSecret || !timingSafeEqual(adminSecret, config.adminSecret)) {
         return res.status(403).json({ success: false, message: 'Unauthorized key.' });
     }
 
@@ -2485,5 +2486,3 @@ try {
 server.listen(PORT, () => console.log(`Bingo server listening on ${PORT}`));
 
 module.exports = { app, server, io, pool };
-
-try { ensureTelegramMenuButton(); } catch (_) {}

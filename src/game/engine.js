@@ -42,6 +42,14 @@ function createRoom(stake) {
         readyPlayers: new Set(),
         playerPaid: new Map(),
         playerBalanceCache: new Map(), // soft pre-check only; the real charge at READY is authoritative
+        // Usernames with a money-moving action (READY charge / leave refund /
+        // bingo claim) currently in flight. player_ready and leave_room both
+        // read some "have I already done this?" state, then `await` a DB
+        // call, and only update that state afterwards — without this guard,
+        // a duplicate event (double-tap, client retry, flaky reconnect)
+        // arriving while the first is still awaiting would sail past the
+        // check and run the charge/refund a second time. See pendingLock().
+        pendingActions: new Set(),
         drawn: new Set(),
         drawOrder: [],
         drawTimer: null,
@@ -255,6 +263,21 @@ function removePlayer(room, username) {
     room.playerBalanceCache.delete(username);
 }
 
+// Synchronous test-and-set: returns true and marks `username` busy if it
+// wasn't already; returns false if an action for that user is still in
+// flight. Callers MUST release it in a `finally` block via releaseLock().
+// Because this check-and-set has no `await` anywhere inside it, two events
+// arriving back-to-back can never both pass it for the same username — the
+// second always sees the first's lock already held.
+function acquireLock(room, username) {
+    if (room.pendingActions.has(username)) return false;
+    room.pendingActions.add(username);
+    return true;
+}
+function releaseLock(room, username) {
+    room.pendingActions.delete(username);
+}
+
 function clearDrawTimer(room) {
     if (room.drawTimer) clearInterval(room.drawTimer);
     room.drawTimer = null;
@@ -271,6 +294,7 @@ async function resetRoom(room, message = null) {
     room.readyPlayers.clear();
     room.playerPaid.clear();
     room.playerBalanceCache.clear();
+    room.pendingActions.clear();
     room.drawn.clear();
     room.drawOrder = [];
     room.drawIndex = 0;
@@ -1184,6 +1208,14 @@ io.on('connection', socket => {
             });
         }
 
+        // refundPlayerRoomPayment reads the paid amount, then awaits the DB
+        // refund, and only zeroes it out afterward. Without this lock, a
+        // duplicate 'leave_room' event landing mid-await would read the same
+        // not-yet-zeroed amount and refund it a second time for free.
+        if (!acquireLock(room, username)) {
+            return cb({ success: false, message: 'Already processing — please wait.' });
+        }
+
         try {
             await refundPlayerRoomPayment(room, username, 'GAME_REFUND_LEFT_ROOM');
             removePlayer(room, username);
@@ -1204,6 +1236,8 @@ io.on('connection', socket => {
                 success: false,
                 message: 'Refund failed. Please try again.'
             });
+        } finally {
+            releaseLock(room, username);
         }
     });
 
@@ -1330,6 +1364,15 @@ io.on('connection', socket => {
             });
         }
 
+        // Without this lock, a duplicate 'player_ready' event (double-tap,
+        // client retry) arriving while the first is still awaiting
+        // chargePlayer() below would also pass the readyPlayers.has() check
+        // above — readyPlayers only gets the username added AFTER the charge
+        // resolves — and charge the player a second time for one entry.
+        if (!acquireLock(room, username)) {
+            return cb({ success: false, message: 'Already processing your READY — please wait.' });
+        }
+
         // The one and only charge for this round: the whole selection is
         // paid for in a single transaction right here, instead of one
         // transaction per card tap during selection.
@@ -1343,6 +1386,8 @@ io.on('connection', socket => {
             cb({ success: true, balance: charge.balance });
         } catch (err) {
             cb({ success: false, message: err.message || 'Could not charge entry fee.' });
+        } finally {
+            releaseLock(room, username);
         }
     });
 
@@ -1350,10 +1395,16 @@ io.on('connection', socket => {
         stake=Number(stake); cardNumber=Number(cardNumber); const room=gameRooms.get(stake);
         if(!room||(room.status!=='PLAYING'&&room.status!=='FINISHING')||!room.readyPlayers.has(username)||!userCards(room,username).has(cardNumber)) return cb({success:false,message:'Invalid Bingo claim.'});
         if(room.claimLockedCards.has(cardNumber)) return cb({success:false,locked:true,message:'This card is locked for the rest of this game.'});
+        // Lock the card SYNCHRONOUSLY, before the `await` below — a duplicate
+        // claim_bingo event for the same card (double-tap) arriving while
+        // this one is still awaiting getCardGrid() would otherwise also pass
+        // the claimLockedCards check above (it was only being set afterwards)
+        // and get queued as a second, separate winner for the same card.
+        room.claimLockedCards.add(cardNumber);
         try {
             const grid=await getCardGrid(cardNumber);
             const claim=grid?winningClaim(grid,room.drawn,room.winningPattern,room.lastNumber):{ok:false};
-            if(!claim.ok){ room.claimLockedCards.add(cardNumber); socket.emit('card_locked',{stake,cardNumber,message:'BINGO claim was not valid for the latest called number. This card is locked for this round.'}); return cb({success:false,locked:true,message:'Invalid or late BINGO claim. This card is now locked for this game.'}); }
+            if(!claim.ok){ socket.emit('card_locked',{stake,cardNumber,message:'BINGO claim was not valid for the latest called number. This card is locked for this round.'}); return cb({success:false,locked:true,message:'Invalid or late BINGO claim. This card is now locked for this game.'}); }
             // Valid win on the current number — don't pay out yet. Collect it
             // and give any other player who completed on this exact same
             // number a brief window to have their claim land too, so a real
@@ -1361,7 +1412,6 @@ io.on('connection', socket => {
             // happened to arrive first.
             if(!room.pendingWinners) room.pendingWinners=[];
             room.pendingWinners.push({username,cardNumber,grid,claim});
-            room.claimLockedCards.add(cardNumber);
             cb({success:true,queued:true});
             if(room.status==='PLAYING'){
                 room.status='FINISHING'; clearDrawTimer(room);

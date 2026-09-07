@@ -59,7 +59,10 @@ function registerInstantRoutes(app) {
     }
   });
 
-  app.post('/api/instant/play', moneyLimiter, async (req, res) => {
+  // '/play' is the current name the frontend calls; '/join' is kept as an
+  // alias for any older/other client still pointed at it. Both share one
+  // handler so the join logic only exists once.
+  const handleInstantJoin = async (req, res) => {
     try {
       const { username, stake, cardNumbers } = req.body || {};
       if (!username) return res.status(400).json({ success: false, message: 'Username required.' });
@@ -73,23 +76,9 @@ function registerInstantRoutes(app) {
       const status = err.code === 'DISABLED' ? 503 : 400;
       res.status(status).json({ success: false, message: err.message || 'Could not join.' });
     }
-  });
-
-  app.post('/api/instant/join', moneyLimiter, async (req, res) => {
-    try {
-      const { username, stake, cardNumbers } = req.body || {};
-      if (!username) return res.status(400).json({ success: false, message: 'Username required.' });
-      const result = await instant.joinSharedRound({
-        username: String(username),
-        stake: Number(stake),
-        cardNumbers: cardNumbers || [],
-      });
-      res.json(result);
-    } catch (err) {
-      const status = err.code === 'DISABLED' ? 503 : 400;
-      res.status(status).json({ success: false, message: err.message || 'Could not join.' });
-    }
-  });
+  };
+  app.post('/api/instant/play', moneyLimiter, handleInstantJoin);
+  app.post('/api/instant/join', moneyLimiter, handleInstantJoin);
 
   app.get('/api/instant/history', async (req, res) => {
     try {
