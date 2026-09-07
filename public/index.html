@@ -898,15 +898,7 @@ body.instant-immersive .instant-sticky-play{display:none;}
 @keyframes kalLetterBounce{0%,100%{transform:translateY(0);}40%{transform:translateY(-12px);}60%{transform:translateY(-6px);}}
 @keyframes kalBarSlide{0%{transform:translateX(-120%);}100%{transform:translateX(320%);}}
 @media (prefers-reduced-motion: reduce){.kal-boot-letter,.kal-boot-bar i{animation:none;}}
-
-/* ===== PLAYER HOME PREMIUM UI LAYER ===== */
-:root,[data-theme="dark"]{--bg:#070a12!important;--card:rgba(16,23,40,.76)!important;--muted:#8290aa!important;--line:rgba(148,163,184,.13)!important;--blue:#8b7cff!important;--blue-hover:#a18fff!important;--green:#34f5a3!important;--red:#ff6b81!important;--gold:#ffc66e!important;--input-bg:rgba(7,12,22,.72)!important;--input-border:rgba(148,163,184,.15)!important;--text-color:#f5f7ff!important;--shadow:0 20px 60px rgba(0,0,0,.25)!important;--radius:20px!important;--radius-sm:13px!important}
-body{background:radial-gradient(800px 500px at 5% -10%,rgba(124,92,246,.2),transparent 60%),radial-gradient(600px 450px at 100% 10%,rgba(52,245,163,.07),transparent 55%),#070a12!important}.card{background:linear-gradient(145deg,rgba(17,25,43,.86),rgba(10,15,28,.74))!important;border-color:rgba(148,163,184,.12)!important;box-shadow:0 20px 60px rgba(0,0,0,.2),inset 0 1px 0 rgba(255,255,255,.025)!important;border-radius:20px!important}.header-bar{background:rgba(9,14,25,.68)!important;border-color:rgba(148,163,184,.12)!important;box-shadow:0 15px 45px rgba(0,0,0,.2)!important}.header-icon-btn{background:rgba(15,23,42,.72)!important;border-color:rgba(148,163,184,.13)!important;border-radius:12px!important;transition:transform .18s,background .18s}.header-icon-btn:hover{transform:translateY(-2px);background:#172238!important}.btn-play{background:linear-gradient(135deg,#7c5cff,#a05cff,#34cfa0)!important;box-shadow:0 15px 35px rgba(124,92,246,.22)!important;border-radius:14px!important}.btn-play:hover:not(:disabled){transform:translateY(-2px) scale(1.01);filter:brightness(1.06)}.btn-secondary,.back-btn{background:rgba(30,41,59,.72)!important;border:1px solid rgba(148,163,184,.12)!important}.card-grid{gap:8px!important}.card-item{background:rgba(22,30,48,.7)!important;border-color:rgba(148,163,184,.12)!important;border-radius:11px!important;transition:transform .18s,border-color .18s,background .18s}.card-item:hover:not(.taken){transform:translateY(-2px);border-color:rgba(167,139,250,.4)!important}.card-item.selected{background:linear-gradient(135deg,#7c5cff,#a05cff)!important;border-color:#bca9ff!important;box-shadow:0 0 20px rgba(124,92,246,.25)}.bottom-nav{background:rgba(7,11,20,.88)!important;border-top-color:rgba(148,163,184,.12)!important;backdrop-filter:blur(22px)!important}.nav-item.active{color:#b8adff!important}.notif-card{background:linear-gradient(145deg,rgba(17,25,43,.86),rgba(10,15,28,.74))!important;border-color:rgba(148,163,184,.12)!important;border-radius:18px!important}
-
 </style>
-
-<script src="https://cdn.tailwindcss.com"></script>
-<script src="https://unpkg.com/lucide@latest"></script>
 </head>
 <body>
 
@@ -1287,12 +1279,5 @@ body{background:radial-gradient(800px 500px at 5% -10%,rgba(124,92,246,.2),trans
 </div>
 <script src="i18n.js?v=3""></script>
 <script src="app.js?v=20260906-header-deposit"></script>
-<script>
-(function(){
- const map={homeRefreshBtn:'refresh-cw',profileBtn:'user-round',notifBell:'bell'};
- Object.entries(map).forEach(([id,icon])=>{const el=document.getElementById(id);if(el){el.innerHTML='<i data-lucide="'+icon+'"></i>';}});
- if(window.lucide) lucide.createIcons();
-})();
-</script>
 </body>
 </html>
