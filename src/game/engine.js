@@ -943,6 +943,16 @@ app.get('/api/admin/games', async (req, res) => {
     const wsql = where.length ? ('WHERE ' + where.join(' AND ')) : '';
     try {
         const countR = await pool.query(`SELECT COUNT(*)::int AS c FROM game_sessions ${wsql}`, params);
+        const totalsR = await pool.query(
+            `SELECT COUNT(*)::int AS games,
+                    COALESCE(SUM(winner_prize),0)::float AS prize,
+                    COALESCE(SUM(card_count),0)::int AS cards,
+                    COALESCE(SUM(prize_pool),0)::float AS volume,
+                    COALESCE(SUM(house_cut),0)::float AS house,
+                    COALESCE(SUM(player_count),0)::int AS players
+             FROM game_sessions ${wsql}`,
+            params
+        );
         const listParams = params.concat([limit, offset]);
         const list = await pool.query(
             `SELECT id, status, stake, prize_pool, house_cut, winner_prize, cut_percent,
@@ -1039,6 +1049,14 @@ app.get('/api/admin/games', async (req, res) => {
             page,
             limit,
             total: countR.rows[0].c,
+            totals: {
+                games: Number(totalsR.rows[0].games || 0),
+                prize: Number(totalsR.rows[0].prize || 0),
+                cards: Number(totalsR.rows[0].cards || 0),
+                volume: Number(totalsR.rows[0].volume || 0),
+                house: Number(totalsR.rows[0].house || 0),
+                players: Number(totalsR.rows[0].players || 0),
+            },
             liveRooms: (!status || status === 'LIVE' || status === 'IN_PROGRESS') ? liveRooms : [],
             games: list.rows.map(r => {
                 const winners = winnersByGame[r.id] || [];

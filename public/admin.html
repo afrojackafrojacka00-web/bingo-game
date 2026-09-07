@@ -403,8 +403,9 @@ table.data tr:hover td { background: var(--card-hover); }
 .inst-card h3{margin:0 0 6px;font-size:14px;font-weight:700;letter-spacing:.02em;}
 .inst-card .hint{font-size:12px;color:var(--muted);margin:0 0 12px;line-height:1.45;}
 .inst-card .row-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px;}
-.inst-kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;}
-@media(max-width:900px){.inst-kpi{grid-template-columns:repeat(2,1fr);}}
+.inst-kpi{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:16px;}
+@media(max-width:1100px){.inst-kpi{grid-template-columns:repeat(3,1fr);}}
+@media(max-width:700px){.inst-kpi{grid-template-columns:repeat(2,1fr);}}
 .inst-kpi .stat{background:var(--bg-elevated,rgba(0,0,0,.2));border-radius:12px;padding:12px 14px;border:1px solid var(--border,var(--line,#333));}
 .inst-kpi .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
 .inst-kpi .value{font-size:20px;font-weight:800;margin-top:4px;}
@@ -493,6 +494,44 @@ table.data tr:hover td { background: var(--card-hover); }
           <div class="stat-card"><div class="stat-label">Withdrawals requested today</div><div class="stat-value red" id="statWdrToday">—</div></div>
           <div class="stat-card"><div class="stat-label">Transfers today</div><div class="stat-value purple" id="statTrfToday">—</div></div>
           <div class="stat-card"><div class="stat-label">Transfers approved today</div><div class="stat-value green" id="statTrfOkToday">—</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2><span class="emoji">🎮</span> Today's games</h2>
+          <span class="muted" style="font-size:12px;">Resets every day at midnight</span>
+        </div>
+        <div style="margin-bottom:12px;">
+          <div class="muted" style="font-size:12px;margin-bottom:6px;font-weight:600;">Classic Bingo</div>
+          <div class="inst-kpi" id="dashClassicToday">
+            <div class="stat"><div class="label">Games</div><div class="value" id="dashClassicGames">—</div></div>
+            <div class="stat"><div class="label">Prize Σ</div><div class="value" id="dashClassicPrize">—</div></div>
+            <div class="stat"><div class="label">Volume Σ</div><div class="value" id="dashClassicVol">—</div></div>
+            <div class="stat"><div class="label">House Σ</div><div class="value" id="dashClassicHouse">—</div></div>
+            <div class="stat"><div class="label">Players Σ</div><div class="value" id="dashClassicPlayers">—</div></div>
+            <div class="stat"><div class="label">Cards Σ</div><div class="value" id="dashClassicCards">—</div></div>
+          </div>
+        </div>
+        <div style="margin-bottom:12px;">
+          <div class="muted" style="font-size:12px;margin-bottom:6px;font-weight:600;">Instant Bingo</div>
+          <div class="inst-kpi" id="dashInstantToday">
+            <div class="stat"><div class="label">Plays</div><div class="value" id="dashInstantGames">—</div></div>
+            <div class="stat"><div class="label">Prize Σ</div><div class="value" id="dashInstantPrize">—</div></div>
+            <div class="stat"><div class="label">Volume Σ</div><div class="value" id="dashInstantVol">—</div></div>
+            <div class="stat"><div class="label">House Σ</div><div class="value" id="dashInstantHouse">—</div></div>
+            <div class="stat"><div class="label">Players Σ</div><div class="value" id="dashInstantPlayers">—</div></div>
+            <div class="stat"><div class="label">Cards Σ</div><div class="value" id="dashInstantCards">—</div></div>
+          </div>
+        </div>
+        <div>
+          <div class="muted" style="font-size:12px;margin-bottom:6px;font-weight:600;">Special Room</div>
+          <div class="inst-kpi" id="dashSpecialToday">
+            <div class="stat"><div class="label">Games</div><div class="value" id="dashSpecialGames">—</div></div>
+            <div class="stat"><div class="label">Prize Σ</div><div class="value" id="dashSpecialPrize">—</div></div>
+            <div class="stat"><div class="label">Volume Σ</div><div class="value" id="dashSpecialVol">—</div></div>
+            <div class="stat"><div class="label">House Σ</div><div class="value" id="dashSpecialHouse">—</div></div>
+            <div class="stat"><div class="label">Players Σ</div><div class="value" id="dashSpecialPlayers">—</div></div>
+            <div class="stat"><div class="label">Cards Σ</div><div class="value" id="dashSpecialCards">—</div></div>
+          </div>
         </div>
       </div>
       <div class="card">
@@ -841,6 +880,7 @@ table.data tr:hover td { background: var(--card-hover); }
           </select>
           <button class="btn btn-ghost btn-sm" onclick="loadAdminGames(1, true)">Filter</button>
         </div>
+        <div id="gamesHistoryTotals" class="inst-kpi" style="margin-bottom:12px;"></div>
         <div id="gamesList" class="empty">Load games…</div>
         <div class="pagination" id="gamesPager"></div>
       </div>
@@ -961,10 +1001,13 @@ table.data tr:hover td { background: var(--card-hover); }
           <span class="muted" style="font-size:12px;">Username · phone · display name</span>
         </div>
         <div class="toolbar">
-          <input id="instantHistQ" placeholder="Search username, phone, or name…" style="min-width:240px;">
+          <input id="instantHistQ" placeholder="Search username, phone, or name…" style="min-width:200px;">
+          <input id="instantHistFrom" type="date" title="From">
+          <input id="instantHistTo" type="date" title="To">
           <button class="btn btn-primary btn-sm" onclick="loadInstantHistory(true)">Search</button>
-          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('instantHistQ').value='';loadInstantHistory(true)">Reset</button>
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('instantHistQ').value='';document.getElementById('instantHistFrom').value='';document.getElementById('instantHistTo').value='';loadInstantHistory(true)">Reset</button>
         </div>
+        <div id="instantHistTotals" class="inst-kpi" style="margin-bottom:12px;"></div>
         <div id="instantHistList" class="empty">Open this panel to load history.</div>
         <div class="pagination" id="instantHistPager"></div>
       </div>
@@ -1593,6 +1636,20 @@ async function loadStats() {
     el = document.getElementById('statWdrToday'); if (el) el.textContent = s.withdrawsToday;
     el = document.getElementById('statTrfToday'); if (el) el.textContent = s.transfersToday;
     el = document.getElementById('statTrfOkToday'); if (el) el.textContent = s.transfersApprovedToday;
+    function fillGameToday(prefix, data) {
+      if (!data) return;
+      var map = { Games: 'games', Prize: 'prize', Vol: 'volume', House: 'house', Players: 'players', Cards: 'cards' };
+      var el;
+      el = document.getElementById(prefix + 'Games'); if (el) el.textContent = data.games != null ? data.games : '—';
+      el = document.getElementById(prefix + 'Prize'); if (el) el.textContent = data.prize != null ? fmtMoney(data.prize) : '—';
+      el = document.getElementById(prefix + 'Vol'); if (el) el.textContent = data.volume != null ? fmtMoney(data.volume) : '—';
+      el = document.getElementById(prefix + 'House'); if (el) el.textContent = data.house != null ? fmtMoney(data.house) : '—';
+      el = document.getElementById(prefix + 'Players'); if (el) el.textContent = data.players != null ? data.players : '—';
+      el = document.getElementById(prefix + 'Cards'); if (el) el.textContent = data.cards != null ? data.cards : '—';
+    }
+    fillGameToday('dashClassic', s.classicToday);
+    fillGameToday('dashInstant', s.instantToday);
+    fillGameToday('dashSpecial', s.specialToday);
     if (s.newUsers) {
       el = document.getElementById('statNewToday'); if (el) el.textContent = s.newUsers.today;
       el = document.getElementById('statNewWeek'); if (el) el.textContent = s.newUsers.week;
@@ -2091,6 +2148,19 @@ async function loadAdminGames(page, resetList) {
     }
 
     const games = d.games || [];
+    const totalsEl = document.getElementById('gamesHistoryTotals');
+    if (totalsEl && d.totals) {
+      const t = d.totals;
+      totalsEl.innerHTML =
+        '<div class="stat"><div class="label">Games</div><div class="value">' + (t.games || 0) + '</div></div>' +
+        '<div class="stat"><div class="label">Prize Σ</div><div class="value">' + fmtMoney(t.prize) + '</div></div>' +
+        '<div class="stat"><div class="label">Cards Σ</div><div class="value">' + (t.cards || 0) + '</div></div>' +
+        '<div class="stat"><div class="label">Volume Σ</div><div class="value">' + fmtMoney(t.volume) + '</div></div>' +
+        '<div class="stat"><div class="label">House Σ</div><div class="value">' + fmtMoney(t.house) + '</div></div>' +
+        '<div class="stat"><div class="label">Players Σ</div><div class="value">' + (t.players || 0) + '</div></div>';
+    } else if (totalsEl) {
+      totalsEl.innerHTML = '';
+    }
     if (list) {
       if (!games.length) {
         list.innerHTML = '<div class="empty">No games found for this filter.</div>';
@@ -3216,13 +3286,30 @@ async function loadInstantHistory(reset) {
   if (!getToken()) return;
   if (reset) instantHistOffset = 0;
   const q = (document.getElementById('instantHistQ') || {}).value || '';
+  const from = (document.getElementById('instantHistFrom') || {}).value || '';
+  const to = (document.getElementById('instantHistTo') || {}).value || '';
   const list = document.getElementById('instantHistList');
+  const totalsEl = document.getElementById('instantHistTotals');
   if (reset) list.innerHTML = '<div class="empty">Loading…</div>';
   try {
     const params = new URLSearchParams({ limit: '20', offset: String(instantHistOffset), q: q });
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
     const r = await fetch('/api/admin/instant/history?' + params, { headers: adminSecretHeader() });
     const d = await r.json();
     if (!d.success) { list.innerHTML = '<div class="empty">' + esc(d.message || 'Failed') + '</div>'; return; }
+    if (totalsEl && d.totals) {
+      const t = d.totals;
+      totalsEl.innerHTML =
+        '<div class="stat"><div class="label">Games</div><div class="value">' + (t.games || 0) + '</div></div>' +
+        '<div class="stat"><div class="label">Prize Σ</div><div class="value">' + fmtMoney(t.prize) + '</div></div>' +
+        '<div class="stat"><div class="label">Cards Σ</div><div class="value">' + (t.cards || 0) + '</div></div>' +
+        '<div class="stat"><div class="label">Volume Σ</div><div class="value">' + fmtMoney(t.volume) + '</div></div>' +
+        '<div class="stat"><div class="label">House Σ</div><div class="value">' + fmtMoney(t.house) + '</div></div>' +
+        '<div class="stat"><div class="label">Players Σ</div><div class="value">' + (t.players || 0) + '</div></div>';
+    } else if (totalsEl && reset) {
+      totalsEl.innerHTML = '';
+    }
     const rows = d.rows || [];
     if (reset && !rows.length) { list.innerHTML = '<div class="empty">No plays found.</div>'; document.getElementById('instantHistPager').innerHTML = ''; return; }
     const html = (reset ? '<div class="inst-table-wrap"><table class="inst-table"><thead><tr><th>User</th><th>Phone</th><th>Card</th><th>Bet</th><th>Prize</th><th>Mult</th><th>Pattern</th><th>Date</th></tr></thead><tbody id="instantHistBody">' : '');

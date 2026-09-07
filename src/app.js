@@ -1142,7 +1142,7 @@ app.post('/api/admin/users/:username/auto-verify', async (req, res) => {
 app.get('/api/admin/stats', async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
-        const [users, deposits, withdraws, transfers, balance, games, newUsers, activeUsers, todayCounts, houseToday] = await Promise.all([
+        const [users, deposits, withdraws, transfers, balance, games, newUsers, activeUsers, todayCounts, houseToday, instantToday, specialToday] = await Promise.all([
             pool.query('SELECT COUNT(*)::int AS total FROM users'),
             pool.query(`SELECT COUNT(*) FILTER (WHERE status = 'PENDING')::int AS pending,
                                COUNT(*) FILTER (WHERE status = 'APPROVED')::int AS approved
@@ -1176,8 +1176,25 @@ app.get('/api/admin/stats', async (req, res) => {
             `),
             pool.query(`SELECT
                 COALESCE(SUM(house_cut),0)::float AS house_today,
-                COUNT(*)::int AS games_today
-                 FROM game_sessions WHERE status IN ('COMPLETED', 'EXHAUSTED') AND created_at >= CURRENT_DATE`)
+                COUNT(*)::int AS games_today,
+                COALESCE(SUM(winner_prize),0)::float AS prize_today,
+                COALESCE(SUM(prize_pool),0)::float AS volume_today,
+                COALESCE(SUM(player_count),0)::int AS players_today,
+                COALESCE(SUM(card_count),0)::int AS cards_today
+                 FROM game_sessions WHERE status IN ('COMPLETED', 'EXHAUSTED') AND created_at >= CURRENT_DATE`),
+            pool.query(`SELECT COUNT(*)::int AS games,
+                    COALESCE(SUM(paid),0)::float AS volume,
+                    COALESCE(SUM(prize),0)::float AS prize,
+                    COUNT(DISTINCT username)::int AS players
+                 FROM instant_entries WHERE created_at >= CURRENT_DATE`).catch(() => ({ rows: [{ games: 0, volume: 0, prize: 0, players: 0 }] })),
+            pool.query(`SELECT COUNT(*)::int AS games,
+                    COALESCE(SUM(prize),0)::float AS prize,
+                    COALESCE(SUM(total_paid),0)::float AS volume,
+                    COALESCE(SUM(house_profit),0)::float AS house,
+                    COALESCE(SUM(player_count),0)::int AS players,
+                    COALESCE(SUM(card_count),0)::int AS cards
+                 FROM special_event_sessions
+                 WHERE COALESCE(completed_at, created_at) >= CURRENT_DATE`).catch(() => ({ rows: [{ games: 0, prize: 0, volume: 0, house: 0, players: 0, cards: 0 }] }))
         ]);
         res.json({
             success: true,
@@ -1211,7 +1228,31 @@ app.get('/api/admin/stats', async (req, res) => {
                     week: activeUsers.rows[0].week
                 },
                 houseProfitToday: Number(houseToday.rows[0].house_today || 0),
-                gamesCompletedToday: Number(houseToday.rows[0].games_today || 0)
+                gamesCompletedToday: Number(houseToday.rows[0].games_today || 0),
+                classicToday: {
+                    games: Number(houseToday.rows[0].games_today || 0),
+                    prize: Number(houseToday.rows[0].prize_today || 0),
+                    cards: Number(houseToday.rows[0].cards_today || 0),
+                    volume: Number(houseToday.rows[0].volume_today || 0),
+                    house: Number(houseToday.rows[0].house_today || 0),
+                    players: Number(houseToday.rows[0].players_today || 0),
+                },
+                instantToday: {
+                    games: Number((instantToday.rows[0] || {}).games || 0),
+                    prize: Number((instantToday.rows[0] || {}).prize || 0),
+                    volume: Number((instantToday.rows[0] || {}).volume || 0),
+                    house: Number((instantToday.rows[0] || {}).volume || 0) - Number((instantToday.rows[0] || {}).prize || 0),
+                    players: Number((instantToday.rows[0] || {}).players || 0),
+                    cards: Number((instantToday.rows[0] || {}).games || 0),
+                },
+                specialToday: {
+                    games: Number((specialToday.rows[0] || {}).games || 0),
+                    prize: Number((specialToday.rows[0] || {}).prize || 0),
+                    cards: Number((specialToday.rows[0] || {}).cards || 0),
+                    volume: Number((specialToday.rows[0] || {}).volume || 0),
+                    house: Number((specialToday.rows[0] || {}).house || 0),
+                    players: Number((specialToday.rows[0] || {}).players || 0),
+                }
             }
         });
     } catch (err) {

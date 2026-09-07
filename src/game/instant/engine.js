@@ -885,22 +885,40 @@ function adminGetControlState() {
   };
 }
 
-async function adminSearchHistory({ q, limit = 20, offset = 0 }) {
+async function adminSearchHistory({ q, limit = 20, offset = 0, from = null, to = null }) {
   const lim = Math.min(Math.max(Number(limit) || 20, 1), 50);
   const off = Math.max(Number(offset) || 0, 0);
   const query = String(q || '').trim();
-  if (!query) {
-    const r = await pool.query(
-      `SELECT e.id, e.username, e.card_number, e.stake, e.paid, e.pattern, e.multiplier,
-              e.prize, e.winning_cells, e.created_at, r.drawn_numbers, r.completed_at, r.id AS round_id,
-              u.phone_number, u.display_name
-       FROM instant_entries e
-       LEFT JOIN instant_rounds r ON r.id = e.round_id
-       LEFT JOIN users u ON LOWER(u.username) = LOWER(e.username)
-       ORDER BY e.id DESC LIMIT $1 OFFSET $2`, [lim, off]);
-    return { rows: mapAdminHistory(r.rows), hasMore: r.rows.length >= lim };
+  const params = [];
+  const where = [];
+  if (query) {
+    params.push('%' + query.replace(/%/g, '') + '%');
+    where.push(`(LOWER(e.username) LIKE LOWER($${params.length})
+        OR COALESCE(u.phone_number,'') LIKE $${params.length}
+        OR COALESCE(u.display_name,'') ILIKE $${params.length})`);
   }
-  const like = '%' + query.replace(/%/g, '') + '%';
+  if (from) {
+    params.push(from);
+    where.push(`e.created_at >= $${params.length}::date`);
+  }
+  if (to) {
+    params.push(to);
+    where.push(`e.created_at < ($${params.length}::date + INTERVAL '1 day')`);
+  }
+  const wsql = where.length ? ('WHERE ' + where.join(' AND ')) : '';
+  const totalsR = await pool.query(
+    `SELECT COUNT(*)::int AS games,
+            COALESCE(SUM(e.prize),0)::float AS prize,
+            COUNT(*)::int AS cards,
+            COALESCE(SUM(e.paid),0)::float AS volume,
+            COALESCE(SUM(e.paid),0)::float - COALESCE(SUM(e.prize),0)::float AS house,
+            COUNT(DISTINCT e.username)::int AS players
+     FROM instant_entries e
+     LEFT JOIN users u ON LOWER(u.username) = LOWER(e.username)
+     ${wsql}`,
+    params
+  );
+  const listParams = params.concat([lim, off]);
   const r = await pool.query(
     `SELECT e.id, e.username, e.card_number, e.stake, e.paid, e.pattern, e.multiplier,
             e.prize, e.winning_cells, e.created_at, r.drawn_numbers, r.completed_at, r.id AS round_id,
@@ -908,11 +926,23 @@ async function adminSearchHistory({ q, limit = 20, offset = 0 }) {
      FROM instant_entries e
      LEFT JOIN instant_rounds r ON r.id = e.round_id
      LEFT JOIN users u ON LOWER(u.username) = LOWER(e.username)
-     WHERE LOWER(e.username) LIKE LOWER($1)
-        OR COALESCE(u.phone_number,'') LIKE $1
-        OR COALESCE(u.display_name,'') ILIKE $1
-     ORDER BY e.id DESC LIMIT $2 OFFSET $3`, [like, lim, off]);
-  return { rows: mapAdminHistory(r.rows), hasMore: r.rows.length >= lim };
+     ${wsql}
+     ORDER BY e.id DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    listParams
+  );
+  const t = totalsR.rows[0] || {};
+  return {
+    rows: mapAdminHistory(r.rows),
+    hasMore: r.rows.length >= lim,
+    totals: {
+      games: Number(t.games || 0),
+      prize: Number(t.prize || 0),
+      cards: Number(t.cards || 0),
+      volume: Number(t.volume || 0),
+      house: Number(t.house || 0),
+      players: Number(t.players || 0),
+    },
+  };
 }
 
 function mapAdminHistory(rows) {

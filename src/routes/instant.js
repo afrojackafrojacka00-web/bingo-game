@@ -192,8 +192,10 @@ function registerInstantRoutes(app) {
       const q = String(req.query.q || '');
       const limit = Number(req.query.limit) || 20;
       const offset = Number(req.query.offset) || 0;
-      const data = await instant.adminSearchHistory({ q, limit, offset });
-      res.json({ success: true, ...data, q, limit, offset });
+      const from = req.query.from ? String(req.query.from) : null;
+      const to = req.query.to ? String(req.query.to) : null;
+      const data = await instant.adminSearchHistory({ q, limit, offset, from, to });
+      res.json({ success: true, ...data, q, limit, offset, from, to });
     } catch (err) {
       console.error('admin instant history', err);
       res.status(500).json({ success: false, message: 'Server error.' });
