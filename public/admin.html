@@ -7,6 +7,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>tailwind = { config: { corePlugins: { preflight: false } } };</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="modern-admin.css">
+    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
 :root, [data-theme="dark"] {
   --bg: #0b0f14;
@@ -434,28 +438,28 @@ table.data tr:hover td { background: var(--card-hover); }
   </div>
   <nav class="nav">
     <div class="nav-section">Overview</div>
-    <button class="nav-item active" data-panel="dashboard"><span class="icon">📊</span> Dashboard</button>
-    <button class="nav-item" data-panel="users"><span class="icon">👥</span> Users <span class="badge" id="navUserCount" style="display:none">0</span></button>
+    <button class="nav-item active" data-panel="dashboard"><span class="icon" data-lucide="layout-dashboard"></span> Dashboard</button>
+    <button class="nav-item" data-panel="users"><span class="icon" data-lucide="users"></span> Users <span class="badge" id="navUserCount" style="display:none">0</span></button>
     <div class="nav-section">Wallet</div>
-    <button class="nav-item" data-panel="deposits"><span class="icon">💰</span> Deposits <span class="badge" id="navDepCount" style="display:none">0</span></button>
-    <button class="nav-item" data-panel="withdraws"><span class="icon">💸</span> Withdrawals <span class="badge" id="navWdrCount" style="display:none">0</span></button>
-    <button class="nav-item" data-panel="transfers"><span class="icon">🔁</span> Transfers <span class="badge" id="navTrfCount" style="display:none">0</span></button>
-    <button class="nav-item" data-panel="payments"><span class="icon">💳</span> Payment Methods</button>
-    <button class="nav-item" data-panel="autoverify"><span class="icon">🔐</span> Auto-Verify</button>
+    <button class="nav-item" data-panel="deposits"><span class="icon" data-lucide="wallet"></span> Deposits <span class="badge" id="navDepCount" style="display:none">0</span></button>
+    <button class="nav-item" data-panel="withdraws"><span class="icon" data-lucide="banknote-arrow-down"></span> Withdrawals <span class="badge" id="navWdrCount" style="display:none">0</span></button>
+    <button class="nav-item" data-panel="transfers"><span class="icon" data-lucide="arrow-left-right"></span> Transfers <span class="badge" id="navTrfCount" style="display:none">0</span></button>
+    <button class="nav-item" data-panel="payments"><span class="icon" data-lucide="credit-card"></span> Payment Methods</button>
+    <button class="nav-item" data-panel="autoverify"><span class="icon" data-lucide="shield-check"></span> Auto-Verify</button>
     <div class="nav-section">Engagement</div>
-    <button class="nav-item" data-panel="announcements"><span class="icon">📢</span> Announcements</button>
-    <button class="nav-item" data-panel="referrals"><span class="icon">🎁</span> Referrals</button>
-    <button class="nav-item" data-panel="welcomebonus"><span class="icon">🎉</span> Welcome Bonus</button>
+    <button class="nav-item" data-panel="announcements"><span class="icon" data-lucide="megaphone"></span> Announcements</button>
+    <button class="nav-item" data-panel="referrals"><span class="icon" data-lucide="gift"></span> Referrals</button>
+    <button class="nav-item" data-panel="welcomebonus"><span class="icon" data-lucide="party-popper"></span> Welcome Bonus</button>
     <div class="nav-section">Game</div>
-    <button class="nav-item" data-panel="gamesettings"><span class="icon">🎮</span> Game Settings</button>
+    <button class="nav-item" data-panel="gamesettings"><span class="icon" data-lucide="gamepad-2"></span> Game Settings</button>
     <button class="nav-item" data-panel="rake"><span class="icon">🏦</span> House Cut %</button>
     <button class="nav-item" data-panel="gamerooms"><span class="icon">🟢</span> Game Rooms</button>
     <button class="nav-item" data-panel="gamehistory"><span class="icon">📜</span> Game History</button>
-    <button class="nav-item" data-panel="houseprofit"><span class="icon">💰</span> House Profit</button>
+    <button class="nav-item" data-panel="houseprofit"><span class="icon" data-lucide="wallet"></span> House Profit</button>
     <div class="nav-section">Instant Bingo</div>
-    <button class="nav-item" data-panel="instantcontrol"><span class="icon">⚡</span> Instant Control</button>
+    <button class="nav-item" data-panel="instantcontrol"><span class="icon" data-lucide="zap"></span> Instant Control</button>
     <button class="nav-item" data-panel="instanthistory"><span class="icon">📋</span> Instant History</button>
-    <button class="nav-item" data-panel="instantrounds"><span class="icon">🔁</span> Instant Rounds</button>
+    <button class="nav-item" data-panel="instantrounds"><span class="icon" data-lucide="arrow-left-right"></span> Instant Rounds</button>
     <div class="nav-section">Special Event</div>
     <button class="nav-item" data-panel="specialevent"><span class="icon">🏆</span> Special Room</button>
     <button class="nav-item" data-panel="specialhistory"><span class="icon">📋</span> Special History</button>
@@ -3117,5 +3121,11 @@ async function loadInstantRounds(reset) {
 
 </div>
 
+<script>
+  // Presentation-only icon hydration; no admin state or handlers are changed.
+  document.addEventListener('DOMContentLoaded', function () {
+    if (window.lucide) lucide.createIcons({ attrs: { 'stroke-width': 1.8 } });
+  });
+</script>
 </body>
 </html>
