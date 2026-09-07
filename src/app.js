@@ -732,12 +732,26 @@ app.get('/api/admin/admin-users', async (req, res) => {
                    FROM admin_users`;
         const params = [];
         if (req.admin.role === 'admin') {
-            sql += ` WHERE role = 'super_admin'`;
+            sql += ` WHERE role IN ('admin', 'super_admin')`;
         }
         // Boss sees everyone. Super Admin cannot reach this endpoint.
         sql += ` ORDER BY CASE role WHEN 'boss' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, username ASC`;
         const result = await pool.query(sql, params);
-        res.json({ success: true, users: result.rows });
+        let users = result.rows;
+        if (req.admin.role === 'admin') {
+            const bosses = await pool.query(`SELECT username FROM admin_users WHERE role = 'boss'`);
+            const bossNames = new Set(bosses.rows.map(b => String(b.username).toLowerCase()));
+            users = users.map(row => {
+                const creator = row.created_by ? String(row.created_by).toLowerCase() : '';
+                if (row.role === 'boss' || bossNames.has(creator)) {
+                    return { ...row, created_by: row.role === 'boss' ? null : '••••' };
+                }
+                return row;
+            });
+            // Admin list already filters to super_admin only in SQL — but boss can list all.
+            // When admin lists, they only see super_admins from SQL. Allow them to also see admins they created?
+        }
+        res.json({ success: true, users });
     } catch (err) {
         console.error('List admin users error:', err);
         res.status(500).json({ success: false, message: 'Server error.' });
@@ -759,7 +773,9 @@ app.post('/api/admin/admin-users', async (req, res) => {
         if (String(password).length < 6) {
             return res.status(400).json({ success: false, message: 'Password must be at least 6 characters.' });
         }
-        const allowedRoles = req.admin.role === 'boss' ? ['boss', 'admin', 'super_admin'] : ['super_admin'];
+        const allowedRoles = req.admin.role === 'boss'
+            ? ['boss', 'admin', 'super_admin']
+            : (req.admin.role === 'admin' ? ['admin', 'super_admin'] : []);
         if (!allowedRoles.includes(role)) {
             return res.status(403).json({ success: false, message: 'You cannot create this role.' });
         }
@@ -794,9 +810,10 @@ app.put('/api/admin/admin-users/:id', async (req, res) => {
         const target = targetRes.rows[0];
 
         // Permission checks
+        // Admin may create other admins but cannot edit/delete them afterward
         if (req.admin.role === 'admin') {
             if (target.role !== 'super_admin') {
-                return res.status(403).json({ success: false, message: 'Admins can only manage Super Admins.' });
+                return res.status(403).json({ success: false, message: 'Admins can only manage Super Admins (not other Admins or Boss).' });
             }
         }
         if (target.role === 'boss' && req.admin.role !== 'boss') {

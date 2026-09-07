@@ -1361,26 +1361,8 @@ function applyRoleUI() {
 }
 
 async function doLogin() {
-  const username = document.getElementById('loginUser').value.trim();
-  const password = document.getElementById('loginPass').value;
-  if (!username || !password) { alert('Enter username and password'); return; }
-  try {
-    const r = await fetch('/api/admin/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
-    });
-    const data = await r.json();
-    if (!data.success) { alert(data.message || 'Login failed'); return; }
-    currentAdmin = { token: data.token, username: data.username, role: data.role };
-    localStorage.setItem('adminToken', data.token);
-    localStorage.setItem('adminUser', data.username);
-    localStorage.setItem('adminRole', data.role);
-    onLoggedIn();
-    refreshAll();
-  } catch (e) {
-    alert('Login error: ' + e.message);
-  }
+  // Login moved to /admin-login.html
+  window.location.replace('/admin-login.html');
 }
 
 function doLogout() {
@@ -1415,6 +1397,8 @@ function onLoggedIn() {
         localStorage.setItem('adminUser', d.username);
         localStorage.setItem('adminRole', d.role);
         onLoggedIn();
+        // Load dashboard once after session restore
+        setTimeout(function() { if (typeof loadStats === 'function') loadStats(); }, 50);
         return;
       }
     } catch (_) {}
@@ -2621,27 +2605,23 @@ async function adjustBonus(username) {
 }
 
 function refreshAll() {
-  if (!requireSecret()) return;
+  if (!getToken()) return;
   loadStats();
   const active = document.querySelector('.panel.active');
-  if (active) showPanel(active.id.replace('panel-', ''));
+  if (!active) return;
+  const name = active.id.replace('panel-', '');
+  // Reload only the active panel data — do NOT call showPanel (avoids full re-render blink)
+  if (name === 'deposits') { loadDepositRequestStats(); loadDepositRequests(); }
+  else if (name === 'withdraws') { loadWithdrawRequestStats(); loadWithdrawRequests(); }
+  else if (name === 'transfers') loadTransferRequests();
+  else if (name === 'users') loadUsers(usersPage);
+  else if (name === 'adminaccounts') loadAdminUsers();
+  else if (name === 'instanthistory') loadInstantHistory(true);
+  else if (name === 'instantrounds') loadInstantRounds(true);
+  else if (name === 'instantcontrol') loadInstantControl();
 }
-document.getElementById('secret').addEventListener('change', function() {
-  loadStats();
-  loadAutoVerifySettings();
-    loadGameSettings();
-  loadPaymentMethodsAdmin();
-  loadDepositRequests();
-  loadWithdrawRequests();
-  loadTransferRequests();
-  loadReferralSettingsAdmin();
-  loadWelcomeBonusSettings();
-  loadReferralLeaderboard();
-  loadUsers(1);
-});
-document.getElementById('secret').addEventListener('keydown', function(e) {
-  if (e.key === 'Enter') e.target.dispatchEvent(new Event('change'));
-});
+/* secret input removed — login is on /admin-login.html */
+
 
 /* ========== Instant Bingo admin (isolated from classic) ========== */
 let instantHistOffset = 0;
@@ -3303,30 +3283,35 @@ async function loadInstantRounds(reset) {
 
 // ===================== REALTIME ADMIN UPDATES =====================
 let adminSocket = null;
+let _rtDepTimer = null, _rtWdrTimer = null, _rtStatsTimer = null;
+function _debounced(fn, key, ms) {
+  if (key === 'dep') { clearTimeout(_rtDepTimer); _rtDepTimer = setTimeout(fn, ms || 400); }
+  else if (key === 'wdr') { clearTimeout(_rtWdrTimer); _rtWdrTimer = setTimeout(fn, ms || 400); }
+  else if (key === 'stats') { clearTimeout(_rtStatsTimer); _rtStatsTimer = setTimeout(fn, ms || 800); }
+}
+
 function connectAdminSocket() {
   if (typeof io === 'undefined') return;
+  if (adminSocket && adminSocket.connected) return; // already connected — don't reconnect
   if (adminSocket) { try { adminSocket.disconnect(); } catch(_){} }
-  adminSocket = io({ transports: ['websocket', 'polling'] });
+  adminSocket = io({ transports: ['websocket', 'polling'], reconnection: true, reconnectionDelay: 2000 });
   adminSocket.on('connect', function() {
     console.log('[admin] realtime connected');
   });
   adminSocket.on('admin_pending_request', function(payload) {
-    // New deposit or withdraw pending — refresh lists if on those panels
     if (!currentAdmin) return;
     const depPanel = document.getElementById('panel-deposits');
     const wdrPanel = document.getElementById('panel-withdraws');
     if (payload.type === 'deposit' && depPanel && depPanel.classList.contains('active')) {
-      loadDepositRequests();
-      loadDepositRequestStats();
+      _debounced(function() { loadDepositRequests(); loadDepositRequestStats(); }, 'dep');
     }
     if (payload.type === 'withdraw' && wdrPanel && wdrPanel.classList.contains('active')) {
-      loadWithdrawRequests();
-      loadWithdrawRequestStats();
+      _debounced(function() { loadWithdrawRequests(); loadWithdrawRequestStats(); }, 'wdr');
     }
-    // Update nav badges / dashboard if visible
     const dash = document.getElementById('panel-dashboard');
-    if (dash && dash.classList.contains('active')) loadStats();
-    // Toast-like notice
+    if (dash && dash.classList.contains('active')) {
+      _debounced(function() { loadStats(); }, 'stats');
+    }
     showAdminToast(
       (payload.type === 'deposit' ? 'New deposit' : 'New withdraw') +
       ' from ' + (payload.username || '?') +
@@ -3338,12 +3323,10 @@ function connectAdminSocket() {
     const depPanel = document.getElementById('panel-deposits');
     const wdrPanel = document.getElementById('panel-withdraws');
     if (payload.type === 'deposit' && depPanel && depPanel.classList.contains('active')) {
-      loadDepositRequests();
-      loadDepositRequestStats();
+      _debounced(function() { loadDepositRequests(); loadDepositRequestStats(); }, 'dep');
     }
     if (payload.type === 'withdraw' && wdrPanel && wdrPanel.classList.contains('active')) {
-      loadWithdrawRequests();
-      loadWithdrawRequestStats();
+      _debounced(function() { loadWithdrawRequests(); loadWithdrawRequestStats(); }, 'wdr');
     }
   });
 }
@@ -3388,17 +3371,18 @@ async function loadAdminUsers() {
         ? '<span style="color:var(--danger);font-weight:600;">Blocked</span>'
         : '<span style="color:var(--success);">Active</span>';
       const isSelf = currentAdmin && currentAdmin.username === u.username;
+      // Boss can edit anyone (including other bosses). Admin can only edit super_admins (not other admins).
       const canEdit = currentAdmin && (
         (currentAdmin.role === 'boss') ||
         (currentAdmin.role === 'admin' && u.role === 'super_admin')
       );
-      // Boss accounts can never be deleted; non-boss can be deleted by higher roles
-      const canDelete = currentAdmin && u.role !== 'boss' && (
-        (currentAdmin.role === 'boss') ||
+      // Never delete boss. Admin cannot delete other admins — only super_admins.
+      const canDelete = currentAdmin && u.role !== 'boss' && !isSelf && (
+        (currentAdmin.role === 'boss' && u.role !== 'boss') ||
         (currentAdmin.role === 'admin' && u.role === 'super_admin')
       );
-      // Boss can block admin/super_admin; cannot block other bosses (or self handled server-side)
-      const canBlock = currentAdmin && u.role !== 'boss' && (
+      // Same rules for block
+      const canBlock = currentAdmin && u.role !== 'boss' && !isSelf && (
         (currentAdmin.role === 'boss') ||
         (currentAdmin.role === 'admin' && u.role === 'super_admin')
       );
@@ -3430,10 +3414,14 @@ async function loadAdminUsers() {
 
 function openCreateAdminModal() {
   if (!currentAdmin) return;
-  const canCreateAdmin = currentAdmin.role === 'boss';
-  const roleOptions = canCreateAdmin
-    ? '<option value="boss">Boss</option><option value="admin">Admin</option><option value="super_admin">Super Admin</option>'
-    : '<option value="super_admin">Super Admin</option>';
+  let roleOptions = '';
+  if (currentAdmin.role === 'boss') {
+    roleOptions = '<option value="boss">Boss</option><option value="admin">Admin</option><option value="super_admin">Super Admin</option>';
+  } else if (currentAdmin.role === 'admin') {
+    roleOptions = '<option value="admin">Admin</option><option value="super_admin">Super Admin</option>';
+  } else {
+    roleOptions = '<option value="super_admin">Super Admin</option>';
+  }
   const html = `
     <div class="modal-backdrop" id="createAdminModal" style="display:flex;">
       <div class="modal" style="max-width:420px;">
