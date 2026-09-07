@@ -422,6 +422,7 @@ table.data tr:hover td { background: var(--card-hover); }
 .inst-diff-btns button.active{border-color:var(--blue);background:rgba(59,130,246,.18);color:var(--blue);}
 
 </style>
+  <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
 <aside class="sidebar" id="sidebar">
@@ -564,7 +565,7 @@ table.data tr:hover td { background: var(--card-hover); }
               </tr>
             </thead>
             <tbody id="usersBody">
-              <tr><td colspan="13" class="empty">Enter admin secret to load users.</td></tr>
+              <tr><td colspan="13" class="empty">Login to load users.</td></tr>
             </tbody>
           </table>
         </div>
@@ -578,7 +579,9 @@ table.data tr:hover td { background: var(--card-hover); }
           <div class="search-bar">
             <input type="search" id="depQ" placeholder="Username…" style="width:140px;">
             <select id="depStatus" style="width:auto;"><option value="">All status</option><option value="PENDING">Pending</option><option value="APPROVED">Approved</option><option value="REJECTED">Rejected</option></select>
-            <input type="date" id="depFrom"><input type="date" id="depTo">
+            <input type="search" id="depReviewedBy" placeholder="Approved by…" style="width:120px;" title="Filter by who approved/rejected">
+            <input type="date" id="depFrom" title="Created from"><input type="date" id="depTo" title="Created to">
+            <input type="date" id="depReviewedFrom" title="Reviewed from"><input type="date" id="depReviewedTo" title="Reviewed to">
             <select id="depPageSize" title="Rows per page">
               <option value="10" selected>10</option>
               <option value="50">50</option>
@@ -595,7 +598,7 @@ table.data tr:hover td { background: var(--card-hover); }
           <div class="stat-card"><div class="stat-label">Approved this week</div><div class="stat-value green" id="depApprWeek">—</div></div>
           <div class="stat-card"><div class="stat-label">Approved this month</div><div class="stat-value green" id="depApprMonth">—</div></div>
         </div>
-        <div id="depositRequestsList"><div class="empty">Enter admin secret to load.</div></div>
+        <div id="depositRequestsList"><div class="empty">Login to load.</div></div>
         <div class="pagination" id="depPagination"></div>
       </div>
     </section>
@@ -606,7 +609,9 @@ table.data tr:hover td { background: var(--card-hover); }
           <div class="search-bar">
             <input type="search" id="wdrQ" placeholder="Username…" style="width:140px;">
             <select id="wdrStatus" style="width:auto;"><option value="">All status</option><option value="PENDING">Pending</option><option value="APPROVED">Approved</option><option value="REJECTED">Rejected</option></select>
-            <input type="date" id="wdrFrom"><input type="date" id="wdrTo">
+            <input type="search" id="wdrReviewedBy" placeholder="Approved by…" style="width:120px;" title="Filter by who approved/rejected">
+            <input type="date" id="wdrFrom" title="Created from"><input type="date" id="wdrTo" title="Created to">
+            <input type="date" id="wdrReviewedFrom" title="Reviewed from"><input type="date" id="wdrReviewedTo" title="Reviewed to">
             <select id="wdrPageSize" title="Rows per page">
               <option value="10" selected>10</option>
               <option value="50">50</option>
@@ -623,7 +628,7 @@ table.data tr:hover td { background: var(--card-hover); }
           <div class="stat-card"><div class="stat-label">Approved this week</div><div class="stat-value green" id="wdrApprWeek">—</div></div>
           <div class="stat-card"><div class="stat-label">Approved this month</div><div class="stat-value green" id="wdrApprMonth">—</div></div>
         </div>
-        <div id="withdrawRequestsList"><div class="empty">Enter admin secret to load.</div></div>
+        <div id="withdrawRequestsList"><div class="empty">Login to load.</div></div>
         <div class="pagination" id="wdrPagination"></div>
       </div>
     </section>
@@ -639,7 +644,7 @@ table.data tr:hover td { background: var(--card-hover); }
             <button class="btn btn-secondary btn-sm" onclick="loadTransferRequests()">↻</button>
           </div>
         </div>
-        <div id="transferRequestsList"><div class="empty">Enter admin secret to load.</div></div>
+        <div id="transferRequestsList"><div class="empty">Login to load.</div></div>
         <div class="pagination" id="trfPagination"></div>
       </div>
     </section>
@@ -778,7 +783,7 @@ table.data tr:hover td { background: var(--card-hover); }
             <button class="btn btn-secondary btn-sm" onclick="loadReferralLeaderboard()">↻</button>
           </div>
         </div>
-        <div id="referralLeaderboard"><div class="empty">Enter secret to load.</div></div>
+        <div id="referralLeaderboard"><div class="empty">Login to load.</div></div>
         <div class="pagination" id="refPagination"></div>
       </div>
     </section>
@@ -801,7 +806,7 @@ table.data tr:hover td { background: var(--card-hover); }
           <h2><span class="emoji">🟢</span> Live game rooms</h2>
           <button class="btn btn-ghost btn-sm" onclick="loadLiveRoomsOnly()">Refresh</button>
         </div>
-        <div id="liveRoomsList" class="empty">Enter admin key and open this page.</div>
+        <div id="liveRoomsList" class="empty">Open this panel to load rounds.</div>
       </div>
     </section>
 
@@ -960,7 +965,7 @@ table.data tr:hover td { background: var(--card-hover); }
           <button class="btn btn-primary btn-sm" onclick="loadInstantHistory(true)">Search</button>
           <button class="btn btn-ghost btn-sm" onclick="document.getElementById('instantHistQ').value='';loadInstantHistory(true)">Reset</button>
         </div>
-        <div id="instantHistList" class="empty">Enter admin key and search.</div>
+        <div id="instantHistList" class="empty">Open this panel to load history.</div>
         <div class="pagination" id="instantHistPager"></div>
       </div>
     </section>
@@ -974,7 +979,7 @@ table.data tr:hover td { background: var(--card-hover); }
         <div class="toolbar">
           <button class="btn btn-ghost btn-sm" onclick="loadInstantRounds(true)">Refresh</button>
         </div>
-        <div id="instantRoundsList" class="empty">Enter admin key and open this page.</div>
+        <div id="instantRoundsList" class="empty">Open this panel to load rounds.</div>
         <div class="pagination" id="instantRoundsPager"></div>
       </div>
     </section>
@@ -1392,6 +1397,7 @@ function onLoggedIn() {
   const roleLabel = { boss: 'Boss', admin: 'Admin', super_admin: 'Super Admin' }[currentAdmin.role] || currentAdmin.role;
   document.getElementById('loggedAs').textContent = currentAdmin.username + ' (' + roleLabel + ')';
   applyRoleUI();
+  connectAdminSocket();
 }
 
 // Restore session on load — redirect to dedicated login page if not authenticated
@@ -2333,15 +2339,20 @@ async function saveAutoVerifySettings() {
   }
 }
 async function loadDepositRequests(page) {
-  if (!getSecret()) return;
+  if (!getToken()) return;
   if (page) depPage = page;
   const params = new URLSearchParams({ page: String(depPage), limit: String(adminPageSize('depPageSize', 10)) });
   const q = document.getElementById('depQ'); const st = document.getElementById('depStatus');
   const fr = document.getElementById('depFrom'); const to = document.getElementById('depTo');
+  const rb = document.getElementById('depReviewedBy');
+  const rf = document.getElementById('depReviewedFrom'); const rt = document.getElementById('depReviewedTo');
   if (q && q.value.trim()) params.set('q', q.value.trim());
   if (st && st.value) params.set('status', st.value);
   if (fr && fr.value) params.set('from', fr.value);
   if (to && to.value) params.set('to', to.value);
+  if (rb && rb.value.trim()) params.set('reviewedBy', rb.value.trim());
+  if (rf && rf.value) params.set('reviewedFrom', rf.value);
+  if (rt && rt.value) params.set('reviewedTo', rt.value);
   const r = await fetch('/api/admin/deposit-requests?' + params, { headers: adminSecretHeader() });
   const d = await r.json();
   const list = document.getElementById('depositRequestsList');
@@ -2357,7 +2368,7 @@ async function loadDepositRequests(page) {
         '<div class="item-meta">' + esc(x.method) + ' · Amount: <span class="mono">' + (x.amount != null ? fmtMoney(x.amount) : '—') + '</span>' +
         (x.transaction_id ? ' · Txn: <span class="mono">' + esc(x.transaction_id) + '</span>' : '') +
         (x.credited_amount != null ? ' · Credited: ' + fmtMoney(x.credited_amount) : '') +
-        (x.reviewed_by ? ' · By: <strong>' + esc(x.reviewed_by) + '</strong>' + (x.reviewed_by_role && x.reviewed_by_role !== 'hidden' ? ' (' + esc(x.reviewed_by_role) + ')' : '') : '') +
+        (x.reviewed_by ? ' · By: <strong>' + esc(x.reviewed_by) + '</strong>' + (x.reviewed_by_role && x.reviewed_by_role !== 'hidden' ? ' (' + esc(x.reviewed_by_role) + ')' : '') + (x.reviewed_at ? ' @ ' + fmtDate(x.reviewed_at) : '') : '') +
         (x.auto_verify_enabled === false ? ' · <span class="badge badge-muted">auto-verify off</span>' : '') +
         '</div>' +
         (x.verification_note ? '<div style="margin-top:8px;padding:10px 12px;border-radius:8px;font-size:12.5px;line-height:1.45;border:1px solid ' +
@@ -2421,15 +2432,20 @@ async function rejectDeposit(id) {
 }
 
 async function loadWithdrawRequests(page) {
-  if (!getSecret()) return;
+  if (!getToken()) return;
   if (page) wdrPage = page;
   const params = new URLSearchParams({ page: String(wdrPage), limit: String(adminPageSize('wdrPageSize', 10)) });
   const q = document.getElementById('wdrQ'); const st = document.getElementById('wdrStatus');
   const fr = document.getElementById('wdrFrom'); const to = document.getElementById('wdrTo');
+  const rb = document.getElementById('wdrReviewedBy');
+  const rf = document.getElementById('wdrReviewedFrom'); const rt = document.getElementById('wdrReviewedTo');
   if (q && q.value.trim()) params.set('q', q.value.trim());
   if (st && st.value) params.set('status', st.value);
   if (fr && fr.value) params.set('from', fr.value);
   if (to && to.value) params.set('to', to.value);
+  if (rb && rb.value.trim()) params.set('reviewedBy', rb.value.trim());
+  if (rf && rf.value) params.set('reviewedFrom', rf.value);
+  if (rt && rt.value) params.set('reviewedTo', rt.value);
   const r = await fetch('/api/admin/withdraw-requests?' + params, { headers: adminSecretHeader() });
   const d = await r.json();
   const list = document.getElementById('withdrawRequestsList');
@@ -2445,7 +2461,7 @@ async function loadWithdrawRequests(page) {
       ' · To: <span class="mono">' + esc(x.destination) + '</span>' +
       (x.account_owner_name ? ' (' + esc(x.account_owner_name) + ')' : '') + '</div>' +
       '<div class="item-meta">' + fmtDate(x.created_at) +
-      (x.reviewed_by ? ' · By: <strong>' + esc(x.reviewed_by) + '</strong>' + (x.reviewed_by_role && x.reviewed_by_role !== 'hidden' ? ' (' + esc(x.reviewed_by_role) + ')' : '') : '') +
+      (x.reviewed_by ? ' · By: <strong>' + esc(x.reviewed_by) + '</strong>' + (x.reviewed_by_role && x.reviewed_by_role !== 'hidden' ? ' (' + esc(x.reviewed_by_role) + ')' : '') + (x.reviewed_at ? ' @ ' + fmtDate(x.reviewed_at) : '') : '') +
       '</div>' +
       (status === 'pending' ? '<div class="btn-group" style="margin-top:8px;">' +
         '<button class="btn btn-success btn-sm" onclick="approveWithdraw(' + x.id + ')">Approve</button>' +
@@ -3217,7 +3233,7 @@ async function specialResetIdle() {
 
 
 async function loadInstantHistory(reset) {
-  if (!getSecret()) return;
+  if (!getToken()) return;
   if (reset) instantHistOffset = 0;
   const q = (document.getElementById('instantHistQ') || {}).value || '';
   const list = document.getElementById('instantHistList');
@@ -3253,7 +3269,7 @@ async function loadInstantHistory(reset) {
 }
 
 async function loadInstantRounds(reset) {
-  if (!getSecret()) return;
+  if (!getToken()) return;
   if (reset) instantRoundsOffset = 0;
   const list = document.getElementById('instantRoundsList');
   if (reset) list.innerHTML = '<div class="empty">Loading…</div>';
@@ -3284,6 +3300,71 @@ async function loadInstantRounds(reset) {
   }
 }
 
+
+// ===================== REALTIME ADMIN UPDATES =====================
+let adminSocket = null;
+function connectAdminSocket() {
+  if (typeof io === 'undefined') return;
+  if (adminSocket) { try { adminSocket.disconnect(); } catch(_){} }
+  adminSocket = io({ transports: ['websocket', 'polling'] });
+  adminSocket.on('connect', function() {
+    console.log('[admin] realtime connected');
+  });
+  adminSocket.on('admin_pending_request', function(payload) {
+    // New deposit or withdraw pending — refresh lists if on those panels
+    if (!currentAdmin) return;
+    const depPanel = document.getElementById('panel-deposits');
+    const wdrPanel = document.getElementById('panel-withdraws');
+    if (payload.type === 'deposit' && depPanel && depPanel.classList.contains('active')) {
+      loadDepositRequests();
+      loadDepositRequestStats();
+    }
+    if (payload.type === 'withdraw' && wdrPanel && wdrPanel.classList.contains('active')) {
+      loadWithdrawRequests();
+      loadWithdrawRequestStats();
+    }
+    // Update nav badges / dashboard if visible
+    const dash = document.getElementById('panel-dashboard');
+    if (dash && dash.classList.contains('active')) loadStats();
+    // Toast-like notice
+    showAdminToast(
+      (payload.type === 'deposit' ? 'New deposit' : 'New withdraw') +
+      ' from ' + (payload.username || '?') +
+      (payload.amount != null ? ' · ' + Number(payload.amount).toFixed(2) + ' Br' : '')
+    );
+  });
+  adminSocket.on('admin_request_updated', function(payload) {
+    if (!currentAdmin) return;
+    const depPanel = document.getElementById('panel-deposits');
+    const wdrPanel = document.getElementById('panel-withdraws');
+    if (payload.type === 'deposit' && depPanel && depPanel.classList.contains('active')) {
+      loadDepositRequests();
+      loadDepositRequestStats();
+    }
+    if (payload.type === 'withdraw' && wdrPanel && wdrPanel.classList.contains('active')) {
+      loadWithdrawRequests();
+      loadWithdrawRequestStats();
+    }
+  });
+}
+
+function showAdminToast(msg) {
+  let el = document.getElementById('adminToast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'adminToast';
+    el.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;padding:12px 18px;border-radius:10px;background:var(--card);border:1px solid var(--border);color:var(--text);box-shadow:var(--shadow);font-size:13px;max-width:320px;transition:opacity 0.3s;';
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.opacity = '1';
+  clearTimeout(el._t);
+  el._t = setTimeout(function() { el.style.opacity = '0'; }, 4000);
+}
+
+// Connect socket after successful login
+const _origOnLoggedIn = typeof onLoggedIn === 'function' ? onLoggedIn : null;
+// Patch: call connectAdminSocket from onLoggedIn by redefining
 // ===================== ADMIN ACCOUNTS =====================
 async function loadAdminUsers() {
   if (!requireSecret()) return;
@@ -3306,15 +3387,32 @@ async function loadAdminUsers() {
       const status = u.is_blocked
         ? '<span style="color:var(--danger);font-weight:600;">Blocked</span>'
         : '<span style="color:var(--success);">Active</span>';
+      const isSelf = currentAdmin && currentAdmin.username === u.username;
       const canEdit = currentAdmin && (
-        (currentAdmin.role === 'boss' && u.role !== 'boss') ||
+        (currentAdmin.role === 'boss') ||
         (currentAdmin.role === 'admin' && u.role === 'super_admin')
       );
-      const actions = canEdit
-        ? `<button class="btn btn-secondary btn-sm" onclick="editAdminUser(${u.id},'${esc(u.username)}')">Edit</button>
-           <button class="btn btn-sm ${u.is_blocked ? 'btn-primary' : 'btn-danger'}" onclick="toggleBlockAdmin(${u.id},${u.is_blocked})">${u.is_blocked ? 'Unblock' : 'Block'}</button>
-           <button class="btn btn-danger btn-sm" onclick="deleteAdminUser(${u.id},'${esc(u.username)}')">Delete</button>`
-        : (u.role === 'boss' ? '<span class="muted">—</span>' : '');
+      // Boss accounts can never be deleted; non-boss can be deleted by higher roles
+      const canDelete = currentAdmin && u.role !== 'boss' && (
+        (currentAdmin.role === 'boss') ||
+        (currentAdmin.role === 'admin' && u.role === 'super_admin')
+      );
+      // Boss can block admin/super_admin; cannot block other bosses (or self handled server-side)
+      const canBlock = currentAdmin && u.role !== 'boss' && (
+        (currentAdmin.role === 'boss') ||
+        (currentAdmin.role === 'admin' && u.role === 'super_admin')
+      );
+      let actions = '';
+      if (canEdit) {
+        actions += `<button class="btn btn-secondary btn-sm" onclick="editAdminUser(${u.id},'${esc(u.username)}')">Edit</button>`;
+      }
+      if (canBlock) {
+        actions += ` <button class="btn btn-sm ${u.is_blocked ? 'btn-primary' : 'btn-danger'}" onclick="toggleBlockAdmin(${u.id},${!!u.is_blocked})">${u.is_blocked ? 'Unblock' : 'Block'}</button>`;
+      }
+      if (canDelete) {
+        actions += ` <button class="btn btn-danger btn-sm" onclick="deleteAdminUser(${u.id},'${esc(u.username)}')">Delete</button>`;
+      }
+      if (!actions) actions = '<span class="muted">—</span>';
       return `<tr>
         <td>${u.id}</td>
         <td><strong>${esc(u.username)}</strong></td>
@@ -3334,7 +3432,7 @@ function openCreateAdminModal() {
   if (!currentAdmin) return;
   const canCreateAdmin = currentAdmin.role === 'boss';
   const roleOptions = canCreateAdmin
-    ? '<option value="admin">Admin</option><option value="super_admin">Super Admin</option>'
+    ? '<option value="boss">Boss</option><option value="admin">Admin</option><option value="super_admin">Super Admin</option>'
     : '<option value="super_admin">Super Admin</option>';
   const html = `
     <div class="modal-backdrop" id="createAdminModal" style="display:flex;">

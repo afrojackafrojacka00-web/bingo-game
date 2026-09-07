@@ -759,12 +759,9 @@ app.post('/api/admin/admin-users', async (req, res) => {
         if (String(password).length < 6) {
             return res.status(400).json({ success: false, message: 'Password must be at least 6 characters.' });
         }
-        const allowedRoles = req.admin.role === 'boss' ? ['admin', 'super_admin'] : ['super_admin'];
+        const allowedRoles = req.admin.role === 'boss' ? ['boss', 'admin', 'super_admin'] : ['super_admin'];
         if (!allowedRoles.includes(role)) {
             return res.status(403).json({ success: false, message: 'You cannot create this role.' });
-        }
-        if (role === 'boss') {
-            return res.status(403).json({ success: false, message: 'Cannot create another Boss.' });
         }
         const hash = await bcrypt.hash(String(password), 10);
         await pool.query(
@@ -808,6 +805,10 @@ app.put('/api/admin/admin-users/:id', async (req, res) => {
         // Prevent self-block
         if (target.username === req.admin.username && req.body.is_blocked === true) {
             return res.status(400).json({ success: false, message: 'You cannot block yourself.' });
+        }
+        // Boss accounts cannot be blocked
+        if (target.role === 'boss' && req.body.is_blocked === true) {
+            return res.status(400).json({ success: false, message: 'Boss accounts cannot be blocked.' });
         }
 
         const updates = [];
@@ -1516,10 +1517,20 @@ app.post('/api/deposit-request', moneyLimiter, async (req, res) => {
         // still exists in the admin queue instead of silently disappearing.
         const inserted = await pool.query(
             `INSERT INTO deposit_requests(user_id, username, method, submitted_text, amount, transaction_id)
-             VALUES($1,$2,$3,$4,$5,$6) RETURNING id`,
+             VALUES($1,$2,$3,$4,$5,$6) RETURNING id, created_at`,
             [userId, username, method, (submittedText || '').trim().slice(0, 1000) || null, depositAmount, txnId]
         );
         const requestId = inserted.rows[0].id;
+        try {
+            io.emit('admin_pending_request', {
+                type: 'deposit',
+                id: requestId,
+                username,
+                method,
+                amount: depositAmount,
+                created_at: inserted.rows[0].created_at,
+            });
+        } catch (_) {}
 
         // ---- Attempt automatic verification, but never make the person
         // wait more than DEPOSIT_VERIFY_DEADLINE_MS for an answer. CBE/
@@ -1627,6 +1638,19 @@ app.get('/api/admin/deposit-requests', async (req, res) => {
             params.push('%' + String(req.query.q).trim() + '%');
             where.push(`LOWER(dr.username) LIKE LOWER($${params.length})`);
         }
+        if (req.query.reviewedBy && String(req.query.reviewedBy).trim()) {
+            params.push(String(req.query.reviewedBy).trim());
+            where.push(`LOWER(dr.reviewed_by) = LOWER($${params.length})`);
+        }
+        if (req.query.reviewedFrom && /^\d{4}-\d{2}-\d{2}/.test(String(req.query.reviewedFrom))) {
+            params.push(String(req.query.reviewedFrom).trim());
+            where.push(`dr.reviewed_at >= $${params.length}::timestamp`);
+        }
+        if (req.query.reviewedTo && /^\d{4}-\d{2}-\d{2}/.test(String(req.query.reviewedTo))) {
+            const to = String(req.query.reviewedTo).trim();
+            params.push(to.length === 10 ? to + ' 23:59:59.999' : to);
+            where.push(`dr.reviewed_at <= $${params.length}::timestamp`);
+        }
         const wsql = where.length ? 'WHERE ' + where.join(' AND ') : '';
         const countRes = await pool.query(`SELECT COUNT(*)::int AS total FROM deposit_requests dr ${wsql}`, params);
         const total = countRes.rows[0].total;
@@ -1697,6 +1721,9 @@ app.post('/api/admin/deposit-requests/:id/approve', async (req, res) => {
         );
         if (upd.rowCount === 0) throw new Error('Request not found or already reviewed.');
         await client.query('COMMIT');
+        try {
+            io.emit('admin_request_updated', { type: 'deposit', id, status: 'APPROVED' });
+        } catch (_) {}
         res.json({ success: true, balance: Number(userRes.rows[0].balance) });
     } catch (err) {
         await client.query('ROLLBACK');
@@ -1720,6 +1747,7 @@ app.post('/api/admin/deposit-requests/:id/reject', async (req, res) => {
         [id, req.admin.username, req.admin.role]
     );
     if (!result.rowCount) return res.status(400).json({ success: false, message: 'Request not found or already reviewed.' });
+    try { io.emit('admin_request_updated', { type: 'deposit', id, status: 'REJECTED' }); } catch (_) {}
     res.json({ success: true });
 });
 
@@ -1752,11 +1780,22 @@ app.post('/api/withdraw-request', moneyLimiter, async (req, res) => {
             throw new Error(exists.rowCount ? "You don't have enough balance to withdraw that amount." : 'User not found.');
         }
 
-        await client.query(
-            'INSERT INTO withdraw_requests(user_id,username,amount,method,destination,account_owner_name) VALUES($1,$2,$3,$4,$5,$6)',
+        const wIns = await client.query(
+            `INSERT INTO withdraw_requests(user_id,username,amount,method,destination,account_owner_name)
+             VALUES($1,$2,$3,$4,$5,$6) RETURNING id, created_at`,
             [charge.rows[0].id, username, withdrawAmount, method, destination.trim(), method === 'cbe' ? String(accountOwnerName).trim() : null]
         );
         await client.query('COMMIT');
+        try {
+            io.emit('admin_pending_request', {
+                type: 'withdraw',
+                id: wIns.rows[0].id,
+                username,
+                method,
+                amount: withdrawAmount,
+                created_at: wIns.rows[0].created_at,
+            });
+        } catch (_) {}
         res.json({ success: true, message: 'Submitted — your withdrawal is pending review.', balance: Number(charge.rows[0].balance) });
     } catch (err) {
         await client.query('ROLLBACK');
@@ -1791,6 +1830,19 @@ app.get('/api/admin/withdraw-requests', async (req, res) => {
         if (req.query.q) {
             params.push('%' + String(req.query.q).trim() + '%');
             where.push(`LOWER(username) LIKE LOWER($${params.length})`);
+        }
+        if (req.query.reviewedBy && String(req.query.reviewedBy).trim()) {
+            params.push(String(req.query.reviewedBy).trim());
+            where.push(`LOWER(reviewed_by) = LOWER($${params.length})`);
+        }
+        if (req.query.reviewedFrom && /^\d{4}-\d{2}-\d{2}/.test(String(req.query.reviewedFrom))) {
+            params.push(String(req.query.reviewedFrom).trim());
+            where.push(`reviewed_at >= $${params.length}::timestamp`);
+        }
+        if (req.query.reviewedTo && /^\d{4}-\d{2}-\d{2}/.test(String(req.query.reviewedTo))) {
+            const to = String(req.query.reviewedTo).trim();
+            params.push(to.length === 10 ? to + ' 23:59:59.999' : to);
+            where.push(`reviewed_at <= $${params.length}::timestamp`);
         }
         const wsql = where.length ? 'WHERE ' + where.join(' AND ') : '';
         const countRes = await pool.query(`SELECT COUNT(*)::int AS total FROM withdraw_requests ${wsql}`, params);
@@ -1841,6 +1893,7 @@ app.post('/api/admin/withdraw-requests/:id/approve', async (req, res) => {
         );
         if (upd.rowCount === 0) throw new Error('Request not found or already reviewed.');
         await client.query('COMMIT');
+        try { io.emit('admin_request_updated', { type: 'withdraw', id, status: 'APPROVED' }); } catch (_) {}
         res.json({ success: true });
     } catch (err) {
         await client.query('ROLLBACK');
@@ -1878,6 +1931,7 @@ app.post('/api/admin/withdraw-requests/:id/reject', async (req, res) => {
         );
         if (upd.rowCount === 0) throw new Error('Request not found or already reviewed.');
         await client.query('COMMIT');
+        try { io.emit('admin_request_updated', { type: 'withdraw', id, status: 'REJECTED' }); } catch (_) {}
         res.json({ success: true });
     } catch (err) {
         await client.query('ROLLBACK');
