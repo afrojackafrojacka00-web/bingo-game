@@ -16,7 +16,7 @@ const { verifyDeposit } = require('../paymentVerification');
 const config = require('./config');
 const pool = require('./db/pool');
 const { initDB } = require('./db/init');
-const { adminAuth, requireAdmin, timingSafeEqual } = require('./middleware/adminAuth');
+const { adminAuth, requireAdmin, requireRole, timingSafeEqual, createAdminToken, getAdminFromRequest, hasPermission, ROLES } = require('./middleware/adminAuth');
 const { generalLimiter, authLimiter, moneyLimiter } = require('./middleware/rateLimiters');
 const cache = require('./cache/memory');
 
@@ -680,8 +680,210 @@ app.get('/api/referral-info', async (req, res) => {
     }
 });
 
-app.get('/api/admin/referrals', async (req, res) => {
+
+// ===================== MULTI-ROLE ADMIN AUTH & ACCOUNTS =====================
+
+// Login
+app.post('/api/admin/login', authLimiter, async (req, res) => {
+    try {
+        const { username, password } = req.body || {};
+        if (!username || !password) {
+            return res.status(400).json({ success: false, message: 'Username and password required.' });
+        }
+        const result = await pool.query(
+            'SELECT id, username, password_hash, role, is_blocked FROM admin_users WHERE LOWER(username) = LOWER($1)',
+            [String(username).trim()]
+        );
+        if (result.rows.length === 0) {
+            return res.status(401).json({ success: false, message: 'Invalid credentials.' });
+        }
+        const row = result.rows[0];
+        if (row.is_blocked) {
+            return res.status(403).json({ success: false, message: 'Account is blocked.' });
+        }
+        const ok = await bcrypt.compare(String(password), row.password_hash);
+        if (!ok) {
+            return res.status(401).json({ success: false, message: 'Invalid credentials.' });
+        }
+        const token = createAdminToken(row.username, row.role);
+        res.json({
+            success: true,
+            token,
+            username: row.username,
+            role: row.role,
+        });
+    } catch (err) {
+        console.error('Admin login error:', err);
+        res.status(500).json({ success: false, message: 'Server error.' });
+    }
+});
+
+// Who am I
+app.get('/api/admin/me', async (req, res) => {
     if (!requireAdmin(req, res)) return;
+    res.json({ success: true, username: req.admin.username, role: req.admin.role });
+});
+
+// List admin accounts (Boss sees all, Admin sees only super_admin)
+app.get('/api/admin/admin-users', async (req, res) => {
+    if (!requireAdmin(req, res, 'adminaccounts')) return;
+    try {
+        let sql = `SELECT id, username, role, is_blocked, created_by, created_at, updated_at
+                   FROM admin_users`;
+        const params = [];
+        if (req.admin.role === 'admin') {
+            sql += ` WHERE role = 'super_admin'`;
+        }
+        // Boss sees everyone. Super Admin cannot reach this endpoint.
+        sql += ` ORDER BY CASE role WHEN 'boss' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END, username ASC`;
+        const result = await pool.query(sql, params);
+        res.json({ success: true, users: result.rows });
+    } catch (err) {
+        console.error('List admin users error:', err);
+        res.status(500).json({ success: false, message: 'Server error.' });
+    }
+});
+
+// Create admin account
+app.post('/api/admin/admin-users', async (req, res) => {
+    if (!requireAdmin(req, res, 'adminaccounts')) return;
+    try {
+        const { username, password, role } = req.body || {};
+        if (!username || !password || !role) {
+            return res.status(400).json({ success: false, message: 'username, password and role are required.' });
+        }
+        const cleanUser = String(username).trim().toLowerCase();
+        if (cleanUser.length < 3 || cleanUser.length > 50) {
+            return res.status(400).json({ success: false, message: 'Username must be 3-50 characters.' });
+        }
+        if (String(password).length < 6) {
+            return res.status(400).json({ success: false, message: 'Password must be at least 6 characters.' });
+        }
+        const allowedRoles = req.admin.role === 'boss' ? ['admin', 'super_admin'] : ['super_admin'];
+        if (!allowedRoles.includes(role)) {
+            return res.status(403).json({ success: false, message: 'You cannot create this role.' });
+        }
+        if (role === 'boss') {
+            return res.status(403).json({ success: false, message: 'Cannot create another Boss.' });
+        }
+        const hash = await bcrypt.hash(String(password), 10);
+        await pool.query(
+            `INSERT INTO admin_users (username, password_hash, role, created_by)
+             VALUES ($1, $2, $3, $4)`,
+            [cleanUser, hash, role, req.admin.username]
+        );
+        res.json({ success: true, message: 'Account created.' });
+    } catch (err) {
+        if (err.code === '23505') {
+            return res.status(400).json({ success: false, message: 'Username already exists.' });
+        }
+        console.error('Create admin user error:', err);
+        res.status(500).json({ success: false, message: 'Server error.' });
+    }
+});
+
+// Update admin account (username / password / block)
+app.put('/api/admin/admin-users/:id', async (req, res) => {
+    if (!requireAdmin(req, res, 'adminaccounts')) return;
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isFinite(id)) {
+            return res.status(400).json({ success: false, message: 'Invalid id.' });
+        }
+        const targetRes = await pool.query('SELECT * FROM admin_users WHERE id = $1', [id]);
+        if (targetRes.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+        const target = targetRes.rows[0];
+
+        // Permission checks
+        if (req.admin.role === 'admin') {
+            if (target.role !== 'super_admin') {
+                return res.status(403).json({ success: false, message: 'Admins can only manage Super Admins.' });
+            }
+        }
+        if (target.role === 'boss' && req.admin.role !== 'boss') {
+            return res.status(403).json({ success: false, message: 'Cannot modify Boss.' });
+        }
+        // Prevent self-block
+        if (target.username === req.admin.username && req.body.is_blocked === true) {
+            return res.status(400).json({ success: false, message: 'You cannot block yourself.' });
+        }
+
+        const updates = [];
+        const params = [];
+        let idx = 1;
+
+        if (req.body.username !== undefined) {
+            const newUser = String(req.body.username).trim().toLowerCase();
+            if (newUser.length < 3 || newUser.length > 50) {
+                return res.status(400).json({ success: false, message: 'Username must be 3-50 characters.' });
+            }
+            updates.push(`username = $${idx++}`);
+            params.push(newUser);
+        }
+        if (req.body.password !== undefined && String(req.body.password).length > 0) {
+            if (String(req.body.password).length < 6) {
+                return res.status(400).json({ success: false, message: 'Password must be at least 6 characters.' });
+            }
+            const hash = await bcrypt.hash(String(req.body.password), 10);
+            updates.push(`password_hash = $${idx++}`);
+            params.push(hash);
+        }
+        if (req.body.is_blocked !== undefined) {
+            updates.push(`is_blocked = $${idx++}`);
+            params.push(!!req.body.is_blocked);
+        }
+        if (updates.length === 0) {
+            return res.status(400).json({ success: false, message: 'Nothing to update.' });
+        }
+        updates.push(`updated_at = CURRENT_TIMESTAMP`);
+        params.push(id);
+        await pool.query(
+            `UPDATE admin_users SET ${updates.join(', ')} WHERE id = $${idx}`,
+            params
+        );
+        res.json({ success: true, message: 'Account updated.' });
+    } catch (err) {
+        if (err.code === '23505') {
+            return res.status(400).json({ success: false, message: 'Username already exists.' });
+        }
+        console.error('Update admin user error:', err);
+        res.status(500).json({ success: false, message: 'Server error.' });
+    }
+});
+
+// Delete admin account (optional, Boss only for safety, or Admin for super_admin)
+app.delete('/api/admin/admin-users/:id', async (req, res) => {
+    if (!requireAdmin(req, res, 'adminaccounts')) return;
+    try {
+        const id = parseInt(req.params.id, 10);
+        const targetRes = await pool.query('SELECT * FROM admin_users WHERE id = $1', [id]);
+        if (targetRes.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'User not found.' });
+        }
+        const target = targetRes.rows[0];
+        if (target.username === req.admin.username) {
+            return res.status(400).json({ success: false, message: 'You cannot delete yourself.' });
+        }
+        if (target.role === 'boss') {
+            return res.status(403).json({ success: false, message: 'Cannot delete Boss.' });
+        }
+        if (req.admin.role === 'admin' && target.role !== 'super_admin') {
+            return res.status(403).json({ success: false, message: 'Admins can only delete Super Admins.' });
+        }
+        await pool.query('DELETE FROM admin_users WHERE id = $1', [id]);
+        res.json({ success: true, message: 'Account deleted.' });
+    } catch (err) {
+        console.error('Delete admin user error:', err);
+        res.status(500).json({ success: false, message: 'Server error.' });
+    }
+});
+
+// ===================== END MULTI-ROLE ADMIN =====================
+
+app.get('/api/admin/referrals', async (req, res) => {
+    if (!requireAdmin(req, res, 'referrals')) return;
     try {
         const page = Math.max(1, parseInt(req.query.page, 10) || 1);
         const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 10));
@@ -733,7 +935,7 @@ app.get('/api/admin/referrals', async (req, res) => {
 });
 
 app.get('/api/admin/referrals/:username', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'referrals')) return;
     try {
         const result = await pool.query(
             'SELECT username, created_at FROM users WHERE LOWER(referred_by) = LOWER($1) ORDER BY created_at DESC',
@@ -746,7 +948,7 @@ app.get('/api/admin/referrals/:username', async (req, res) => {
 });
 
 app.get('/api/admin/referral-settings', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'referrals')) return;
     const r = await pool.query('SELECT referrals_required, reward_amount FROM referral_settings WHERE id = 1');
     const s = r.rows[0] || { referrals_required: 100, reward_amount: 500 };
     res.json({ success: true, referralsRequired: s.referrals_required, rewardAmount: Number(s.reward_amount) });
@@ -754,7 +956,7 @@ app.get('/api/admin/referral-settings', async (req, res) => {
 
 app.post('/api/admin/referral-settings', async (req, res) => {
     const { adminSecret, referralsRequired, rewardAmount } = req.body;
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'referrals')) return;
     const required = Number(referralsRequired);
     const reward = Number(rewardAmount);
     if (!Number.isInteger(required) || required < 1 || !Number.isFinite(reward) || reward < 0) {
@@ -770,7 +972,7 @@ app.post('/api/admin/referral-settings', async (req, res) => {
 
 // ---------------- WALLET: PAYMENT METHODS (admin-managed) ----------------
 app.get('/api/admin/welcome-bonus-settings', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'welcomebonus')) return;
     try {
         const s = await getWelcomeBonusSettings();
         res.json({ success: true, enabled: s.enabled, amount: s.amount });
@@ -781,7 +983,7 @@ app.get('/api/admin/welcome-bonus-settings', async (req, res) => {
 
 app.post('/api/admin/welcome-bonus-settings', async (req, res) => {
     const { adminSecret, enabled, amount } = req.body;
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'welcomebonus')) return;
     const amt = Number(amount);
     if (!Number.isFinite(amt) || amt < 0) {
         return res.status(400).json({ success: false, message: 'Invalid amount.' });
@@ -820,14 +1022,14 @@ app.get('/api/payment-methods', async (req, res) => {
 });
 
 app.get('/api/admin/payment-methods', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'payments')) return;
     const result = await pool.query('SELECT * FROM payment_methods ORDER BY method, id ASC');
     res.json({ success: true, methods: result.rows });
 });
 
 app.post('/api/admin/payment-methods', async (req, res) => {
     const { adminSecret, method, accountNumber, accountName } = req.body;
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'payments')) return;
     if (!['telebirr', 'cbe'].includes(method) || !accountNumber || !accountName) {
         return res.status(400).json({ success: false, message: 'Missing or invalid fields.' });
     }
@@ -841,7 +1043,7 @@ app.post('/api/admin/payment-methods', async (req, res) => {
 
 app.put('/api/admin/payment-methods/:id', async (req, res) => {
     const { adminSecret, accountNumber, accountName, active } = req.body;
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'payments')) return;
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ success: false, message: 'Invalid id.' });
 
@@ -857,7 +1059,7 @@ app.put('/api/admin/payment-methods/:id', async (req, res) => {
 });
 
 app.delete('/api/admin/payment-methods/:id', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'payments')) return;
     const id = Number(req.params.id);
     if (!Number.isInteger(id)) return res.status(400).json({ success: false, message: 'Invalid id.' });
     await pool.query('DELETE FROM payment_methods WHERE id = $1', [id]);
@@ -891,14 +1093,14 @@ app.get('/api/admin/debug-network', async (req, res) => {
 
 // ---------------- DEPOSIT AUTO-VERIFICATION CONTROLS ----------------
 app.get('/api/admin/deposit-verification-settings', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'autoverify')) return;
     const r = await pool.query('SELECT auto_verify_enabled FROM deposit_verification_settings WHERE id = 1');
     res.json({ success: true, autoVerifyEnabled: r.rows[0] ? r.rows[0].auto_verify_enabled : true });
 });
 
 app.post('/api/admin/deposit-verification-settings', async (req, res) => {
     const { adminSecret, autoVerifyEnabled } = req.body;
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'autoverify')) return;
     await pool.query(
         `INSERT INTO deposit_verification_settings(id, auto_verify_enabled, updated_at) VALUES(1,$1,NOW())
          ON CONFLICT(id) DO UPDATE SET auto_verify_enabled=EXCLUDED.auto_verify_enabled, updated_at=NOW()`,
@@ -909,7 +1111,7 @@ app.post('/api/admin/deposit-verification-settings', async (req, res) => {
 
 app.post('/api/admin/users/:username/auto-verify', async (req, res) => {
     const { adminSecret, enabled } = req.body;
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'users')) return;
     const result = await pool.query(
         'UPDATE users SET auto_verify_enabled = $1 WHERE LOWER(username) = LOWER($2) RETURNING username, auto_verify_enabled',
         [!!enabled, req.params.username]
@@ -1001,7 +1203,7 @@ app.get('/api/admin/stats', async (req, res) => {
 });
 
 app.get('/api/admin/users', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'users')) return;
     try {
         const q = (req.query.q || '').toString().trim();
         const page = Math.max(1, parseInt(req.query.page, 10) || 1);
@@ -1082,7 +1284,7 @@ app.get('/api/admin/users', async (req, res) => {
 });
 
 app.get('/api/admin/users/:username', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'users')) return;
     try {
         const result = await pool.query(
             `SELECT
@@ -1137,7 +1339,7 @@ app.get('/api/admin/users/:username', async (req, res) => {
 
 app.post('/api/admin/adjust-balance', async (req, res) => {
     const { adminSecret, username, amount } = req.body;
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'users')) return;
     const delta = Number(amount);
     if (!username || !Number.isFinite(delta) || delta === 0) {
         return res.status(400).json({ success: false, message: 'Invalid request.' });
@@ -1836,7 +2038,7 @@ app.get('/api/my-pending-requests', async (req, res) => {
 
 app.post('/api/admin/adjust-bonus', async (req, res) => {
     const { adminSecret, username, amount } = req.body;
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'users')) return;
     const delta = Number(amount);
     if (!username || !Number.isFinite(delta) || delta === 0) {
         return res.status(400).json({ success: false, message: 'Invalid request.' });
@@ -2204,9 +2406,7 @@ const upload = multer({ storage });
 app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) => {
     const { message, imageUrl, adminSecret, destination } = req.body;
 
-    if (!config.adminSecret || !adminSecret || !timingSafeEqual(adminSecret, config.adminSecret)) {
-        return res.status(403).json({ success: false, message: 'Unauthorized key.' });
-    }
+    if (!requireAdmin(req, res, 'announcements')) return;
 
     try {
         let finalImageUrl = imageUrl || null;
@@ -2267,7 +2467,7 @@ app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) =>
 // 2. Get All Posts for Admin Dashboard
 app.get('/api/admin/notifications', async (req, res) => {
     const adminSecret = req.headers['x-admin-secret'];
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'announcements')) return;
     try {
         const page = Math.max(1, parseInt(req.query.page, 10) || 1);
         const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 10));
@@ -2301,7 +2501,7 @@ app.put('/api/admin/notifications/:id', async (req, res) => {
     const { id } = req.params;
     const { message, imageUrl, adminSecret } = req.body;
 
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'announcements')) return;
 
     try {
         await pool.query(
@@ -2319,7 +2519,7 @@ app.delete('/api/admin/notifications/:id', async (req, res) => {
     const { id } = req.params;
     const adminSecret = req.headers['x-admin-secret'];
 
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'announcements')) return;
 
     try {
         // Fetch image URL before deleting

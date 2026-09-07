@@ -288,6 +288,37 @@ await pool.query('ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS prize_pool 
                 );
             }
         }
+        // --------------- Multi-role Admin Users ---------------
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_users (
+                id SERIAL PRIMARY KEY,
+                username VARCHAR(50) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                role VARCHAR(20) NOT NULL CHECK (role IN ('boss', 'admin', 'super_admin')),
+                is_blocked BOOLEAN NOT NULL DEFAULT FALSE,
+                created_by VARCHAR(50),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_admin_users_role ON admin_users(role);
+            CREATE INDEX IF NOT EXISTS idx_admin_users_username_lower ON admin_users(LOWER(username));
+        `);
+
+        // Seed default Boss if no admin users exist yet
+        const adminCount = await pool.query('SELECT COUNT(*) FROM admin_users');
+        if (Number(adminCount.rows[0].count) === 0) {
+            const bcrypt = require('bcryptjs');
+            const defaultPass = process.env.BOSS_DEFAULT_PASSWORD || 'boss123';
+            const hash = await bcrypt.hash(defaultPass, 10);
+            await pool.query(
+                `INSERT INTO admin_users (username, password_hash, role, created_by)
+                 VALUES ($1, $2, 'boss', 'system')
+                 ON CONFLICT (username) DO NOTHING`,
+                ['boss', hash]
+            );
+            console.log('Seeded default Boss account: username=boss  (change password after first login)');
+        }
+
         console.log("Database initialized cleanly with indexes.");
     } catch (err) {
         console.error("Database initialization error:", err);

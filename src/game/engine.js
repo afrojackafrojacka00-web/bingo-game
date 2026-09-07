@@ -644,7 +644,7 @@ setInterval(async () => {
 
 // ---------------- ROOM RAKE (HOUSE CUT) ----------------
 app.get('/api/admin/rake-settings', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'rake')) return;
     try {
         const r = await pool.query('SELECT stake, cut_percent, updated_at FROM room_rake_settings ORDER BY stake ASC');
         res.json({
@@ -662,7 +662,7 @@ app.get('/api/admin/rake-settings', async (req, res) => {
 
 app.post('/api/admin/rake-settings', async (req, res) => {
     const { adminSecret, settings } = req.body || {};
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'rake')) return;
     if (!Array.isArray(settings) || !settings.length) {
         return res.status(400).json({ success: false, message: 'settings array required.' });
     }
@@ -1081,8 +1081,8 @@ app.get('/api/admin/games', async (req, res) => {
     }
 });
 
-app.get('/api/admin/game-settings', async (req,res)=>{ if (!requireAdmin(req, res)) return; const r=await pool.query('SELECT winning_pattern,draw_interval_seconds FROM bingo_game_settings WHERE id=1'); const s=r.rows[0]||{winning_pattern:DEFAULT_GAME_PATTERN,draw_interval_seconds:DEFAULT_DRAW_INTERVAL_SECONDS}; res.json({success:true,winningPattern:s.winning_pattern,drawIntervalSeconds:s.draw_interval_seconds,patterns:PATTERN_NAMES}); });
-app.post('/api/admin/game-settings', async (req,res)=>{ const {adminSecret,winningPattern,drawIntervalSeconds}=req.body; if (!requireAdmin(req, res)) return; if(!PATTERN_NAMES[winningPattern])return res.status(400).json({success:false,message:'Invalid pattern.'}); const seconds=Number(drawIntervalSeconds); if(!Number.isInteger(seconds)||seconds<1||seconds>60)return res.status(400).json({success:false,message:'Interval must be 1-60 seconds.'}); await pool.query(`INSERT INTO bingo_game_settings(id,winning_pattern,draw_interval_seconds,updated_at) VALUES(1,$1,$2,NOW()) ON CONFLICT(id) DO UPDATE SET winning_pattern=EXCLUDED.winning_pattern,draw_interval_seconds=EXCLUDED.draw_interval_seconds,updated_at=NOW()`,[winningPattern,seconds]); res.json({success:true,winningPattern,drawIntervalSeconds:seconds}); });
+app.get('/api/admin/game-settings', async (req,res)=>{ if (!requireAdmin(req, res, 'gamesettings')) return; const r=await pool.query('SELECT winning_pattern,draw_interval_seconds FROM bingo_game_settings WHERE id=1'); const s=r.rows[0]||{winning_pattern:DEFAULT_GAME_PATTERN,draw_interval_seconds:DEFAULT_DRAW_INTERVAL_SECONDS}; res.json({success:true,winningPattern:s.winning_pattern,drawIntervalSeconds:s.draw_interval_seconds,patterns:PATTERN_NAMES}); });
+app.post('/api/admin/game-settings', async (req,res)=>{ const {adminSecret,winningPattern,drawIntervalSeconds}=req.body; if (!requireAdmin(req, res, 'gamesettings')) return; if(!PATTERN_NAMES[winningPattern])return res.status(400).json({success:false,message:'Invalid pattern.'}); const seconds=Number(drawIntervalSeconds); if(!Number.isInteger(seconds)||seconds<1||seconds>60)return res.status(400).json({success:false,message:'Interval must be 1-60 seconds.'}); await pool.query(`INSERT INTO bingo_game_settings(id,winning_pattern,draw_interval_seconds,updated_at) VALUES(1,$1,$2,NOW()) ON CONFLICT(id) DO UPDATE SET winning_pattern=EXCLUDED.winning_pattern,draw_interval_seconds=EXCLUDED.draw_interval_seconds,updated_at=NOW()`,[winningPattern,seconds]); res.json({success:true,winningPattern,drawIntervalSeconds:seconds}); });
 app.get('/api/game-state', async (req,res)=>{ const stake=Number(req.query.stake), username=String(req.query.username||''); const room=gameRooms.get(stake); if(!room||!username||!room.readyPlayers.has(username))return res.status(403).json({success:false,ended:true,message:'This game has ended.'}); const cards=[]; for(const cardNumber of Array.from(userCards(room,username))) { const grid=await getCardGrid(cardNumber); if(grid)cards.push({cardNumber,grid,locked:room.claimLockedCards.has(cardNumber)}); } res.json({success:true,room:{...roomSnapshot(room),drawn:Array.from(room.drawn),lastNumber:room.lastNumber,patternName:PATTERN_NAMES[room.winningPattern]||room.winningPattern},cards,winnerPayload:room.winnerPayload||null}); });
 
 io.on('connection', socket => {

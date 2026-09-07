@@ -34,31 +34,6 @@ function near(g){const out=new Set(),type=room.winningPattern;if(type==='any_two
 function letter(n){return n<=15?'B':n<=30?'I':n<=45?'N':n<=60?'G':'O'}
 function toast(t){const e=document.getElementById('toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),3500)}
 
-function openViewAllCalls(){
-  const overlay=document.getElementById('viewAllCallsOverlay');
-  const list=document.getElementById('allCallsList');
-  const countEl=document.getElementById('allCallsCount');
-  if(!overlay||!list)return;
-  const order=Array.from(drawn);
-  const last=room.lastNumber;
-  list.innerHTML=order.length
-    ? order.map(n=>{
-        const isLast=Number(n)===Number(last);
-        const cls=isLast?'call-ball last':'call-ball called';
-        return `<div class="${cls}">${letter(n)}${n}</div>`;
-      }).join('')
-    : '<p class="text-muted text-sm col-span-5 text-center">No numbers called yet.</p>';
-  if(countEl) countEl.textContent = `${order.length} / 75 numbers called`;
-  overlay.classList.add('show');
-  overlay.classList.remove('hidden');
-}
-function closeViewAllCalls(){
-  const overlay=document.getElementById('viewAllCallsOverlay');
-  if(overlay){overlay.classList.remove('show');overlay.classList.add('hidden');}
-}
-window.openViewAllCalls=openViewAllCalls;
-window.closeViewAllCalls=closeViewAllCalls;
-
 // Telegram's in-app browser blocks/misbehaves with native confirm() popups in
 // many client versions, so a Leave button gated behind window.confirm() can
 // silently do nothing when tapped from inside Telegram. But the
@@ -134,69 +109,18 @@ async function state(){
     if(d.winnerPayload){ended=true;showWinner(d.winnerPayload)}
   }catch{}
 }
-function header(){
-  patternName.textContent=room.patternName||'Any One Line';
-  // players count (people icon already in HTML)
-  if(playersPlaying){
-    playersPlaying.textContent = String(room.playersPlaying || room.totalCards || 0);
-    playersPlaying.style.display = '';
-  }
-  calledCount.textContent=`${drawn.size} / 75`;
-  lastNumber.textContent=room.lastNumber?`${letter(room.lastNumber)} ${room.lastNumber}`:'--';
-  prizePool.textContent=Number(room.prizePool||0).toFixed(2);
-  // special mode shine
-  document.body.classList.toggle('is-special', !!isSpecial);
-  renderLastCalled();
-}
+function header(){patternName.textContent=room.patternName||'Any One Line';playersPlaying.textContent=isSpecial?'':(t('playersLabel','Players')+' | '+(room.totalCards||0));if(isSpecial&&playersPlaying){playersPlaying.style.display='none'}else if(playersPlaying){playersPlaying.style.display='';}calledCount.textContent=`${drawn.size} / 75`;lastNumber.textContent=room.lastNumber?`${letter(room.lastNumber)} ${room.lastNumber}`:'--';prizePool.textContent=Number(room.prizePool||0).toFixed(2);renderLastCalled()}
 function renderLastCalled(){
-  const el=document.getElementById('lastCalledBalls');
-  if(!el)return;
-  const order=Array.from(drawn).slice(-5);
-  const last = room.lastNumber || (order.length ? order[order.length-1] : null);
-  el.innerHTML=order.length
-    ? order.map(n=>{
-        const isLast = Number(n) === Number(last);
-        const cls = isLast ? 'last-red' : 'called-green';
-        return `<span class="${cls}">${letter(n)}${n}</span>`;
-      }).join('')
-    : '<span class="empty">--</span>';
+    const el=document.getElementById('lastCalledBalls');
+    if(!el)return;
+    // `drawn` is built from the server's Set in draw order, so the array's
+    // insertion order already matches the order numbers were called.
+    const order=Array.from(drawn).slice(-5);
+    el.innerHTML=order.length?order.map(n=>`<span>${letter(n)}${n}</span>`).join(''):'<span class="empty">--</span>';
 }
-function board(){
-  const last = room.lastNumber;
-  let h='';
-  for(let r=1;r<=15;r++){
-    for(let c=0;c<5;c++){
-      const n=r+c*15;
-      const isCalled = drawn.has(n);
-      const isLast = Number(n) === Number(last);
-      let cls = 'ball';
-      if(isLast) cls += ' last-called';
-      else if(isCalled) cls += ' called';
-      h+=`<div class="${cls}">${n}</div>`;
-    }
-  }
-  numberBoard.innerHTML=h;
-}
-function render(){
-  board();
-  cardsEl.innerHTML=cards.map(card).join('')||'<p class="text-muted text-sm p-2">No cards found.</p>';
-  // show more-cards hint when >3 cards
-  const hint = document.getElementById('moreCardsHint');
-  if(hint){
-    if(cards.length > 3){
-      hint.classList.remove('hidden');
-      hint.textContent = `${cards.length} cards · swipe →`;
-    } else {
-      hint.classList.add('hidden');
-    }
-  }
-}
-function card(c){
-  const close=showBlink?near(c.grid):new Set(),marks=manualMarks.get(c.cardNumber)||new Set();
-  const modeText = locked.has(c.cardNumber) ? t('locked','LOCKED') : (autoMark ? t('auto','AUTO') : t('manual','MANUAL'));
-  const modeCls = locked.has(c.cardNumber) ? '' : (autoMark ? '' : 'manual');
-  return `<article class="bingo"><div class="ct"><b>CARD #${c.cardNumber}</b><span class="mode-badge ${modeCls}">${modeText}</span></div><table><thead><tr><th>B</th><th>I</th><th>N</th><th>G</th><th>O</th></tr></thead><tbody>${c.grid.map((row,r)=>'<tr>'+row.map((v,col)=>{const free=v==='FREE'||(r===2&&col===2),n=Number(v),called=drawn.has(n),marked=free||(autoMark&&called)||(!autoMark&&marks.has(n)),bl=!called&&close.has(`${r},${col}`);return `<td class="${free?'free ':''}${marked?'marked ':''}${bl?'blink ':''}" data-card="${c.cardNumber}" data-number="${free?'':n}" onclick="manualMark(${c.cardNumber},${n||0})" ${marked && !free ? `style="background:${getHighlightColor()};color:#fff;border-color:${getHighlightColor()};"` : ''}>${free?'FREE':v}</td>`}).join('')+'</tr>').join('')}</tbody></table><button ${ended||locked.has(c.cardNumber)?'disabled':''} onclick="claim(${c.cardNumber})">${locked.has(c.cardNumber)?'CARD '+t('locked','LOCKED')+'':t('claimBingo','BINGO')}</button></article>`;
-}
+function board(){let h='<div class="board-head">B</div><div class="board-head">I</div><div class="board-head">N</div><div class="board-head">G</div><div class="board-head">O</div>';for(let r=1;r<=15;r++)for(let c=0;c<5;c++){const n=r+c*15;h+=`<div class="ball ${drawn.has(n)?'called':''}">${n}</div>`}numberBoard.innerHTML=h}
+function render(){board();cardsEl.innerHTML=cards.map(card).join('')||'<p>No cards found.</p>'}
+function card(c){const close=showBlink?near(c.grid):new Set(),marks=manualMarks.get(c.cardNumber)||new Set();return `<article class="bingo"><div class="ct"><b>CARD #${c.cardNumber}</b><small>${locked.has(c.cardNumber)?t('locked','LOCKED'):(autoMark?t('auto','AUTO'):t('manual','MANUAL'))}</small></div><table><thead><tr><th>B</th><th>I</th><th>N</th><th>G</th><th>O</th></tr></thead><tbody>${c.grid.map((row,r)=>'<tr>'+row.map((v,col)=>{const free=v==='FREE'||(r===2&&col===2),n=Number(v),called=drawn.has(n),marked=free||(autoMark&&called)||(!autoMark&&marks.has(n)),bl=!called&&close.has(`${r},${col}`);return `<td class="${free?'free ':''}${marked?'marked ':''}${bl?'blink ':''}" data-card="${c.cardNumber}" data-number="${free?'':n}" onclick="manualMark(${c.cardNumber},${n||0})" ${marked && !free ? `style="background:${getHighlightColor()};color:#fff;border-color:${getHighlightColor()};"` : ''}>${free?'FREE':v}</td>`}).join('')+'</tr>').join('')}</tbody></table><button ${ended||locked.has(c.cardNumber)?'disabled':''} onclick="claim(${c.cardNumber})">${locked.has(c.cardNumber)?'CARD '+t('locked','LOCKED')+'':t('claimBingo','BINGO')}</button></article>`}
 
 // Manual mode: let the player mark ANY cell on their card, not only ones
 // that have actually been called. This is purely a visual aid — the server

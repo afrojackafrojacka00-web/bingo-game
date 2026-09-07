@@ -101,7 +101,7 @@ function registerSpecialRoutes(app) {
   });
 
   app.get('/api/admin/special', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'specialevent')) return;
     try {
       res.json({ success: true, ...(await special.adminGet()) });
     } catch (err) {
@@ -111,7 +111,7 @@ function registerSpecialRoutes(app) {
   });
 
   app.post('/api/admin/special', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'specialevent')) return;
     try {
       const data = await special.adminUpdate(req.body || {});
       res.json({ success: true, ...data });
@@ -122,7 +122,7 @@ function registerSpecialRoutes(app) {
   });
 
   app.get('/api/admin/special/history', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'specialhistory')) return;
     try {
       const limit = Math.min(Number(req.query.limit) || 50, 300);
       const from = req.query.from ? String(req.query.from) : null;
@@ -152,7 +152,7 @@ function registerSpecialRoutes(app) {
   });
 
   app.get('/api/admin/special/session/:id', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'specialhistory')) return;
     try {
       const id = Number(req.params.id);
       const s = await pool.query(`SELECT * FROM special_event_sessions WHERE id=$1`, [id]);
@@ -186,7 +186,7 @@ function registerSpecialRoutes(app) {
   try { fs.mkdirSync(uploadsDir, { recursive: true }); } catch (_) {}
 
   app.get('/api/admin/special/uploads', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'specialevent')) return;
     try {
       const files = fs.readdirSync(uploadsDir)
         .filter((f) => /\.(jpe?g|png|webp|gif)$/i.test(f))
@@ -220,7 +220,7 @@ function registerSpecialRoutes(app) {
     });
 
     app.post('/api/admin/special/uploads', (req, res) => {
-      if (!requireAdmin(req, res)) return;
+      if (!requireAdmin(req, res, 'specialevent')) return;
       specialUpload.single('image')(req, res, async (err) => {
         if (err) return res.status(400).json({ success: false, message: err.message });
         if (!req.file) return res.status(400).json({ success: false, message: 'No file' });
@@ -233,13 +233,13 @@ function registerSpecialRoutes(app) {
     });
   } else {
     app.post('/api/admin/special/uploads', (req, res) => {
-      if (!requireAdmin(req, res)) return;
+      if (!requireAdmin(req, res, 'specialevent')) return;
       res.status(500).json({ success: false, message: 'Upload not available (multer missing).' });
     });
   }
 
   app.delete('/api/admin/special/uploads/:name', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'specialevent')) return;
     try {
       const name = path.basename(String(req.params.name || ''));
       if (!name || name.startsWith('.')) return res.status(400).json({ success: false, message: 'Invalid name' });
@@ -253,7 +253,7 @@ function registerSpecialRoutes(app) {
   });
 
   app.post('/api/admin/special/notify-test', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'specialevent')) return;
     try {
       const kind = req.body && req.body.kind === 'joining' ? 'joining' : 'countdown';
       const result = await special.notifySpecialEvent(kind, { force: true });

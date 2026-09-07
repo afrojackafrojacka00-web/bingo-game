@@ -459,15 +459,22 @@ table.data tr:hover td { background: var(--card-hover); }
     <div class="nav-section">Special Event</div>
     <button class="nav-item" data-panel="specialevent"><span class="icon">🏆</span> Special Room</button>
     <button class="nav-item" data-panel="specialhistory"><span class="icon">📋</span> Special History</button>
+    <div class="nav-section">System</div>
+    <button class="nav-item" data-panel="adminaccounts"><span class="icon">🛡️</span> Admin Accounts</button>
   </nav>
 </aside>
 <div class="main">
   <header class="topbar">
     <button class="mobile-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')" aria-label="Menu">☰</button>
     <div class="topbar-title" id="pageTitle">Dashboard</div>
-    <div class="secret-wrap">
-      <label>Admin key</label>
-      <input type="password" id="secret" placeholder="ADMIN_SECRET" autocomplete="off">
+    <div id="loginArea" class="secret-wrap" style="gap:8px;align-items:center;">
+      <input type="text" id="loginUser" placeholder="Username" autocomplete="username" style="width:120px;">
+      <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password" style="width:120px;">
+      <button class="btn btn-primary btn-sm" id="loginBtn" onclick="doLogin()">Login</button>
+    </div>
+    <div id="userArea" class="secret-wrap" style="display:none;gap:10px;align-items:center;">
+      <span id="loggedAs" style="font-size:13px;color:var(--muted);"></span>
+      <button class="btn btn-secondary btn-sm" onclick="doLogout()">Logout</button>
     </div>
     <button class="btn-icon" id="themeToggle" title="Toggle theme">🌙</button>
     <button class="btn btn-secondary btn-sm" onclick="refreshAll()">Refresh</button>
@@ -1144,6 +1151,35 @@ table.data tr:hover td { background: var(--card-hover); }
           <div id="spHistoryDetail" style="margin-top:12px;"></div>
       </div>
     </section>
+
+    <section class="panel" id="panel-adminaccounts">
+      <div class="card">
+        <div class="card-header">
+          <h2><span class="emoji">🛡️</span> Admin Accounts</h2>
+          <button class="btn btn-primary btn-sm" onclick="openCreateAdminModal()">+ Create Account</button>
+        </div>
+        <p class="muted" style="margin-bottom:12px;font-size:13px;">
+          Boss can create Admin and Super Admin. Admin can create Super Admin only.
+        </p>
+        <table class="data" id="adminUsersTable">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Username</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>Created By</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="adminUsersBody">
+            <tr><td colspan="7" class="empty">Login to load accounts.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
 <section class="panel" id="panel-houseprofit">
       <div class="card">
         <div class="card-header"><h2><span class="emoji">💰</span> House profit</h2></div>
@@ -1260,16 +1296,148 @@ const TITLES = {
   instanthistory: '⚡ Instant History',
   instantrounds: '⚡ Instant Rounds',
   specialevent: '🏆 Special Room',
-  specialhistory: '📋 Special History'
+  specialhistory: '📋 Special History',
+  adminaccounts: 'Admin Accounts'
 };
+
+// Role → allowed panels (must match backend ROLE_PERMISSIONS)
+const ROLE_PERMS = {
+  boss: ['*'],
+  admin: [
+    'dashboard','deposits','withdraws','transfers',
+    'announcements','referrals',
+    'gamerooms','gamehistory','houseprofit',
+    'instanthistory','instantrounds',
+    'specialevent','specialhistory',
+    'adminaccounts'
+  ],
+  super_admin: [
+    'dashboard','deposits','withdraws','transfers',
+    'gamerooms','gamehistory','houseprofit',
+    'instanthistory','instantrounds',
+    'specialhistory'
+  ]
+};
+
 let usersPage = 1;
 let usersLimit = 10;
-function adminSecretHeader() { return { 'x-admin-secret': document.getElementById('secret').value }; }
-function getSecret() { return document.getElementById('secret').value; }
+let currentAdmin = null; // { token, username, role }
+
+function getToken() {
+  return (currentAdmin && currentAdmin.token) || localStorage.getItem('adminToken') || '';
+}
+function adminSecretHeader() {
+  const t = getToken();
+  return t ? { 'x-admin-token': t } : {};
+}
+function getSecret() { return getToken(); } // legacy name used in many places
 function requireSecret() {
-  if (!getSecret()) { alert('Please enter your Admin Secret key in the top bar.'); return false; }
+  if (!getToken()) { alert('Please login first.'); return false; }
   return true;
 }
+
+function hasPerm(panel) {
+  if (!currentAdmin) return false;
+  const perms = ROLE_PERMS[currentAdmin.role] || [];
+  if (perms.includes('*')) return true;
+  return perms.includes(panel);
+}
+
+function applyRoleUI() {
+  document.querySelectorAll('.nav-item[data-panel]').forEach(btn => {
+    const panel = btn.getAttribute('data-panel');
+    btn.style.display = hasPerm(panel) ? '' : 'none';
+  });
+  // Hide empty nav-sections
+  document.querySelectorAll('.nav-section').forEach(sec => {
+    let el = sec.nextElementSibling;
+    let any = false;
+    while (el && !el.classList.contains('nav-section')) {
+      if (el.classList.contains('nav-item') && el.style.display !== 'none') any = true;
+      el = el.nextElementSibling;
+    }
+    sec.style.display = any ? '' : 'none';
+  });
+}
+
+async function doLogin() {
+  const username = document.getElementById('loginUser').value.trim();
+  const password = document.getElementById('loginPass').value;
+  if (!username || !password) { alert('Enter username and password'); return; }
+  try {
+    const r = await fetch('/api/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await r.json();
+    if (!data.success) { alert(data.message || 'Login failed'); return; }
+    currentAdmin = { token: data.token, username: data.username, role: data.role };
+    localStorage.setItem('adminToken', data.token);
+    localStorage.setItem('adminUser', data.username);
+    localStorage.setItem('adminRole', data.role);
+    onLoggedIn();
+    refreshAll();
+  } catch (e) {
+    alert('Login error: ' + e.message);
+  }
+}
+
+function doLogout() {
+  currentAdmin = null;
+  localStorage.removeItem('adminToken');
+  localStorage.removeItem('adminUser');
+  localStorage.removeItem('adminRole');
+  document.getElementById('loginArea').style.display = '';
+  document.getElementById('userArea').style.display = 'none';
+  document.getElementById('loginPass').value = '';
+  applyRoleUI();
+  // clear panels
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  const dash = document.getElementById('panel-dashboard');
+  if (dash) dash.classList.add('active');
+}
+
+function onLoggedIn() {
+  document.getElementById('loginArea').style.display = 'none';
+  document.getElementById('userArea').style.display = 'flex';
+  const roleLabel = { boss: 'Boss', admin: 'Admin', super_admin: 'Super Admin' }[currentAdmin.role] || currentAdmin.role;
+  document.getElementById('loggedAs').textContent = currentAdmin.username + ' (' + roleLabel + ')';
+  applyRoleUI();
+}
+
+// Restore session on load
+(async function restoreSession() {
+  const token = localStorage.getItem('adminToken');
+  const username = localStorage.getItem('adminUser');
+  const role = localStorage.getItem('adminRole');
+  if (token && username && role) {
+    currentAdmin = { token, username, role };
+    // Validate token still works
+    try {
+      const r = await fetch('/api/admin/me', { headers: { 'x-admin-token': token } });
+      const d = await r.json();
+      if (d.success) {
+        currentAdmin = { token, username: d.username, role: d.role };
+        localStorage.setItem('adminUser', d.username);
+        localStorage.setItem('adminRole', d.role);
+        onLoggedIn();
+        return;
+      }
+    } catch (_) {}
+    // Token invalid
+    doLogout();
+  } else {
+    applyRoleUI(); // hide everything until login
+  }
+})();
+
+// Enter key on password
+document.addEventListener('DOMContentLoaded', () => {
+  const pass = document.getElementById('loginPass');
+  if (pass) pass.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+});
+
 function fmtMoney(n) { return Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtDate(d) { if (!d) return '—'; try { return new Date(d).toLocaleString(); } catch { return String(d); } }
 function esc(s) {
@@ -1381,6 +1549,10 @@ if (_adjModal) _adjModal.addEventListener('click', function(e) {
 let depPage = 1, wdrPage = 1, trfPage = 1, postsPage = 1, refPage = 1, postsVisible = false;
 
 function showPanel(name) {
+  if (currentAdmin && !hasPerm(name)) {
+    alert('You do not have permission to view this section.');
+    return;
+  }
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   const panel = document.getElementById('panel-' + name);
@@ -1389,7 +1561,7 @@ function showPanel(name) {
   if (nav) nav.classList.add('active');
   document.getElementById('pageTitle').textContent = TITLES[name] || name;
   document.getElementById('sidebar').classList.remove('open');
-  if (getSecret()) {
+  if (getToken()) {
     if (name === 'dashboard') loadStats();
     if (name === 'users') loadUsers(usersPage);
     if (name === 'transfers') loadTransferRequests();
@@ -1410,6 +1582,7 @@ function showPanel(name) {
     if (name === 'instantrounds') loadInstantRounds(true);
     if (name === 'specialevent') loadSpecialAdmin();
     if (name === 'specialhistory') loadSpecialHistory();
+    if (name === 'adminaccounts') loadAdminUsers();
   }
 }
 document.querySelectorAll('.nav-item').forEach(btn => {
@@ -3110,6 +3283,178 @@ async function loadInstantRounds(reset) {
       : '<span class="muted">End of results</span>';
   } catch (e) {
     list.innerHTML = '<div class="empty">Network error</div>';
+  }
+}
+
+// ===================== ADMIN ACCOUNTS =====================
+async function loadAdminUsers() {
+  if (!requireSecret()) return;
+  const body = document.getElementById('adminUsersBody');
+  body.innerHTML = '<tr><td colspan="7" class="empty">Loading…</td></tr>';
+  try {
+    const r = await fetch('/api/admin/admin-users', { headers: adminSecretHeader() });
+    const d = await r.json();
+    if (!d.success) {
+      body.innerHTML = '<tr><td colspan="7" class="empty">' + esc(d.message || 'Failed') + '</td></tr>';
+      return;
+    }
+    const users = d.users || [];
+    if (!users.length) {
+      body.innerHTML = '<tr><td colspan="7" class="empty">No accounts yet.</td></tr>';
+      return;
+    }
+    body.innerHTML = users.map(u => {
+      const roleLabel = { boss: 'Boss', admin: 'Admin', super_admin: 'Super Admin' }[u.role] || u.role;
+      const status = u.is_blocked
+        ? '<span style="color:var(--danger);font-weight:600;">Blocked</span>'
+        : '<span style="color:var(--success);">Active</span>';
+      const canEdit = currentAdmin && (
+        (currentAdmin.role === 'boss' && u.role !== 'boss') ||
+        (currentAdmin.role === 'admin' && u.role === 'super_admin')
+      );
+      const actions = canEdit
+        ? `<button class="btn btn-secondary btn-sm" onclick="editAdminUser(${u.id},'${esc(u.username)}')">Edit</button>
+           <button class="btn btn-sm ${u.is_blocked ? 'btn-primary' : 'btn-danger'}" onclick="toggleBlockAdmin(${u.id},${u.is_blocked})">${u.is_blocked ? 'Unblock' : 'Block'}</button>
+           <button class="btn btn-danger btn-sm" onclick="deleteAdminUser(${u.id},'${esc(u.username)}')">Delete</button>`
+        : (u.role === 'boss' ? '<span class="muted">—</span>' : '');
+      return `<tr>
+        <td>${u.id}</td>
+        <td><strong>${esc(u.username)}</strong></td>
+        <td>${roleLabel}</td>
+        <td>${status}</td>
+        <td>${esc(u.created_by || '—')}</td>
+        <td>${fmtDate(u.created_at)}</td>
+        <td style="white-space:nowrap;display:flex;gap:6px;flex-wrap:wrap;">${actions}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    body.innerHTML = '<tr><td colspan="7" class="empty">Network error</td></tr>';
+  }
+}
+
+function openCreateAdminModal() {
+  if (!currentAdmin) return;
+  const canCreateAdmin = currentAdmin.role === 'boss';
+  const roleOptions = canCreateAdmin
+    ? '<option value="admin">Admin</option><option value="super_admin">Super Admin</option>'
+    : '<option value="super_admin">Super Admin</option>';
+  const html = `
+    <div class="modal-backdrop" id="createAdminModal" style="display:flex;">
+      <div class="modal" style="max-width:420px;">
+        <h3 style="margin-bottom:12px;">Create Admin Account</h3>
+        <div class="form-group" style="margin-bottom:10px;">
+          <label>Username</label>
+          <input type="text" id="newAdminUser" placeholder="username" autocomplete="off">
+        </div>
+        <div class="form-group" style="margin-bottom:10px;">
+          <label>Password</label>
+          <input type="password" id="newAdminPass" placeholder="min 6 characters">
+        </div>
+        <div class="form-group" style="margin-bottom:14px;">
+          <label>Role</label>
+          <select id="newAdminRole">${roleOptions}</select>
+        </div>
+        <div class="btn-group" style="justify-content:flex-end;">
+          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('createAdminModal').remove()">Cancel</button>
+          <button class="btn btn-primary btn-sm" onclick="createAdminUser()">Create</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function createAdminUser() {
+  const username = document.getElementById('newAdminUser').value.trim();
+  const password = document.getElementById('newAdminPass').value;
+  const role = document.getElementById('newAdminRole').value;
+  if (!username || !password) { alert('Username and password required'); return; }
+  try {
+    const r = await fetch('/api/admin/admin-users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...adminSecretHeader() },
+      body: JSON.stringify({ username, password, role, adminToken: getToken() })
+    });
+    const d = await r.json();
+    if (!d.success) { alert(d.message || 'Failed'); return; }
+    document.getElementById('createAdminModal')?.remove();
+    loadAdminUsers();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+function editAdminUser(id, currentUsername) {
+  const html = `
+    <div class="modal-backdrop" id="editAdminModal" style="display:flex;">
+      <div class="modal" style="max-width:420px;">
+        <h3 style="margin-bottom:12px;">Edit Account</h3>
+        <div class="form-group" style="margin-bottom:10px;">
+          <label>Username</label>
+          <input type="text" id="editAdminUser" value="${esc(currentUsername)}">
+        </div>
+        <div class="form-group" style="margin-bottom:14px;">
+          <label>New Password (leave blank to keep)</label>
+          <input type="password" id="editAdminPass" placeholder="leave blank to keep current">
+        </div>
+        <div class="btn-group" style="justify-content:flex-end;">
+          <button class="btn btn-secondary btn-sm" onclick="document.getElementById('editAdminModal').remove()">Cancel</button>
+          <button class="btn btn-primary btn-sm" onclick="saveAdminUser(${id})">Save</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function saveAdminUser(id) {
+  const username = document.getElementById('editAdminUser').value.trim();
+  const password = document.getElementById('editAdminPass').value;
+  const body = { adminToken: getToken() };
+  if (username) body.username = username;
+  if (password) body.password = password;
+  try {
+    const r = await fetch('/api/admin/admin-users/' + id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...adminSecretHeader() },
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (!d.success) { alert(d.message || 'Failed'); return; }
+    document.getElementById('editAdminModal')?.remove();
+    loadAdminUsers();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+async function toggleBlockAdmin(id, currentlyBlocked) {
+  const action = currentlyBlocked ? 'unblock' : 'block';
+  if (!confirm('Are you sure you want to ' + action + ' this account?')) return;
+  try {
+    const r = await fetch('/api/admin/admin-users/' + id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...adminSecretHeader() },
+      body: JSON.stringify({ is_blocked: !currentlyBlocked, adminToken: getToken() })
+    });
+    const d = await r.json();
+    if (!d.success) { alert(d.message || 'Failed'); return; }
+    loadAdminUsers();
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+async function deleteAdminUser(id, username) {
+  if (!confirm('Delete account "' + username + '"? This cannot be undone.')) return;
+  try {
+    const r = await fetch('/api/admin/admin-users/' + id, {
+      method: 'DELETE',
+      headers: adminSecretHeader()
+    });
+    const d = await r.json();
+    if (!d.success) { alert(d.message || 'Failed'); return; }
+    loadAdminUsers();
+  } catch (e) {
+    alert('Error: ' + e.message);
   }
 }
 

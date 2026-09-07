@@ -559,19 +559,6 @@ async function goToGameScreen() {
 
 function refreshToHome() {
     try {
-        // Show Kal Bingo bouncer briefly so users feel a real refresh
-        const splash = document.getElementById('bootSplash');
-        if (splash) {
-            splash.classList.remove('hidden');
-            splash.classList.add('kal-boot');
-            // re-trigger letter animations
-            const letters = splash.querySelectorAll('.kal-boot-letter');
-            letters.forEach(el => {
-                el.style.animation = 'none';
-                void el.offsetWidth;
-                el.style.animation = '';
-            });
-        }
         // Leave special selection/play if open
         if (typeof leaveSpecialSelection === 'function') {
             try { leaveSpecialSelection(); } catch (_) {}
@@ -600,12 +587,6 @@ function refreshToHome() {
             loadUserData(currentUsername).catch(() => {});
         }
         try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) { window.scrollTo(0, 0); }
-        // Hide splash after short bounce
-        setTimeout(() => {
-            if (splash) {
-                splash.classList.add('hidden');
-            }
-        }, 1100);
     } catch (e) {
         console.error('refreshToHome', e);
         location.href = '/index.html';
@@ -613,29 +594,15 @@ function refreshToHome() {
 }
 window.refreshToHome = refreshToHome;
 
-let _depositBounceTimer = null;
 function setDepositChipVisible(on) {
     const chip = document.getElementById('depositFloatChip');
     if (!chip) return;
-    if (_depositBounceTimer) {
-        clearInterval(_depositBounceTimer);
-        _depositBounceTimer = null;
-    }
     if (on) {
         chip.style.display = 'inline-flex';
         // next frame for slide-in
         requestAnimationFrame(() => chip.classList.add('show'));
-        // occasional bounce to draw attention (every ~12s, only if still visible)
-        _depositBounceTimer = setInterval(() => {
-            if (!chip.classList.contains('show') || document.hidden) return;
-            chip.classList.remove('bounce-hint');
-            // force reflow
-            void chip.offsetWidth;
-            chip.classList.add('bounce-hint');
-            setTimeout(() => chip.classList.remove('bounce-hint'), 1600);
-        }, 12000);
     } else {
-        chip.classList.remove('show', 'bounce-hint');
+        chip.classList.remove('show');
         setTimeout(() => {
             if (!chip.classList.contains('show')) chip.style.display = 'none';
         }, 280);

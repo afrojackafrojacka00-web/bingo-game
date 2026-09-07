@@ -124,7 +124,7 @@ function registerInstantRoutes(app) {
   });
 
   app.get('/api/admin/instant/status', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'instantcontrol')) return;
     try {
       const control = instant.adminGetControlState();
       const stats = await instant.adminStats();
@@ -136,7 +136,7 @@ function registerInstantRoutes(app) {
   });
 
   app.post('/api/admin/instant/enabled', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'instantcontrol')) return;
     try {
       const on = !!(req.body && (req.body.enabled === true || req.body.enabled === 'true' || req.body.enabled === 1));
       const result = instant.adminSetMasterEnabled(on);
@@ -148,7 +148,7 @@ function registerInstantRoutes(app) {
   });
 
   app.post('/api/admin/instant/eco', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'instantcontrol')) return;
     try {
       const on = !!(req.body && (req.body.ecoMode === true || req.body.ecoMode === 'true' || req.body.ecoMode === 1 || req.body.enabled === true));
       // body.ecoMode preferred; also accept enabled as alias for eco
@@ -163,7 +163,7 @@ function registerInstantRoutes(app) {
   });
 
   app.post('/api/admin/instant/settings', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'instantcontrol')) return;
     try {
       const body = req.body || {};
       const out = {};
@@ -187,7 +187,7 @@ function registerInstantRoutes(app) {
   });
 
   app.get('/api/admin/instant/history', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'instanthistory')) return;
     try {
       const q = String(req.query.q || '');
       const limit = Number(req.query.limit) || 20;
@@ -201,7 +201,7 @@ function registerInstantRoutes(app) {
   });
 
   app.get('/api/admin/instant/rounds', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'instantrounds')) return;
     try {
       const limit = Number(req.query.limit) || 20;
       const offset = Number(req.query.offset) || 0;
@@ -214,7 +214,7 @@ function registerInstantRoutes(app) {
   });
 
   app.get('/api/admin/instant/stats', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'instantcontrol')) return;
     try {
       const stats = await instant.adminStats();
       res.json({ success: true, ...stats });
@@ -224,7 +224,7 @@ function registerInstantRoutes(app) {
   });
 
   app.get('/api/admin/instant/win-rules', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'instantcontrol')) return;
     try {
       res.json({ success: true, ...instant.adminGetWinRules() });
     } catch (err) {
@@ -233,7 +233,7 @@ function registerInstantRoutes(app) {
   });
 
   app.post('/api/admin/instant/win-rules', async (req, res) => {
-    if (!requireAdmin(req, res)) return;
+    if (!requireAdmin(req, res, 'instantcontrol')) return;
     try {
       const rules = (req.body && req.body.rules) || [];
       const result = instant.adminSetWinRules(rules);
