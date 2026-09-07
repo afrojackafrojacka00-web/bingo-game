@@ -250,56 +250,102 @@ button:disabled { opacity:.55; cursor:not-allowed; }
 .header-icon-btn:active{transform:scale(.96);}
 #logoutBtn.btn-logout{padding:6px 10px;font-size:11px;border-radius:10px;margin:0;}
 
-/* Floating deposit chip — under header, slides from right */
+/* Floating deposit chip — left side, compact +, periodic Deposit label */
 #depositFloatChip{
   position:fixed;
-  top:58px;
-  right:10px;
+  top:88px;
+  left:12px;
+  right:auto;
   z-index:45;
   display:none;
   align-items:center;
-  gap:8px;
-  padding:8px 12px 8px 10px;
-  border-radius:999px;
-  border:1px solid rgba(245,158,11,.35);
-  background:rgba(15,23,42,.55);
+  gap:0;
+  padding:0;
+  width:44px;
+  height:44px;
+  border-radius:50%;
+  border:1px solid rgba(245,158,11,.4);
+  background:rgba(15,23,42,.5);
   backdrop-filter:blur(14px);
   -webkit-backdrop-filter:blur(14px);
   color:#f8fafc;
-  box-shadow:0 8px 24px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.08);
+  box-shadow:0 6px 20px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.08);
   cursor:pointer;
-  transform:translateX(120%);
+  transform:translateX(-120%);
   opacity:0;
-  transition:transform .35s cubic-bezier(.2,.9,.2,1), opacity .25s ease;
+  transition:transform .35s cubic-bezier(.2,.9,.2,1), opacity .25s ease, width .35s ease, border-radius .35s ease, padding .35s ease, gap .35s ease;
   font-size:12px;font-weight:700;letter-spacing:.02em;
   user-select:none;
+  overflow:hidden;
+  justify-content:center;
 }
 #depositFloatChip.show{
   display:inline-flex;
   transform:translateX(0);
   opacity:1;
 }
+#depositFloatChip.expand{
+  width:auto;
+  border-radius:999px;
+  padding:6px 12px 6px 8px;
+  gap:8px;
+  justify-content:flex-start;
+}
 #depositFloatChip .df-ico{
-  width:26px;height:26px;border-radius:50%;
+  width:32px;height:32px;border-radius:50%;
   display:inline-flex;align-items:center;justify-content:center;
   background:linear-gradient(135deg,#f59e0b,#ea580c);
-  color:#111;font-size:13px;font-weight:800;
+  color:#111;font-size:18px;font-weight:800;line-height:1;
   box-shadow:0 2px 8px rgba(245,158,11,.4);
+  flex-shrink:0;
 }
-#depositFloatChip .df-txt{line-height:1.1;}
-#depositFloatChip .df-txt small{display:block;font-size:10px;font-weight:500;opacity:.75;margin-top:1px;}
-#depositFloatChip:active{transform:translateX(0) scale(.97);}
+#depositFloatChip .df-txt{
+  line-height:1.1;
+  white-space:nowrap;
+  max-width:0;
+  opacity:0;
+  overflow:hidden;
+  transition:max-width .35s ease, opacity .25s ease;
+}
+#depositFloatChip.expand .df-txt{
+  max-width:90px;
+  opacity:1;
+}
+#depositFloatChip .df-txt small{display:none;}
+#depositFloatChip:active{transform:translateX(0) scale(.96);}
 body.instant-immersive #depositFloatChip{display:none !important;}
 .status-container {
   display:inline-flex;
   align-items:center;
-  gap:5px;
-  background:var(--status-bg);
-  padding:4px 10px;
-  border-radius:999px;
+  gap:4px;
+  background:transparent;
+  padding:0;
+  border-radius:0;
   font-size:12px;
   font-weight:500;
 }
+.status-bars{
+  display:inline-flex;
+  align-items:flex-end;
+  gap:2px;
+  height:12px;
+}
+.status-bars i{
+  display:block;
+  width:3px;
+  border-radius:1px;
+  background:currentColor;
+  opacity:.35;
+}
+.status-bars i:nth-child(1){height:4px;}
+.status-bars i:nth-child(2){height:7px;}
+.status-bars i:nth-child(3){height:10px;}
+.status-container.online .status-bars{color:var(--green);}
+.status-container.online .status-bars i{opacity:1;}
+.status-container.offline .status-bars{color:var(--red);}
+.status-container.offline .status-bars i:nth-child(1){opacity:1;}
+.status-container.offline .status-bars i:nth-child(2),
+.status-container.offline .status-bars i:nth-child(3){opacity:.25;}
 .status-dot {
   width:8px;
   height:8px;
@@ -342,18 +388,40 @@ body.instant-immersive #depositFloatChip{display:none !important;}
 }
 .history-list { display:flex; flex-direction:column; gap:12px; }
 .history-card {
-  background:var(--card);
-  border:1px solid var(--card-border);
-  border-radius:var(--radius);
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:14px;
   padding:16px;
   text-align:left;
-  border-left:4px solid var(--muted);
+  border-left:none;
   color:var(--text-color);
-  box-shadow:var(--shadow);
-  transition:border-color .15s ease;
+  box-shadow:0 4px 16px rgba(0,0,0,.12);
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+  transition:border-color .15s ease, background .15s ease, box-shadow .15s ease;
 }
-.history-card.won { border-left-color:var(--green); }
-.history-card.lost { border-left-color:var(--red); }
+.history-card.won {
+  background:rgba(34,197,94,.1);
+  border:1px solid rgba(34,197,94,.22);
+  box-shadow:0 4px 18px rgba(34,197,94,.08);
+}
+.history-card.lost {
+  background:rgba(239,68,68,.08);
+  border:1px solid rgba(239,68,68,.18);
+  box-shadow:0 4px 18px rgba(239,68,68,.06);
+}
+[data-theme="light"] .history-card {
+  background:rgba(255,255,255,.65);
+  border:1px solid rgba(15,23,42,.08);
+}
+[data-theme="light"] .history-card.won {
+  background:rgba(34,197,94,.12);
+  border:1px solid rgba(34,197,94,.25);
+}
+[data-theme="light"] .history-card.lost {
+  background:rgba(239,68,68,.1);
+  border:1px solid rgba(239,68,68,.2);
+}
 .history-top { display:flex; justify-content:space-between; align-items:center; gap:8px; }
 .history-outcome { font-weight:700; font-size:15px; letter-spacing:-0.01em; }
 .history-date { font-size:11px; color:var(--muted); font-weight:500; }
@@ -898,13 +966,25 @@ body.instant-immersive .instant-sticky-play{display:none;}
 @keyframes kalLetterBounce{0%,100%{transform:translateY(0);}40%{transform:translateY(-12px);}60%{transform:translateY(-6px);}}
 @keyframes kalBarSlide{0%{transform:translateX(-120%);}100%{transform:translateX(320%);}}
 @media (prefers-reduced-motion: reduce){.kal-boot-letter,.kal-boot-bar i{animation:none;}}
+#softRefreshOverlay{
+  position:fixed;inset:0;z-index:200;
+  display:none;align-items:center;justify-content:center;
+  background:rgba(7,11,18,.72);
+  backdrop-filter:blur(8px);
+  -webkit-backdrop-filter:blur(8px);
+}
+#softRefreshOverlay.show{display:flex;}
+#softRefreshOverlay .kal-boot-inner{transform:scale(.92);}
 </style>
 </head>
 <body>
 
 <div id="headerBar" class="header-bar hidden">
   <div class="user-info">
-    <div class="status-container"><span>📶</span><span id="connectionDot" class="status-dot offline"></span></div>
+    <div class="status-container offline" id="statusContainer" title="Connection">
+      <span class="status-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span id="connectionDot" class="status-dot offline" style="display:none;"></span>
+    </div>
     <span>👤 <strong id="playerDisplay">User</strong></span>
     <span>| 💰 <strong id="balanceDisplay">10.00</strong> <span data-i18n="birr">Birr</span></span>
   </div>
@@ -917,7 +997,7 @@ body.instant-immersive .instant-sticky-play{display:none;}
 </div>
 <button type="button" id="depositFloatChip" class="" onclick="openQuickDeposit()" aria-label="Deposit">
   <span class="df-ico">+</span>
-  <span class="df-txt"><span data-i18n="deposit">Deposit</span><small>Wallet</small></span>
+  <span class="df-txt"><span data-i18n="deposit">Deposit</span></span>
 </button>
 
 <div id="notifModal" class="modal hidden">
@@ -996,7 +1076,7 @@ body.instant-immersive .instant-sticky-play{display:none;}
 </div>
 
 <div id="tabGames" class="tab-content hidden">
- <div id="homeBox" class="card"><h2 data-i18n="readyTitle">Ready to Play? 🎲</h2><p class="small" data-i18n="readyBody">Choose a stake, join a room, select your cards and play.</p>
+ <div id="homeBox" class="card">
   <div id="specialHomeBlock" class="hidden" style="margin:0 0 14px;padding:14px;border-radius:14px;border:1px solid rgba(245,158,11,.45);background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(239,68,68,.08));">
     <div id="specialHomeCd" style="font-size:22px;font-weight:800;letter-spacing:.02em;margin-bottom:6px;">--:--:--</div>
     <div id="specialHomeText" style="font-size:14px;font-weight:700;margin-bottom:4px;">—</div>
@@ -1006,7 +1086,6 @@ body.instant-immersive .instant-sticky-play{display:none;}
   </div>
   <button class="btn-play" onclick="goToGameScreen()" data-i18n="playBtn">Play Classic Bingo 🚀</button>
   <button class="btn-play" style="margin-top:10px;background:linear-gradient(135deg,#f59e0b,#ef4444);" onclick="openInstantBingo()"><span data-i18n="instantBtn">⚡ Instant Bingo</span></button>
-  <p class="small" style="margin-top:8px;">Instant: 20 numbers · up to 4 cards · 1×–4× patterns · same wallet</p>
 
    <div id="referralBox" class="referral-box">
      <h3 style="margin:0 0 6px;" data-i18n="inviteTitle">🎁 Invite Friends, Earn Bonus</h3>
@@ -1278,6 +1357,6 @@ body.instant-immersive .instant-sticky-play{display:none;}
   <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
 </div>
 <script src="i18n.js?v=3""></script>
-<script src="app.js?v=20260906-header-deposit"></script>
+<script src="app.js?v=20260908-ui-home"></script>
 </body>
 </html>

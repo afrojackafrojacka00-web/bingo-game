@@ -381,9 +381,15 @@ async function previewCard(num) {
 
 function setConnection(online) {
     const dot = document.getElementById('connectionDot');
-    if (!dot) return;
-    dot.classList.toggle('online', online);
-    dot.classList.toggle('offline', !online);
+    if (dot) {
+        dot.classList.toggle('online', online);
+        dot.classList.toggle('offline', !online);
+    }
+    const box = document.getElementById('statusContainer');
+    if (box) {
+        box.classList.toggle('online', !!online);
+        box.classList.toggle('offline', !online);
+    }
 }
 
 function show(id) { document.getElementById(id)?.classList.remove('hidden'); }
@@ -557,7 +563,15 @@ async function goToGameScreen() {
 }
 
 
-function refreshToHome() {
+function showSoftRefresh(on) {
+    const el = document.getElementById('softRefreshOverlay');
+    if (!el) return;
+    if (on) el.classList.add('show');
+    else el.classList.remove('show');
+}
+
+async function refreshToHome() {
+    showSoftRefresh(true);
     try {
         // Leave special selection/play if open
         if (typeof leaveSpecialSelection === 'function') {
@@ -584,25 +598,62 @@ function refreshToHome() {
         switchTab('tabGames', document.querySelector('.nav-item'));
         // Soft reload of user balance/data
         if (currentUsername && typeof loadUserData === 'function') {
-            loadUserData(currentUsername).catch(() => {});
+            try { await loadUserData(currentUsername); } catch (_) {}
         }
         try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_) { window.scrollTo(0, 0); }
+        // Brief moment so user sees the Kal Bingo loader
+        await new Promise((r) => setTimeout(r, 650));
     } catch (e) {
         console.error('refreshToHome', e);
         location.href = '/index.html';
+        return;
+    } finally {
+        showSoftRefresh(false);
     }
 }
 window.refreshToHome = refreshToHome;
 
+let _depositPulseTimer = null;
+function stopDepositChipPulse() {
+    if (_depositPulseTimer) {
+        clearInterval(_depositPulseTimer);
+        _depositPulseTimer = null;
+    }
+    const chip = document.getElementById('depositFloatChip');
+    if (chip) chip.classList.remove('expand');
+}
+function startDepositChipPulse() {
+    stopDepositChipPulse();
+    const chip = document.getElementById('depositFloatChip');
+    if (!chip) return;
+    // Every ~2.5 minutes show "Deposit" briefly, then collapse back to +
+    _depositPulseTimer = setInterval(() => {
+        if (!chip.classList.contains('show')) return;
+        chip.classList.add('expand');
+        setTimeout(() => {
+            if (chip.classList.contains('show')) chip.classList.remove('expand');
+        }, 3200);
+    }, 150000); // 2.5 minutes
+    // First hint a bit after appearing so users notice it
+    setTimeout(() => {
+        if (!chip.classList.contains('show')) return;
+        chip.classList.add('expand');
+        setTimeout(() => {
+            if (chip.classList.contains('show')) chip.classList.remove('expand');
+        }, 3200);
+    }, 4000);
+}
 function setDepositChipVisible(on) {
     const chip = document.getElementById('depositFloatChip');
     if (!chip) return;
     if (on) {
         chip.style.display = 'inline-flex';
-        // next frame for slide-in
         requestAnimationFrame(() => chip.classList.add('show'));
+        startDepositChipPulse();
     } else {
+        stopDepositChipPulse();
         chip.classList.remove('show');
+        chip.classList.remove('expand');
         setTimeout(() => {
             if (!chip.classList.contains('show')) chip.style.display = 'none';
         }, 280);
