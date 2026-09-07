@@ -138,14 +138,15 @@ body {
 }
 input, textarea, select {
   width:100%;
-  padding:12px 14px;
-  margin-top:8px;
-  border-radius:var(--radius-sm);
+  padding:11px 14px;
+  margin-top:10px;
+  margin-bottom:4px;
+  border-radius:12px;
   border:1px solid var(--input-border);
   background:var(--input-bg);
   color:var(--input-text);
   box-sizing:border-box;
-  font-size:16px;
+  font-size:15px;
   font-family:inherit;
   transition:border-color .15s ease, box-shadow .15s ease;
 }
@@ -155,36 +156,50 @@ input:focus, textarea:focus, select:focus {
   box-shadow:var(--focus);
 }
 input::placeholder, textarea::placeholder { color:var(--muted); }
+label + input, label + textarea, label + select,
+.form-group input, .form-group textarea, .form-group select {
+  margin-top:6px;
+}
 button {
   width:100%;
-  padding:14px;
-  margin:8px 0;
-  border-radius:var(--radius-sm);
+  padding:11px 16px;
+  margin:10px 0 0;
+  border-radius:12px;
   border:none;
   background:var(--blue);
   color:#fff;
   font-weight:600;
-  font-size:15px;
+  font-size:14px;
   font-family:inherit;
   cursor:pointer;
-  transition:background .15s ease, transform .1s ease, opacity .15s ease;
+  transition:background .15s ease, transform .1s ease, opacity .15s ease, box-shadow .15s ease;
+  box-shadow:0 2px 8px rgba(59,130,246,.25);
 }
-button:hover:not(:disabled) { background:var(--blue-hover); }
+button:hover:not(:disabled) { background:var(--blue-hover); box-shadow:0 4px 14px rgba(59,130,246,.35); }
 button:active:not(:disabled) { transform:scale(0.98); }
-button:disabled { opacity:.55; cursor:not-allowed; }
+button:disabled { opacity:.55; cursor:not-allowed; box-shadow:none; }
 .btn-play {
   background:linear-gradient(135deg, var(--blue), #6366f1);
-  font-size:18px;
+  font-size:15px;
   font-weight:700;
-  padding:16px;
-  margin:0;
+  padding:12px 16px;
+  margin:12px 0 0;
   letter-spacing:-0.01em;
+  box-shadow:0 4px 16px rgba(59,130,246,.35);
 }
 .btn-play:hover:not(:disabled) { filter:brightness(1.05); background:linear-gradient(135deg, var(--blue-hover), #4f46e5); }
-.btn-secondary { background:#334155; color:#fff; }
+.btn-secondary { background:#334155; color:#fff; box-shadow:0 2px 8px rgba(0,0,0,.2); }
 [data-theme="light"] .btn-secondary { background:#e2e8f0; color:#0f172a; }
-.btn-danger { background:var(--red); color:#fff; }
-.btn-success { background:var(--green); color:#052e16; }
+.btn-danger { background:var(--red); color:#fff; box-shadow:0 2px 8px rgba(239,68,68,.3); }
+.btn-success { background:var(--green); color:#052e16; box-shadow:0 2px 8px rgba(34,197,94,.3); }
+/* better spacing between consecutive form controls */
+.modal input + button,
+.modal input + input,
+.modal textarea + button,
+.modal select + button,
+.card input + button,
+.form-stack > * + * { margin-top:12px; }
+.modal .page-title { margin-bottom:14px; }
 .btn-logout {
   background:var(--red);
   width:auto;
@@ -250,29 +265,31 @@ button:disabled { opacity:.55; cursor:not-allowed; }
 .header-icon-btn:active{transform:scale(.96);}
 #logoutBtn.btn-logout{padding:6px 10px;font-size:11px;border-radius:10px;margin:0;}
 
-/* Floating deposit chip — under header, slides from right */
+/* Floating deposit chip — only + visible, expands on hover, occasional bounce */
 #depositFloatChip{
   position:fixed;
   top:58px;
-  right:10px;
+  right:12px;
   z-index:45;
   display:none;
   align-items:center;
-  gap:8px;
-  padding:8px 12px 8px 10px;
+  gap:0;
+  padding:0;
+  width:44px;
+  height:44px;
   border-radius:999px;
-  border:1px solid rgba(245,158,11,.35);
-  background:rgba(15,23,42,.55);
-  backdrop-filter:blur(14px);
-  -webkit-backdrop-filter:blur(14px);
-  color:#f8fafc;
-  box-shadow:0 8px 24px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.08);
+  border:1px solid rgba(245,158,11,.4);
+  background:linear-gradient(135deg,#f59e0b,#ea580c);
+  color:#111;
+  box-shadow:0 6px 20px rgba(245,158,11,.45), 0 2px 8px rgba(0,0,0,.25);
   cursor:pointer;
   transform:translateX(120%);
   opacity:0;
-  transition:transform .35s cubic-bezier(.2,.9,.2,1), opacity .25s ease;
+  transition:width .3s cubic-bezier(.2,.9,.2,1), padding .3s ease, transform .35s cubic-bezier(.2,.9,.2,1), opacity .25s ease, box-shadow .25s ease;
   font-size:12px;font-weight:700;letter-spacing:.02em;
   user-select:none;
+  overflow:hidden;
+  justify-content:center;
 }
 #depositFloatChip.show{
   display:inline-flex;
@@ -280,15 +297,49 @@ button:disabled { opacity:.55; cursor:not-allowed; }
   opacity:1;
 }
 #depositFloatChip .df-ico{
-  width:26px;height:26px;border-radius:50%;
+  width:44px;height:44px;border-radius:50%;
   display:inline-flex;align-items:center;justify-content:center;
-  background:linear-gradient(135deg,#f59e0b,#ea580c);
-  color:#111;font-size:13px;font-weight:800;
-  box-shadow:0 2px 8px rgba(245,158,11,.4);
+  background:transparent;
+  color:#111;font-size:22px;font-weight:800;
+  flex-shrink:0;
+  transition:none;
 }
-#depositFloatChip .df-txt{line-height:1.1;}
-#depositFloatChip .df-txt small{display:block;font-size:10px;font-weight:500;opacity:.75;margin-top:1px;}
-#depositFloatChip:active{transform:translateX(0) scale(.97);}
+#depositFloatChip .df-txt{
+  line-height:1.15;
+  white-space:nowrap;
+  max-width:0;
+  opacity:0;
+  overflow:hidden;
+  transition:max-width .3s ease, opacity .25s ease, margin .3s ease;
+  margin-left:0;
+  color:#111;
+  font-weight:700;
+}
+#depositFloatChip .df-txt small{display:block;font-size:10px;font-weight:500;opacity:.8;margin-top:1px;}
+#depositFloatChip:hover,
+#depositFloatChip:focus-visible{
+  width:auto;
+  padding:0 16px 0 0;
+  gap:0;
+  box-shadow:0 8px 28px rgba(245,158,11,.55), 0 2px 10px rgba(0,0,0,.3);
+}
+#depositFloatChip:hover .df-txt,
+#depositFloatChip:focus-visible .df-txt{
+  max-width:120px;
+  opacity:1;
+  margin-left:2px;
+}
+#depositFloatChip:active{transform:translateX(0) scale(.96);}
+/* occasional bounce to draw attention when not interacted */
+#depositFloatChip.show.bounce-hint{
+  animation:depositBounce 0.7s ease-in-out 2;
+}
+@keyframes depositBounce{
+  0%,100%{transform:translateX(0) scale(1);}
+  30%{transform:translateX(0) scale(1.12);}
+  50%{transform:translateX(0) scale(0.96);}
+  70%{transform:translateX(0) scale(1.06);}
+}
 body.instant-immersive #depositFloatChip{display:none !important;}
 .status-container {
   display:inline-flex;
@@ -874,7 +925,10 @@ body.instant-immersive #tabGames{padding-bottom:70px;}
   pointer-events:none;
 }
 .instant-sticky-play .btn-play{pointer-events:auto;box-shadow:0 4px 18px rgba(0,0,0,.35);}
-.instant-play-spacer{height:64px;}
+.instant-play-spacer{height:12px;}
+.instant-random-row{margin-bottom:4px;}
+#instantSelectOthers{margin-top:6px !important;}
+.instant-opponents{margin-top:4px;max-height:180px;}
 body.instant-immersive .instant-sticky-play{display:none;}
 #instantBox:not(.hidden) ~ * .instant-sticky-play,
 #instantBox:not(.hidden) .instant-sticky-play{display:block;}
@@ -997,12 +1051,19 @@ body.instant-immersive .instant-sticky-play{display:none;}
 
 <div id="tabGames" class="tab-content hidden">
  <div id="homeBox" class="card"><h2 data-i18n="readyTitle">Ready to Play? 🎲</h2><p class="small" data-i18n="readyBody">Choose a stake, join a room, select your cards and play.</p>
-  <div id="specialHomeBlock" class="hidden" style="margin:0 0 14px;padding:14px;border-radius:14px;border:1px solid rgba(245,158,11,.45);background:linear-gradient(135deg,rgba(245,158,11,.12),rgba(239,68,68,.08));">
-    <div id="specialHomeCd" style="font-size:22px;font-weight:800;letter-spacing:.02em;margin-bottom:6px;">--:--:--</div>
-    <div id="specialHomeText" style="font-size:14px;font-weight:700;margin-bottom:4px;">—</div>
-    <div id="specialHomeStake" class="small" style="margin-bottom:10px;">Stake —</div>
-    <button type="button" class="btn-play" id="specialHomePlayBtn" data-i18n="specialPlay" onclick="openSpecialEvent()" style="margin:0;background:linear-gradient(135deg,#8b5cf6,#6366f1);">Play</button>
-    <p id="specialHomeMsg" class="small" style="margin:8px 0 0;"></p>
+  <div id="specialHomeBlock" class="hidden special-shine" style="margin:0 0 16px;padding:16px;border-radius:16px;border:1px solid rgba(245,158,11,.5);background:linear-gradient(145deg,rgba(245,158,11,.18),rgba(139,92,246,.12) 50%,rgba(239,68,68,.1));box-shadow:0 0 0 1px rgba(245,158,11,.15), 0 8px 32px rgba(245,158,11,.18), inset 0 1px 0 rgba(255,255,255,.06);position:relative;overflow:hidden;">
+    <div style="position:absolute;inset:0;background:radial-gradient(ellipse at 20% 0%,rgba(245,158,11,.2),transparent 55%);pointer-events:none;"></div>
+    <div style="position:relative;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+        <span style="font-size:18px;">🏆</span>
+        <span style="font-size:11px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:#fbbf24;">Special Event</span>
+      </div>
+      <div id="specialHomeCd" style="font-size:26px;font-weight:800;letter-spacing:.02em;margin-bottom:6px;background:linear-gradient(90deg,#fde68a,#f59e0b,#fbbf24);-webkit-background-clip:text;background-clip:text;color:transparent;">--:--:--</div>
+      <div id="specialHomeText" style="font-size:14px;font-weight:700;margin-bottom:4px;color:#fef3c7;">—</div>
+      <div id="specialHomeStake" class="small" style="margin-bottom:12px;color:#fcd34d;">Stake —</div>
+      <button type="button" class="btn-play" id="specialHomePlayBtn" data-i18n="specialPlay" onclick="openSpecialEvent()" style="margin:0;background:linear-gradient(135deg,#f59e0b,#ea580c);box-shadow:0 4px 20px rgba(245,158,11,.4);">Play Special</button>
+      <p id="specialHomeMsg" class="small" style="margin:10px 0 0;color:#fde68a;"></p>
+    </div>
   </div>
   <button class="btn-play" onclick="goToGameScreen()" data-i18n="playBtn">Play Classic Bingo 🚀</button>
   <button class="btn-play" style="margin-top:10px;background:linear-gradient(135deg,#f59e0b,#ef4444);" onclick="openInstantBingo()"><span data-i18n="instantBtn">⚡ Instant Bingo</span></button>
@@ -1089,8 +1150,8 @@ body.instant-immersive .instant-sticky-play{display:none;}
        <span><span data-i18n="cards">Cards</span> <strong id="instantSelectedCount">0/4</strong></span>
      </div>
      <div class="instant-random-row">
-       <button type="button" class="btn-secondary instant-random-btn" onclick="pickRandomInstantCards(2)" data-i18n="pick2">🎲 Pick 2</button>
-       <button type="button" class="btn-secondary instant-random-btn" onclick="pickRandomInstantCards(4)" data-i18n="pick4">🎲 Pick 4</button>
+       <button type="button" class="btn-secondary instant-random-btn" onclick="pickRandomInstantCards(2)" data-i18n="pick2">Pick 2</button>
+       <button type="button" class="btn-secondary instant-random-btn" onclick="pickRandomInstantCards(4)" data-i18n="pick4">Pick 4</button>
      </div>
      <div class="instant-play-spacer" aria-hidden="true"></div>
      <p id="instantMsg" class="small" style="margin-top:6px;font-size:11px;"></p>

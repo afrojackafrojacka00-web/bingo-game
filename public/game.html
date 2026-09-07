@@ -7,11 +7,31 @@
   <title>Live Bingo</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg: '#0b0f14',
+            card: '#151d27',
+            line: '#243041',
+            muted: '#8b9bb0',
+            green: '#22c55e',
+            gold: '#f59e0b',
+            blue: '#3b82f6',
+            red: '#ef4444'
+          },
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'] }
+        }
+      }
+    }
+  </script>
   <link rel="stylesheet" href="game.css">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script src="/socket.io/socket.io.js"></script>
-
+  <script src="https://unpkg.com/lucide@latest"></script>
 <script>
 (function(){
   try{
@@ -26,58 +46,105 @@
 })();
 </script>
 </head>
-<body>
-<header>
-  <div class="head-left">
-    <span class="live"><i></i> <span data-i18n="live">LIVE</span></span>
-    <b id="patternName">Any One Line</b>
-    <small id="playersPlaying">0</small>
+<body class="bg-bg text-white font-sans antialiased overflow-hidden flex flex-col h-[100dvh]">
+<!-- Header -->
+<header class="flex-none h-14 flex items-center justify-between px-3 sm:px-4 bg-card/95 border-b border-line backdrop-blur-md">
+  <div class="flex items-center gap-2.5 min-w-0">
+    <span class="live-badge inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-green/15 border border-green/30 text-green text-[11px] font-bold tracking-wide">
+      <span class="w-1.5 h-1.5 rounded-full bg-green animate-pulse"></span>
+      <span data-i18n="live">LIVE</span>
+    </span>
+    <b id="patternName" class="text-sm font-semibold text-white/90 truncate max-w-[120px] sm:max-w-[180px]">Any One Line</b>
   </div>
-  <div class="prize-block">
-    <small data-i18n="prize">PRIZE</small>
-    <b><span id="prizePool">0.00</span> <span data-i18n="birr">Birr</span></b>
+  <div class="flex items-center gap-3">
+    <div class="flex items-center gap-1.5 text-muted">
+      <i data-lucide="users" class="w-4 h-4 text-blue"></i>
+      <small id="playersPlaying" class="text-xs font-semibold text-white">0</small>
+    </div>
+    <div class="prize-block flex items-center gap-1.5 pl-2 border-l border-line">
+      <i data-lucide="trophy" class="w-4 h-4 text-gold"></i>
+      <div class="text-right leading-tight">
+        <b class="text-sm font-bold text-green"><span id="prizePool">0.00</span> <span data-i18n="birr" class="text-[10px] font-medium text-muted">Birr</span></b>
+      </div>
+    </div>
   </div>
 </header>
-<main>
-  <section class="status">
-    <div class="last-called">
-      <small class="lc-label" data-i18n="lastCalled">Last Called</small>
-      <div id="lastCalledBalls" class="lc-balls"><span class="empty">--</span></div>
+
+<main class="flex-1 min-h-0 flex flex-col">
+  <!-- Status bar: last called + big number + count + view all -->
+  <section class="flex-none flex items-center gap-2 sm:gap-3 px-3 py-2.5 bg-card border-b border-line">
+    <div class="last-called flex flex-col items-start gap-1 min-w-0 flex-shrink-0">
+      <small class="lc-label text-[10px] uppercase tracking-wider text-muted font-medium" data-i18n="lastCalled">Last Called</small>
+      <div id="lastCalledBalls" class="lc-balls flex gap-1.5 flex-wrap"></div>
     </div>
-    <div class="stat-block center"><strong id="lastNumber">--</strong></div>
-    <div class="stat-block count"><strong id="calledCount">0 / 75</strong></div>
+    <div class="flex-1 flex justify-center">
+      <strong id="lastNumber" class="text-4xl sm:text-5xl font-extrabold text-gold leading-none min-w-[72px] text-center tracking-tight">--</strong>
+    </div>
+    <div class="flex flex-col items-end gap-1 flex-shrink-0">
+      <strong id="calledCount" class="text-xs sm:text-sm font-bold text-blue">0 / 75</strong>
+      <button id="viewAllCallsBtn" type="button" class="text-[10px] font-semibold text-muted hover:text-white px-2 py-0.5 rounded-md border border-line hover:border-blue/50 transition-colors" onclick="openViewAllCalls()">
+        View all calls
+      </button>
+    </div>
   </section>
-  <section class="game-layout">
-    <aside class="number-board">
-      <h3>B I N G O</h3>
-      <div id="numberBoard" class="numbers"></div>
-    </aside>
-    <section class="card-side">
-      <div class="card-side-head">
-        <h3 data-i18n="yourCards">Your Cards</h3>
-        <div class="controls">
-          <button id="autoMarkToggle" class="switch-pill" type="button" role="switch" aria-checked="true">
-            <span class="dot"></span><span class="switch-label" data-i18n="auto">AUTO</span>
-          </button>
-          <button id="blinkToggle" class="switch-pill" type="button" role="switch" aria-checked="true">
-            <span class="dot"></span><span class="switch-label" data-i18n="blink">Blink</span>
-          </button>
-          <button id="soundToggle" class="switch-pill icon-only" type="button" role="switch" aria-checked="true" aria-label="Toggle sound">
-            <span id="soundToggleIcon">🔊</span>
-          </button>
-          <button id="colorPickerBtn" class="switch-pill color-picker-btn" type="button" onclick="toggleColorPicker()">
-            <span class="color-dot" id="currentColorDot" style="background:#22c55e;"></span>
-            <span class="switch-label" data-i18n="color">Color</span>
-          </button>
-          <button id="leaveGameBtn" class="switch-pill leave" type="button" onclick="leaveGame()">
-            <span class="switch-label" data-i18n="leaveGame">Leave</span>
-          </button>
-        </div>
+
+  <!-- Game layout -->
+  <section class="game-layout flex-1 min-h-0 grid gap-2 p-2 sm:p-3" style="grid-template-columns: minmax(140px, 38%) 1fr;">
+    <!-- Number board -->
+    <aside class="number-board bg-card border border-line rounded-xl p-2 sm:p-2.5 flex flex-col min-h-0 overflow-hidden">
+      <div class="board-letters flex justify-around mb-1.5 flex-none">
+        <span class="text-gold font-black text-xs sm:text-sm">B</span>
+        <span class="text-gold font-black text-xs sm:text-sm">I</span>
+        <span class="text-gold font-black text-xs sm:text-sm">N</span>
+        <span class="text-gold font-black text-xs sm:text-sm">G</span>
+        <span class="text-gold font-black text-xs sm:text-sm">O</span>
       </div>
-      <div id="cardsEl" class="cards"><p data-i18n="loadingCards">Loading cards…</p></div>
+      <div id="numberBoard" class="numbers flex-1 min-h-0 grid grid-cols-5 gap-1" style="grid-template-rows: repeat(15, minmax(0, 1fr));"></div>
+    </aside>
+
+    <!-- Cards side -->
+    <section class="card-side bg-card border border-line rounded-xl p-2 sm:p-2.5 flex flex-col min-h-0 overflow-hidden">
+      <div class="card-side-head flex-none flex items-center justify-between gap-2 mb-2">
+        <h3 class="text-sm font-semibold text-white m-0" data-i18n="yourCards">Your Cards</h3>
+        <span id="moreCardsHint" class="hidden text-[10px] text-muted font-medium px-2 py-0.5 rounded-full bg-line/50">Swipe for more →</span>
+      </div>
+      <div id="cardsEl" class="cards flex-1 min-h-0 overflow-x-auto overflow-y-hidden flex gap-3 pb-1 snap-x snap-mandatory scroll-smooth" style="-webkit-overflow-scrolling: touch;"></div>
+      <!-- Controls under cards -->
+      <div class="controls flex-none flex flex-wrap items-center gap-1.5 mt-2 pt-2 border-t border-line">
+        <button id="autoMarkToggle" class="switch-pill" type="button" role="switch" aria-checked="true">
+          <span class="dot"></span><span class="switch-label" data-i18n="auto">AUTO</span>
+        </button>
+        <button id="blinkToggle" class="switch-pill" type="button" role="switch" aria-checked="true">
+          <span class="dot"></span><span class="switch-label" data-i18n="blink">Blink</span>
+        </button>
+        <button id="soundToggle" class="switch-pill icon-only" type="button" role="switch" aria-checked="true" aria-label="Toggle sound">
+          <span id="soundToggleIcon">🔊</span>
+        </button>
+        <button id="colorPickerBtn" class="switch-pill color-picker-btn" type="button" onclick="toggleColorPicker()">
+          <span class="color-dot" id="currentColorDot" style="background:#22c55e;"></span>
+          <span class="switch-label" data-i18n="color">Color</span>
+        </button>
+        <button id="leaveGameBtn" class="switch-pill leave" type="button" onclick="leaveGame()">
+          <span class="switch-label" data-i18n="leaveGame">Leave</span>
+        </button>
+      </div>
     </section>
   </section>
 </main>
+
+<!-- View All Calls Modal -->
+<div id="viewAllCallsOverlay" class="overlay fixed inset-0 z-30 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4">
+  <div class="bg-card border border-line rounded-2xl w-full max-w-md max-h-[80vh] flex flex-col shadow-2xl">
+    <div class="flex items-center justify-between px-4 py-3 border-b border-line">
+      <h3 class="text-base font-bold text-white m-0">All Called Numbers</h3>
+      <button type="button" class="w-8 h-8 rounded-lg flex items-center justify-center text-muted hover:text-white hover:bg-line/50" onclick="closeViewAllCalls()">✕</button>
+    </div>
+    <div id="allCallsList" class="flex-1 overflow-y-auto p-4 grid grid-cols-5 gap-2 content-start"></div>
+    <div class="px-4 py-3 border-t border-line text-center">
+      <span id="allCallsCount" class="text-xs text-muted"></span>
+    </div>
+  </div>
+</div>
 
 <div id="winnerOverlay" class="overlay">
   <div class="winner">
@@ -98,5 +165,6 @@
 </div>
 <script src="i18n.js?v=3"></script>
 <script src="game.js"></script>
+<script>document.addEventListener('DOMContentLoaded',()=>{try{lucide.createIcons();}catch(e){}});</script>
 </body>
 </html>
