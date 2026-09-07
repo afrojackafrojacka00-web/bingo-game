@@ -1,3 +1,39 @@
+
+async function ensureTelegramMenuButton() {
+    const botToken = process.env.TELEGRAM_BOT_TOKEN || process.env.BOT_TOKEN || '';
+    if (!botToken) return;
+    const appUrl = (
+        process.env.PUBLIC_BASE_URL ||
+        process.env.WEBAPP_URL ||
+        process.env.MINI_APP_URL ||
+        process.env.APP_URL ||
+        ''
+    ).replace(/\/$/, '');
+    if (!appUrl || !/^https:\/\//i.test(appUrl)) {
+        console.warn('Telegram Open menu button skipped: set PUBLIC_BASE_URL to your https Mini App URL');
+        return;
+    }
+    const webAppUrl = /index\.html/i.test(appUrl) ? appUrl : (appUrl + '/index.html');
+    try {
+        const res = await fetch('https://api.telegram.org/bot' + botToken + '/setChatMenuButton', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                menu_button: {
+                    type: 'web_app',
+                    text: 'Open',
+                    web_app: { url: webAppUrl },
+                },
+            }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (data.ok) console.log('Telegram menu button: Open →', webAppUrl);
+        else console.warn('setChatMenuButton failed:', data.description || JSON.stringify(data));
+    } catch (e) {
+        console.warn('setChatMenuButton error:', e.message);
+    }
+}
+
 'use strict';
 
 const express = require('express');
@@ -2449,3 +2485,5 @@ try {
 server.listen(PORT, () => console.log(`Bingo server listening on ${PORT}`));
 
 module.exports = { app, server, io, pool };
+
+try { ensureTelegramMenuButton(); } catch (_) {}
