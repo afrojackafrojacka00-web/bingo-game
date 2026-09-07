@@ -1580,6 +1580,27 @@ app.post('/api/deposit-request', moneyLimiter, async (req, res) => {
     }
 });
 
+
+/** Mask reviewer identity based on viewer's role:
+ *  - boss: sees everyone
+ *  - admin: sees admin + super_admin (not boss)
+ *  - super_admin: sees only super_admin
+ */
+function maskReviewer(viewerRole, reviewedBy, reviewedByRole) {
+    if (!reviewedBy) return null;
+    const role = (reviewedByRole || '').toLowerCase();
+    if (viewerRole === 'boss') {
+        return { username: reviewedBy, role };
+    }
+    if (viewerRole === 'admin') {
+        if (role === 'boss') return { username: '••••', role: 'hidden' };
+        return { username: reviewedBy, role };
+    }
+    // super_admin
+    if (role === 'super_admin') return { username: reviewedBy, role };
+    return { username: '••••', role: 'hidden' };
+}
+
 app.get('/api/admin/deposit-requests', async (req, res) => {
     if (!requireAdmin(req, res)) return;
     try {
@@ -1618,7 +1639,15 @@ app.get('/api/admin/deposit-requests', async (req, res) => {
              LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
             [...params, limit, offset]
         );
-        res.json({ success: true, total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)), requests: result.rows });
+        const requests = result.rows.map(row => {
+            const masked = maskReviewer(req.admin.role, row.reviewed_by, row.reviewed_by_role);
+            return {
+                ...row,
+                reviewed_by: masked ? masked.username : null,
+                reviewed_by_role: masked ? masked.role : null,
+            };
+        });
+        res.json({ success: true, total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)), requests });
     } catch (err) {
         console.error('Admin deposits list error:', err);
         res.status(500).json({ success: false, message: 'Server error.' });
@@ -1626,23 +1655,30 @@ app.get('/api/admin/deposit-requests', async (req, res) => {
 });
 
 app.post('/api/admin/deposit-requests/:id/approve', async (req, res) => {
-    const { adminSecret, amount } = req.body;
     if (!requireAdmin(req, res)) return;
     const id = Number(req.params.id);
-    const creditAmount = Number(amount);
-    if (!Number.isInteger(id) || !Number.isFinite(creditAmount) || creditAmount <= 0) {
-        return res.status(400).json({ success: false, message: 'A valid credit amount is required.' });
+    if (!Number.isInteger(id)) {
+        return res.status(400).json({ success: false, message: 'Invalid request id.' });
     }
 
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+        // Row lock prevents two admins approving the same request at once
         const reqRow = await client.query(
             "SELECT * FROM deposit_requests WHERE id = $1 AND status = 'PENDING' FOR UPDATE",
             [id]
         );
         if (!reqRow.rowCount) throw new Error('Request not found or already reviewed.');
         const depositReq = reqRow.rows[0];
+
+        // Amount: explicit body amount, or fall back to user-submitted amount
+        let creditAmount = req.body && req.body.amount != null && req.body.amount !== ''
+            ? Number(req.body.amount)
+            : Number(depositReq.amount);
+        if (!Number.isFinite(creditAmount) || creditAmount <= 0) {
+            throw new Error('A valid credit amount is required (request has no submitted amount).');
+        }
 
         const userRes = await client.query(
             'UPDATE users SET balance = balance + $1 WHERE id = $2 RETURNING balance',
@@ -1652,11 +1688,15 @@ app.post('/api/admin/deposit-requests/:id/approve', async (req, res) => {
             'INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',
             [depositReq.user_id, creditAmount, 'DEPOSIT_APPROVED']
         );
-        await client.query(
-            "UPDATE deposit_requests SET status = 'APPROVED', credited_amount = $1, reviewed_at = NOW() WHERE id = $2",
-            [creditAmount, id]
+        const upd = await client.query(
+            `UPDATE deposit_requests
+             SET status = 'APPROVED', credited_amount = $1, reviewed_at = NOW(),
+                 reviewed_by = $2, reviewed_by_role = $3
+             WHERE id = $4 AND status = 'PENDING'`,
+            [creditAmount, req.admin.username, req.admin.role, id]
         );
-                await client.query('COMMIT');
+        if (upd.rowCount === 0) throw new Error('Request not found or already reviewed.');
+        await client.query('COMMIT');
         res.json({ success: true, balance: Number(userRes.rows[0].balance) });
     } catch (err) {
         await client.query('ROLLBACK');
@@ -1671,12 +1711,13 @@ app.post('/api/admin/deposit-requests/:id/approve', async (req, res) => {
 
 
 app.post('/api/admin/deposit-requests/:id/reject', async (req, res) => {
-    const { adminSecret } = req.body;
     if (!requireAdmin(req, res)) return;
     const id = Number(req.params.id);
     const result = await pool.query(
-        "UPDATE deposit_requests SET status = 'REJECTED', reviewed_at = NOW() WHERE id = $1 AND status = 'PENDING'",
-        [id]
+        `UPDATE deposit_requests
+         SET status = 'REJECTED', reviewed_at = NOW(), reviewed_by = $2, reviewed_by_role = $3
+         WHERE id = $1 AND status = 'PENDING'`,
+        [id, req.admin.username, req.admin.role]
     );
     if (!result.rowCount) return res.status(400).json({ success: false, message: 'Request not found or already reviewed.' });
     res.json({ success: true });
@@ -1758,7 +1799,15 @@ app.get('/api/admin/withdraw-requests', async (req, res) => {
             `SELECT * FROM withdraw_requests ${wsql} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
             [...params, limit, offset]
         );
-        res.json({ success: true, total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)), requests: result.rows });
+        const requests = result.rows.map(row => {
+            const masked = maskReviewer(req.admin.role, row.reviewed_by, row.reviewed_by_role);
+            return {
+                ...row,
+                reviewed_by: masked ? masked.username : null,
+                reviewed_by_role: masked ? masked.role : null,
+            };
+        });
+        res.json({ success: true, total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)), requests });
     } catch (err) {
         console.error('Admin withdraws list error:', err);
         res.status(500).json({ success: false, message: 'Server error.' });
@@ -1766,7 +1815,6 @@ app.get('/api/admin/withdraw-requests', async (req, res) => {
 });
 
 app.post('/api/admin/withdraw-requests/:id/approve', async (req, res) => {
-    const { adminSecret } = req.body;
     if (!requireAdmin(req, res)) return;
     const id = Number(req.params.id);
     const client = await pool.connect();
@@ -1785,10 +1833,13 @@ app.post('/api/admin/withdraw-requests/:id/approve', async (req, res) => {
             'INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',
             [w.user_id, -Number(w.amount), 'WITHDRAWAL_APPROVED']
         );
-        await client.query(
-            "UPDATE withdraw_requests SET status = 'APPROVED', reviewed_at = NOW() WHERE id = $1",
-            [id]
+        const upd = await client.query(
+            `UPDATE withdraw_requests
+             SET status = 'APPROVED', reviewed_at = NOW(), reviewed_by = $2, reviewed_by_role = $3
+             WHERE id = $1 AND status = 'PENDING'`,
+            [id, req.admin.username, req.admin.role]
         );
+        if (upd.rowCount === 0) throw new Error('Request not found or already reviewed.');
         await client.query('COMMIT');
         res.json({ success: true });
     } catch (err) {
@@ -1819,10 +1870,13 @@ app.post('/api/admin/withdraw-requests/:id/reject', async (req, res) => {
             'INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',
             [w.user_id, Number(w.amount), 'WITHDRAWAL_REJECTED_REFUND']
         );
-        await client.query(
-            "UPDATE withdraw_requests SET status = 'REJECTED', reviewed_at = NOW() WHERE id = $1",
-            [id]
+        const upd = await client.query(
+            `UPDATE withdraw_requests
+             SET status = 'REJECTED', reviewed_at = NOW(), reviewed_by = $2, reviewed_by_role = $3
+             WHERE id = $1 AND status = 'PENDING'`,
+            [id, req.admin.username, req.admin.role]
         );
+        if (upd.rowCount === 0) throw new Error('Request not found or already reviewed.');
         await client.query('COMMIT');
         res.json({ success: true });
     } catch (err) {
@@ -1930,7 +1984,15 @@ app.get('/api/admin/transfer-requests', async (req, res) => {
             `SELECT * FROM transfer_requests ${wsql} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
             [...params, limit, offset]
         );
-        res.json({ success: true, total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)), requests: result.rows });
+        const requests = result.rows.map(row => {
+            const masked = maskReviewer(req.admin.role, row.reviewed_by, row.reviewed_by_role);
+            return {
+                ...row,
+                reviewed_by: masked ? masked.username : null,
+                reviewed_by_role: masked ? masked.role : null,
+            };
+        });
+        res.json({ success: true, total, page, limit, totalPages: Math.max(1, Math.ceil(total / limit)), requests });
     } catch (err) {
         console.error('Admin transfers list error:', err);
         res.status(500).json({ success: false, message: 'Server error.' });
@@ -1966,8 +2028,10 @@ app.post('/api/admin/transfer-requests/:id/approve', async (req, res) => {
             [recipient.rows[0].id, Number(t.amount), 'TRANSFER_RECEIVED']
         );
         await client.query(
-            "UPDATE transfer_requests SET status = 'APPROVED', reviewed_at = NOW() WHERE id = $1",
-            [id]
+            `UPDATE transfer_requests
+             SET status = 'APPROVED', reviewed_at = NOW(), reviewed_by = $2, reviewed_by_role = $3
+             WHERE id = $1 AND status = 'PENDING'`,
+            [id, req.admin.username, req.admin.role]
         );
         await client.query('COMMIT');
         res.json({ success: true });
@@ -1999,8 +2063,10 @@ app.post('/api/admin/transfer-requests/:id/reject', async (req, res) => {
             [t.sender_id, Number(t.amount), 'TRANSFER_REJECTED_REFUND']
         );
         await client.query(
-            "UPDATE transfer_requests SET status = 'REJECTED', reviewed_at = NOW() WHERE id = $1",
-            [id]
+            `UPDATE transfer_requests
+             SET status = 'REJECTED', reviewed_at = NOW(), reviewed_by = $2, reviewed_by_role = $3
+             WHERE id = $1 AND status = 'PENDING'`,
+            [id, req.admin.username, req.admin.role]
         );
         await client.query('COMMIT');
         res.json({ success: true });

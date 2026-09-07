@@ -467,11 +467,6 @@ table.data tr:hover td { background: var(--card-hover); }
   <header class="topbar">
     <button class="mobile-toggle" onclick="document.getElementById('sidebar').classList.toggle('open')" aria-label="Menu">☰</button>
     <div class="topbar-title" id="pageTitle">Dashboard</div>
-    <div id="loginArea" class="secret-wrap" style="gap:8px;align-items:center;">
-      <input type="text" id="loginUser" placeholder="Username" autocomplete="username" style="width:120px;">
-      <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password" style="width:120px;">
-      <button class="btn btn-primary btn-sm" id="loginBtn" onclick="doLogin()">Login</button>
-    </div>
     <div id="userArea" class="secret-wrap" style="display:none;gap:10px;align-items:center;">
       <span id="loggedAs" style="font-size:13px;color:var(--muted);"></span>
       <button class="btn btn-secondary btn-sm" onclick="doLogout()">Logout</button>
@@ -1388,32 +1383,24 @@ function doLogout() {
   localStorage.removeItem('adminToken');
   localStorage.removeItem('adminUser');
   localStorage.removeItem('adminRole');
-  document.getElementById('loginArea').style.display = '';
-  document.getElementById('userArea').style.display = 'none';
-  document.getElementById('loginPass').value = '';
-  applyRoleUI();
-  // clear panels
-  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-  const dash = document.getElementById('panel-dashboard');
-  if (dash) dash.classList.add('active');
+  window.location.replace('/admin-login.html');
 }
 
 function onLoggedIn() {
-  document.getElementById('loginArea').style.display = 'none';
-  document.getElementById('userArea').style.display = 'flex';
+  const ua = document.getElementById('userArea');
+  if (ua) ua.style.display = 'flex';
   const roleLabel = { boss: 'Boss', admin: 'Admin', super_admin: 'Super Admin' }[currentAdmin.role] || currentAdmin.role;
   document.getElementById('loggedAs').textContent = currentAdmin.username + ' (' + roleLabel + ')';
   applyRoleUI();
 }
 
-// Restore session on load
+// Restore session on load — redirect to dedicated login page if not authenticated
 (async function restoreSession() {
   const token = localStorage.getItem('adminToken');
   const username = localStorage.getItem('adminUser');
   const role = localStorage.getItem('adminRole');
   if (token && username && role) {
     currentAdmin = { token, username, role };
-    // Validate token still works
     try {
       const r = await fetch('/api/admin/me', { headers: { 'x-admin-token': token } });
       const d = await r.json();
@@ -1425,18 +1412,10 @@ function onLoggedIn() {
         return;
       }
     } catch (_) {}
-    // Token invalid
-    doLogout();
-  } else {
-    applyRoleUI(); // hide everything until login
   }
+  // Not logged in or token invalid
+  window.location.replace('/admin-login.html');
 })();
-
-// Enter key on password
-document.addEventListener('DOMContentLoaded', () => {
-  const pass = document.getElementById('loginPass');
-  if (pass) pass.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
-});
 
 function fmtMoney(n) { return Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtDate(d) { if (!d) return '—'; try { return new Date(d).toLocaleString(); } catch { return String(d); } }
@@ -2378,6 +2357,7 @@ async function loadDepositRequests(page) {
         '<div class="item-meta">' + esc(x.method) + ' · Amount: <span class="mono">' + (x.amount != null ? fmtMoney(x.amount) : '—') + '</span>' +
         (x.transaction_id ? ' · Txn: <span class="mono">' + esc(x.transaction_id) + '</span>' : '') +
         (x.credited_amount != null ? ' · Credited: ' + fmtMoney(x.credited_amount) : '') +
+        (x.reviewed_by ? ' · By: <strong>' + esc(x.reviewed_by) + '</strong>' + (x.reviewed_by_role && x.reviewed_by_role !== 'hidden' ? ' (' + esc(x.reviewed_by_role) + ')' : '') : '') +
         (x.auto_verify_enabled === false ? ' · <span class="badge badge-muted">auto-verify off</span>' : '') +
         '</div>' +
         (x.verification_note ? '<div style="margin-top:8px;padding:10px 12px;border-radius:8px;font-size:12.5px;line-height:1.45;border:1px solid ' +
@@ -2388,7 +2368,7 @@ async function loadDepositRequests(page) {
         (x.submitted_text ? '<div style="margin-top:6px;font-size:12px;white-space:pre-wrap;background:var(--bg-elevated);padding:8px;border-radius:6px;">' + esc(x.submitted_text) + '</div>' : '') +
         '<div class="item-meta">' + fmtDate(x.created_at) + '</div>' +
         (status === 'pending' ? '<div class="btn-group" style="margin-top:8px;">' +
-          '<button class="btn btn-success btn-sm" onclick="approveDeposit(' + x.id + ')">Approve</button>' +
+          '<button class="btn btn-success btn-sm" onclick="approveDeposit(' + x.id + ', ' + (x.amount != null ? x.amount : 'null') + ')">Approve</button>' +
           '<button class="btn btn-danger btn-sm" onclick="rejectDeposit(' + x.id + ')">Reject</button></div>' : '') +
         '</div>';
     }).join('');
@@ -2398,14 +2378,30 @@ async function loadDepositRequests(page) {
     '<button class="btn btn-secondary btn-sm"' + ((d.page||1)<=1?' disabled':'') + ' onclick="loadDepositRequests(' + ((d.page||1)-1) + ')">Prev</button>' +
     '<button class="btn btn-secondary btn-sm"' + ((d.page||1)>=(d.totalPages||1)?' disabled':'') + ' onclick="loadDepositRequests(' + ((d.page||1)+1) + ')">Next</button>';
 }
-async function approveDeposit(id) {
+async function approveDeposit(id, submittedAmount) {
   if (!requireSecret()) return;
-  const amount = await openAdjustModal('Approve deposit', 'Enter the amount (Birr) to credit to the user.');
-  if (amount === null || amount === undefined) return;
+  const hasSubmitted = submittedAmount != null && Number(submittedAmount) > 0;
+  let amount = null;
+  if (hasSubmitted) {
+    const useSubmitted = confirm(
+      'User submitted: ' + Number(submittedAmount).toFixed(2) + ' Birr\n\n' +
+      'OK = Approve submitted amount\n' +
+      'Cancel = Enter a different amount'
+    );
+    if (useSubmitted) {
+      amount = Number(submittedAmount);
+    } else {
+      amount = await openAdjustModal('Approve deposit', 'Enter the amount (Birr) to credit. Submitted: ' + Number(submittedAmount).toFixed(2));
+      if (amount === null || amount === undefined) return;
+    }
+  } else {
+    amount = await openAdjustModal('Approve deposit', 'Enter the amount (Birr) to credit to the user.');
+    if (amount === null || amount === undefined) return;
+  }
   if (amount <= 0) return alert('Enter a positive amount.');
   if (!(await confirmAction('Confirm approval', 'Credit ' + amount + ' Birr for deposit #' + id + '?', 'Approve'))) return;
   const r = await fetch('/api/admin/deposit-requests/' + id + '/approve', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...adminSecretHeader() },
     body: JSON.stringify({ adminSecret: getSecret(), amount: amount })
   });
   const d = await r.json();
@@ -2448,7 +2444,9 @@ async function loadWithdrawRequests(page) {
       '<div class="item-meta">' + esc(x.method) + ' · <span class="mono text-red">' + fmtMoney(x.amount) + ' Br</span>' +
       ' · To: <span class="mono">' + esc(x.destination) + '</span>' +
       (x.account_owner_name ? ' (' + esc(x.account_owner_name) + ')' : '') + '</div>' +
-      '<div class="item-meta">' + fmtDate(x.created_at) + '</div>' +
+      '<div class="item-meta">' + fmtDate(x.created_at) +
+      (x.reviewed_by ? ' · By: <strong>' + esc(x.reviewed_by) + '</strong>' + (x.reviewed_by_role && x.reviewed_by_role !== 'hidden' ? ' (' + esc(x.reviewed_by_role) + ')' : '') : '') +
+      '</div>' +
       (status === 'pending' ? '<div class="btn-group" style="margin-top:8px;">' +
         '<button class="btn btn-success btn-sm" onclick="approveWithdraw(' + x.id + ')">Approve</button>' +
         '<button class="btn btn-danger btn-sm" onclick="rejectWithdraw(' + x.id + ')">Reject</button></div>' : '') +
@@ -2463,7 +2461,7 @@ async function approveWithdraw(id) {
   if (!requireSecret()) return;
   if (!confirm('Approve this withdrawal?')) return;
   const r = await fetch('/api/admin/withdraw-requests/' + id + '/approve', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...adminSecretHeader() },
     body: JSON.stringify({ adminSecret: getSecret() })
   });
   const d = await r.json();

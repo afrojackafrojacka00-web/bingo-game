@@ -288,6 +288,14 @@ await pool.query('ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS prize_pool 
                 );
             }
         }
+        // Who approved/rejected deposit & withdraw requests
+        await pool.query(`ALTER TABLE deposit_requests ADD COLUMN IF NOT EXISTS reviewed_by VARCHAR(50);`);
+        await pool.query(`ALTER TABLE deposit_requests ADD COLUMN IF NOT EXISTS reviewed_by_role VARCHAR(20);`);
+        await pool.query(`ALTER TABLE withdraw_requests ADD COLUMN IF NOT EXISTS reviewed_by VARCHAR(50);`);
+        await pool.query(`ALTER TABLE withdraw_requests ADD COLUMN IF NOT EXISTS reviewed_by_role VARCHAR(20);`);
+        await pool.query(`ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS reviewed_by VARCHAR(50);`);
+        await pool.query(`ALTER TABLE transfer_requests ADD COLUMN IF NOT EXISTS reviewed_by_role VARCHAR(20);`);
+
         // --------------- Multi-role Admin Users ---------------
         await pool.query(`
             CREATE TABLE IF NOT EXISTS admin_users (
