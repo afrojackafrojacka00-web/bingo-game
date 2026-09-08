@@ -58,8 +58,8 @@ button {
   cursor: pointer;
 }
 
-.btn-play { background: linear-gradient(135deg, #3b82f6, #6366f1); font-size: 18px; padding: 16px; margin: 0; }
-.btn-phone { background: #3b82f6; font-size: 16px; padding: 14px; }
+.btn-play { background: linear-gradient(135deg, #3b82f6, #6366f1); font-size: 14px; padding: 11px 14px; margin: 0; }
+.btn-phone { background: #3b82f6; font-size: 13px; padding: 10px 12px; }
 .secondary-btn { background: #334155; }
 .hidden { display: none !important; }
 
@@ -137,7 +137,7 @@ button {
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  width: 25%;
+  width: 20%;
 }
 
 .nav-item.active { color: #3b82f6; font-weight: 700; }

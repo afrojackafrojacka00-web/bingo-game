@@ -1,6 +1,6 @@
 window.BINGO_I18N = {
   en: {
-    navGames: "Games", navHistory: "History", navWallet: "Wallet", navAccount: "Account",
+    navGames: "Games", navHistory: "History", navLeaderboard: "Leaderboard", navWallet: "Wallet", navAccount: "Account", leaderboardTitle: "🏅 Leaderboard", leaderboardSoon: "Coming soon.",
     readyTitle: "Ready to Play? 🎲", readyBody: "Choose a stake, join a room, select your cards and play.",
     playBtn: "Play Classic Bingo 🚀", instantBtn: "⚡ Instant Bingo", specialPlay: "Play",
     specialNotStarted: "Game has not started yet",
@@ -9,7 +9,7 @@ window.BINGO_I18N = {
     historyLoading: "Loading your game history…", historyFail: "Could not load history.",
     accountTitle: "Account Settings ⚙️",
     accountBody: "Set a password for website login (min 6 characters). Confirm password below.",
-    accountSaveBtn: "Save username & password 🔒", accountUsernameLabel: "Username",
+    accountSaveBtn: "Save", accountUsernameLabel: "Username",
     accountUsernameHint: "Keep this username or change it. Used for web login.",
     accountWebPasswordNote: "Password can only be set or changed inside the Telegram Mini App for security.",
     profileTitle: "👤 Profile", profileUsernameLbl: "USERNAME", profilePhoneLbl: "PHONE", profileLangLbl: "Language",
@@ -108,7 +108,7 @@ window.BINGO_I18N = {
     bingoRoom: "Bingo Room",
   },
   am: {
-    navGames: "ጨዋታዎች", navHistory: "ታሪክ", navWallet: "ዋሌት", navAccount: "መለያ",
+    navGames: "ጨዋታዎች", navHistory: "ታሪክ", navLeaderboard: "ደረጃ ሰሌዳ", navWallet: "ዋሌት", navAccount: "መለያ", leaderboardTitle: "🏅 ደረጃ ሰሌዳ", leaderboardSoon: "በቅርቡ።",
     readyTitle: "ለመጫወት ተዘጋጅተዋል? 🎲", readyBody: "ውርርድ ይምረጡ፣ ክፍል ይቀላቀሉ፣ ካርድዎን ይምረጡ እና ይጫወቱ።",
     playBtn: "ክላሲክ ቢንጎ ይጫወቱ 🚀", instantBtn: "⚡ ፈጣን ቢንጎ", specialPlay: "ተጫወት",
     specialNotStarted: "ጨዋታው ገና አልጀመረም",
@@ -117,7 +117,7 @@ window.BINGO_I18N = {
     historyLoading: "የጨዋታ ታሪክዎ በመጫን ላይ…", historyFail: "ታሪክ መጫን አልተቻለም።",
     accountTitle: "የመለያ ቅንብሮች ⚙️",
     accountBody: "ለድር መግቢያ የይለፍ ቃል ያዘጋጁ (ቢያንስ 6 ቁምፊ)። ከታች ያረጋግጡ።",
-    accountSaveBtn: "መጠቀሚያ ስም እና የይለፍ ቃል አስቀምጥ 🔒", accountUsernameLabel: "መጠቀሚያ ስም",
+    accountSaveBtn: "አስቀምጥ", accountUsernameLabel: "መጠቀሚያ ስም",
     accountUsernameHint: "ይህን መጠቀሚያ ስም ይጠብቁ ወይም ይቀይሩ። ለድር መግቢያ ያገለግላል።",
     accountWebPasswordNote: "የይለፍ ቃል ማስተካከል የሚቻለው በቴሌግራም Mini App ውስጥ ብቻ ነው።",
     profileTitle: "👤 መገለጫ", profileUsernameLbl: "የተጠቃሚ ስም", profilePhoneLbl: "ስልክ", profileLangLbl: "ቋንቋ",

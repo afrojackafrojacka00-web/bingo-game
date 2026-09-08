@@ -157,14 +157,14 @@ input:focus, textarea:focus, select:focus {
 input::placeholder, textarea::placeholder { color:var(--muted); }
 button {
   width:100%;
-  padding:14px;
-  margin:8px 0;
+  padding:10px 12px;
+  margin:6px 0;
   border-radius:var(--radius-sm);
   border:none;
   background:var(--blue);
   color:#fff;
   font-weight:600;
-  font-size:15px;
+  font-size:13px;
   font-family:inherit;
   cursor:pointer;
   transition:background .15s ease, transform .1s ease, opacity .15s ease;
@@ -174,9 +174,9 @@ button:active:not(:disabled) { transform:scale(0.98); }
 button:disabled { opacity:.55; cursor:not-allowed; }
 .btn-play {
   background:linear-gradient(135deg, var(--blue), #6366f1);
-  font-size:18px;
+  font-size:14px;
   font-weight:700;
-  padding:16px;
+  padding:11px 14px;
   margin:0;
   letter-spacing:-0.01em;
 }
@@ -374,7 +374,7 @@ body.instant-immersive #depositFloatChip{display:none !important;}
   font-size:11px;
   font-weight:500;
   cursor:pointer;
-  width:25%;
+  width:20%;
   line-height:1.5;
   transition:color .15s ease;
   -webkit-tap-highlight-color:transparent;
@@ -607,17 +607,17 @@ body.instant-immersive #depositFloatChip{display:none !important;}
   background:var(--card); 
   border:1px solid var(--card-border); 
   border-radius:12px; 
-  padding:14px 4px; 
+  padding:10px 4px; 
   display:flex; 
   flex-direction:column; 
   align-items:center; 
-  gap:6px; 
-  font-size:22px;
+  gap:4px; 
+  font-size:18px;
   color:var(--text-color);
   width:100%;
   margin:0;
 }
-.wallet-action-btn span { font-size:12px; font-weight:bold; color:var(--text-color); }
+.wallet-action-btn span { font-size:11px; font-weight:bold; color:var(--text-color); }
 .pay-method-toggle { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px; }
 .pay-method-btn { 
   background:var(--pay-method-bg); 
@@ -1026,7 +1026,17 @@ body.instant-immersive .instant-sticky-play{display:none;}
   </select>
   <label class="small" style="display:block;text-align:left;margin-top:14px;" data-i18n="displayName">Display name</label>
   <input id="displayNameInput" placeholder="Shown name (optional)">
-  <button class="btn-secondary" style="margin-top:8px;" onclick="saveDisplayName()">Save Display Name</button>
+  <button class="btn-secondary" style="margin-top:8px;" onclick="saveDisplayName()">Save</button>
+  <div style="margin-top:18px;text-align:left;">
+   <label class="small" style="display:block;margin-bottom:8px;">Number-Calling Voice</label>
+   <div id="voicePackPicker" class="voice-pack-grid">
+     <button type="button" class="voice-pack-btn" data-pack="john" onclick="selectVoicePack('john')">👨🏽<span>John</span></button>
+     <button type="button" class="voice-pack-btn" data-pack="amharic" onclick="selectVoicePack('amharic')">🇪🇹<span>Amharic</span></button>
+     <button type="button" class="voice-pack-btn" data-pack="oromifa" onclick="selectVoicePack('oromifa')">👳<span>Oromifa</span></button>
+     <button type="button" class="voice-pack-btn" data-pack="jerry" onclick="selectVoicePack('jerry')">👩🏽<span>Jerry</span></button>
+     <button type="button" class="voice-pack-btn" data-pack="arada" onclick="selectVoicePack('arada')">😎<span>Arada</span></button>
+   </div>
+  </div>
  </div>
 </div>
 
@@ -1332,31 +1342,30 @@ body.instant-immersive .instant-sticky-play{display:none;}
  <div id="webPasswordSection">
    <p class="small" data-i18n="accountBody">Set a password for standard web login (Telegram only).</p>
    <input type="password" id="webPasswordInput" placeholder="New password (min 6 characters)" autocomplete="new-password">
-   <input type="password" id="webPasswordConfirmInput" placeholder="Confirm password" autocomplete="new-password" style="margin-top:8px;">
-   <button class="btn-play" onclick="setWebPassword()" data-i18n="accountSaveBtn">Save Web Password 🔒</button>
+   <input type="password" id="webPasswordConfirmInput" placeholder="Confirm password" autocomplete="new-password" style="margin-top:8px;margin-bottom:16px;">
+   <button class="btn-play" onclick="setWebPassword()" data-i18n="accountSaveBtn" style="margin-top:4px;">Save</button>
  </div>
  <div id="webPasswordWebOnlyNote" class="hidden" style="margin-top:8px;">
    <p class="small" data-i18n="accountWebPasswordNote">Password can only be set or changed inside the Telegram Mini App for security.</p>
  </div>
- <div style="margin-top:22px;text-align:left;">
-   <label class="small" style="display:block;margin-bottom:8px;">Number-Calling Voice</label>
-   <div id="voicePackPicker" class="voice-pack-grid">
-     <button class="voice-pack-btn" data-pack="john" onclick="selectVoicePack('john')">👨🏽<span>John</span></button>
-     <button class="voice-pack-btn" data-pack="amharic" onclick="selectVoicePack('amharic')">🧔🏽<span>Amharic</span></button>
-     <button class="voice-pack-btn" data-pack="oromifa" onclick="selectVoicePack('oromifa')">👳🏽<span>Oromifa</span></button>
-     <button class="voice-pack-btn" data-pack="jerry" onclick="selectVoicePack('jerry')">👩🏽<span>Jerry</span></button>
-     <button class="voice-pack-btn" data-pack="arada" onclick="selectVoicePack('arada')">😎<span>Arada</span></button>
-   </div>
- </div>
-</div></div>
+ </div></div>
+
+<div id="tabLeaderboard" class="tab-content hidden">
+  <div class="card">
+    <div class="page-title"><h2 style="margin:0" data-i18n="leaderboardTitle">🏅 Leaderboard</h2></div>
+    <p class="small" style="margin-top:12px;" data-i18n="leaderboardSoon">Coming soon.</p>
+    <div id="leaderboardList" class="history-list"></div>
+  </div>
+</div>
 
 <div id="bottomNav" class="bottom-nav hidden">
   <div class="nav-item active" onclick="switchTab('tabGames',this)">🎮<br><span data-i18n="navGames">Games</span></div>
   <div class="nav-item" onclick="switchTab('tabHistory',this)">🏆<br><span data-i18n="navHistory">History</span></div>
+  <div class="nav-item" onclick="switchTab('tabLeaderboard',this)">🏅<br><span data-i18n="navLeaderboard">Leaderboard</span></div>
   <div class="nav-item" onclick="switchTab('tabWallet',this)">💰<br><span data-i18n="navWallet">Wallet</span></div>
   <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
 </div>
 <script src="i18n.js?v=3""></script>
-<script src="app.js?v=20260908-ui-home"></script>
+<script src="app.js?v=20260908-profile-voice"></script>
 </body>
 </html>

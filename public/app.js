@@ -669,7 +669,7 @@ async function openQuickDeposit() {
     } catch (e) {
         console.error(e);
         // Fallback: go to wallet tab
-        switchTab('tabWallet', document.querySelectorAll('.nav-item')[2]);
+        switchTab('tabWallet', document.querySelector('.nav-item[onclick*="tabWallet"]'));
     }
 }
 window.openQuickDeposit = openQuickDeposit;
@@ -1834,6 +1834,7 @@ function switchTab(tabId, navElement) {
     }
     if (tabId === 'tabWallet') { fetchWallet(currentUsername); fetchPendingRequests(currentUsername); }
     if (tabId === 'tabAccount') applyAccountTabForClient();
+    // tabLeaderboard: placeholder for now
 }
 
 function logoutUser() {
