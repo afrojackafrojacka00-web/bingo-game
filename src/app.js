@@ -2840,6 +2840,333 @@ attachGameEngine({
   getRoomCutPercent,
 });
 
+
+// ---------------- CURATED LEADERBOARD ----------------
+function leaderboardPeriodSql(period, column = 'created_at') {
+    const p = String(period || 'week').toLowerCase();
+    if (p === 'today' || p === 'day') return ` AND ${column} >= CURRENT_DATE`;
+    if (p === 'month') return ` AND ${column} >= date_trunc('month', CURRENT_TIMESTAMP)`;
+    if (p === 'all' || p === 'alltime') return '';
+    // default week
+    return ` AND ${column} >= date_trunc('week', CURRENT_TIMESTAMP)`;
+}
+
+// Public: players see published board only when visible
+app.get('/api/leaderboard', async (req, res) => {
+    try {
+        const settings = await pool.query('SELECT is_visible, headline, updated_at FROM leaderboard_settings WHERE id = 1');
+        const s = settings.rows[0] || { is_visible: false, headline: '' };
+        if (!s.is_visible) {
+            return res.json({ success: true, visible: false, headline: '', entries: [] });
+        }
+        const entries = await pool.query(
+            `SELECT id, rank_position, username, phone_last3, display_name, award_amount, category, metric_value
+             FROM leaderboard_entries ORDER BY rank_position ASC, id ASC`
+        );
+        res.json({
+            success: true,
+            visible: true,
+            headline: s.headline || '',
+            entries: entries.rows.map((r) => ({
+                id: r.id,
+                rank: r.rank_position,
+                username: r.username,
+                phoneLast3: r.phone_last3 || '***',
+                displayName: r.display_name || r.username,
+                award: Number(r.award_amount || 0),
+                category: r.category,
+                metric: Number(r.metric_value || 0),
+            })),
+        });
+    } catch (err) {
+        console.error('public leaderboard', err);
+        res.status(500).json({ success: false, message: 'Server error.' });
+    }
+});
+
+// Admin: get settings + entries
+app.get('/api/admin/leaderboard', async (req, res) => {
+    if (!requireAdmin(req, res, 'leaderboard')) return;
+    try {
+        const settings = await pool.query('SELECT is_visible, headline, updated_by, updated_at FROM leaderboard_settings WHERE id = 1');
+        const entries = await pool.query(
+            `SELECT id, rank_position, username, phone_last3, display_name, award_amount, category, metric_value, period, created_by, created_at
+             FROM leaderboard_entries ORDER BY rank_position ASC, id ASC`
+        );
+        const s = settings.rows[0] || {};
+        res.json({
+            success: true,
+            settings: {
+                visible: !!s.is_visible,
+                headline: s.headline || '',
+                updatedBy: s.updated_by || null,
+                updatedAt: s.updated_at || null,
+            },
+            entries: entries.rows.map((r) => ({
+                id: r.id,
+                rank: r.rank_position,
+                username: r.username,
+                phoneLast3: r.phone_last3,
+                displayName: r.display_name,
+                award: Number(r.award_amount || 0),
+                category: r.category,
+                metric: Number(r.metric_value || 0),
+                period: r.period,
+                createdBy: r.created_by,
+                createdAt: r.created_at,
+            })),
+        });
+    } catch (err) {
+        console.error('admin leaderboard get', err);
+        res.status(500).json({ success: false, message: 'Server error.' });
+    }
+});
+
+// Admin: update visibility + headline
+app.put('/api/admin/leaderboard/settings', async (req, res) => {
+    if (!requireAdmin(req, res, 'leaderboard')) return;
+    try {
+        const { visible, headline } = req.body || {};
+        await pool.query(`INSERT INTO leaderboard_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
+        if (visible !== undefined && headline !== undefined) {
+            await pool.query(
+                `UPDATE leaderboard_settings SET is_visible = $1, headline = $2, updated_by = $3, updated_at = NOW() WHERE id = 1`,
+                [!!visible, String(headline || '').slice(0, 200), req.admin.username]
+            );
+        } else if (visible !== undefined) {
+            await pool.query(
+                `UPDATE leaderboard_settings SET is_visible = $1, updated_by = $2, updated_at = NOW() WHERE id = 1`,
+                [!!visible, req.admin.username]
+            );
+        } else if (headline !== undefined) {
+            await pool.query(
+                `UPDATE leaderboard_settings SET headline = $1, updated_by = $2, updated_at = NOW() WHERE id = 1`,
+                [String(headline || '').slice(0, 200), req.admin.username]
+            );
+        }
+        res.json({ success: true });
+    } catch (err) {
+        console.error('leaderboard settings', err);
+        res.status(500).json({ success: false, message: 'Server error.' });
+    }
+});
+
+// Admin: candidates by category + period
+app.get('/api/admin/leaderboard/candidates', async (req, res) => {
+    if (!requireAdmin(req, res, 'leaderboard')) return;
+    try {
+        const category = String(req.query.category || 'deposits').toLowerCase();
+        const period = String(req.query.period || 'week').toLowerCase();
+        const limit = Math.min(50, Math.max(5, parseInt(req.query.limit, 10) || 20));
+        let rows = [];
+
+        if (category === 'deposits') {
+            const periodSql = leaderboardPeriodSql(period, 'd.created_at');
+            const r = await pool.query(
+                `SELECT u.username, u.phone_number, u.display_name,
+                        COALESCE(SUM(COALESCE(d.credited_amount, d.amount)),0)::float AS metric
+                 FROM users u
+                 INNER JOIN deposit_requests d ON LOWER(d.username) = LOWER(u.username) AND d.status = 'APPROVED' ${periodSql}
+                 GROUP BY u.username, u.phone_number, u.display_name
+                 ORDER BY metric DESC
+                 LIMIT $1`,
+                [limit]
+            );
+            rows = r.rows;
+        } else if (category === 'games' || category === 'played') {
+            // Union plays from classic, instant, special
+            const pClassic = leaderboardPeriodSql(period, 'gs.created_at').replace(/^\s*AND/, '');
+            const pInstant = leaderboardPeriodSql(period, 'e.created_at').replace(/^\s*AND/, '');
+            const pSpecial = leaderboardPeriodSql(period, 'se.created_at').replace(/^\s*AND/, '');
+            const classicWhere = pClassic ? `AND ${pClassic}` : '';
+            const instantWhere = pInstant ? `AND ${pInstant}` : '';
+            const specialWhere = pSpecial ? `AND ${pSpecial}` : '';
+            const r = await pool.query(
+                `WITH plays AS (
+                    SELECT LOWER(gp.username) AS uname, COUNT(*)::int AS c
+                    FROM game_participants gp
+                    JOIN game_sessions gs ON gs.id = gp.game_id
+                    WHERE 1=1 ${classicWhere}
+                    GROUP BY LOWER(gp.username)
+                    UNION ALL
+                    SELECT LOWER(e.username), COUNT(*)::int
+                    FROM instant_entries e
+                    WHERE 1=1 ${instantWhere}
+                    GROUP BY LOWER(e.username)
+                    UNION ALL
+                    SELECT LOWER(se.username), COUNT(*)::int
+                    FROM special_event_entries se
+                    WHERE 1=1 ${specialWhere}
+                    GROUP BY LOWER(se.username)
+                 ),
+                 totals AS (
+                    SELECT uname, SUM(c)::int AS metric FROM plays GROUP BY uname
+                 )
+                 SELECT u.username, u.phone_number, u.display_name, t.metric::float AS metric
+                 FROM totals t
+                 JOIN users u ON LOWER(u.username) = t.uname
+                 ORDER BY t.metric DESC
+                 LIMIT $1`,
+                [limit]
+            );
+            rows = r.rows;
+        } else if (category === 'invites' || category === 'referrals') {
+            const periodSql = leaderboardPeriodSql(period, 'u2.created_at');
+            const r = await pool.query(
+                `SELECT u.username, u.phone_number, u.display_name,
+                        COUNT(u2.id)::float AS metric
+                 FROM users u
+                 LEFT JOIN users u2 ON LOWER(u2.referred_by) = LOWER(u.username) ${periodSql.replace(' AND ', ' AND ')}
+                 GROUP BY u.username, u.phone_number, u.display_name
+                 HAVING COUNT(u2.id) > 0
+                 ORDER BY metric DESC
+                 LIMIT $1`,
+                [limit]
+            );
+            rows = r.rows;
+        } else {
+            return res.status(400).json({ success: false, message: 'Unknown category.' });
+        }
+
+        res.json({
+            success: true,
+            category,
+            period,
+            candidates: rows.map((r) => {
+                const phone = String(r.phone_number || '');
+                const last3 = phone.replace(/\D/g, '').slice(-3) || '***';
+                return {
+                    username: r.username,
+                    displayName: r.display_name || r.username,
+                    phoneLast3: last3,
+                    metric: Number(r.metric || 0),
+                };
+            }),
+        });
+    } catch (err) {
+        console.error('leaderboard candidates', err);
+        res.status(500).json({ success: false, message: 'Server error.' });
+    }
+});
+
+// Admin: publish entries (replace entire board)
+app.post('/api/admin/leaderboard/publish', async (req, res) => {
+    if (!requireAdmin(req, res, 'leaderboard')) return;
+    try {
+        const { entries, headline, visible } = req.body || {};
+        if (!Array.isArray(entries)) {
+            return res.status(400).json({ success: false, message: 'entries array required.' });
+        }
+        if (entries.length > 50) {
+            return res.status(400).json({ success: false, message: 'Max 50 entries.' });
+        }
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            if (headline !== undefined || visible !== undefined) {
+                await client.query(
+                    `UPDATE leaderboard_settings SET
+                       headline = COALESCE($1, headline),
+                       is_visible = COALESCE($2, is_visible),
+                       updated_by = $3,
+                       updated_at = NOW()
+                     WHERE id = 1`,
+                    [
+                        headline === undefined ? null : String(headline).slice(0, 200),
+                        visible === undefined ? null : !!visible,
+                        req.admin.username,
+                    ]
+                );
+            }
+            await client.query('DELETE FROM leaderboard_entries');
+            let rank = 1;
+            for (const e of entries) {
+                const username = String(e.username || '').trim();
+                if (!username) continue;
+                const userR = await client.query(
+                    `SELECT username, phone_number, display_name FROM users WHERE LOWER(username) = LOWER($1) LIMIT 1`,
+                    [username]
+                );
+                if (!userR.rowCount) continue;
+                const u = userR.rows[0];
+                const phone = String(u.phone_number || '');
+                const last3 = (e.phoneLast3 || phone.replace(/\D/g, '').slice(-3) || '***').toString().slice(-3);
+                const award = Number(e.award);
+                await client.query(
+                    `INSERT INTO leaderboard_entries
+                     (rank_position, username, phone_last3, display_name, award_amount, category, metric_value, period, created_by)
+                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+                    [
+                        Number(e.rank) || rank,
+                        u.username,
+                        last3,
+                        u.display_name || u.username,
+                        Number.isFinite(award) ? award : 0,
+                        e.category ? String(e.category).slice(0, 30) : null,
+                        Number(e.metric) || 0,
+                        e.period ? String(e.period).slice(0, 20) : null,
+                        req.admin.username,
+                    ]
+                );
+                rank += 1;
+            }
+            await client.query(
+                `UPDATE leaderboard_settings SET updated_by = $1, updated_at = NOW() WHERE id = 1`,
+                [req.admin.username]
+            );
+            await client.query('COMMIT');
+        } catch (e) {
+            await client.query('ROLLBACK');
+            throw e;
+        } finally {
+            client.release();
+        }
+        res.json({ success: true });
+    } catch (err) {
+        console.error('leaderboard publish', err);
+        res.status(500).json({ success: false, message: 'Server error.' });
+    }
+});
+
+// Admin: remove one entry
+app.delete('/api/admin/leaderboard/entries/:id', async (req, res) => {
+    if (!requireAdmin(req, res, 'leaderboard')) return;
+    try {
+        const id = parseInt(req.params.id, 10);
+        await pool.query('DELETE FROM leaderboard_entries WHERE id = $1', [id]);
+        // Re-pack ranks
+        await pool.query(`
+            WITH ordered AS (
+              SELECT id, ROW_NUMBER() OVER (ORDER BY rank_position ASC, id ASC) AS rn
+              FROM leaderboard_entries
+            )
+            UPDATE leaderboard_entries e SET rank_position = o.rn
+            FROM ordered o WHERE e.id = o.id
+        `);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('leaderboard delete entry', err);
+        res.status(500).json({ success: false, message: 'Server error.' });
+    }
+});
+
+// Admin: clear all
+app.delete('/api/admin/leaderboard/entries', async (req, res) => {
+    if (!requireAdmin(req, res, 'leaderboard')) return;
+    try {
+        await pool.query('DELETE FROM leaderboard_entries');
+        await pool.query(
+            `UPDATE leaderboard_settings SET updated_by = $1, updated_at = NOW() WHERE id = 1`,
+            [req.admin.username]
+        );
+        res.json({ success: true });
+    } catch (err) {
+        console.error('leaderboard clear', err);
+        res.status(500).json({ success: false, message: 'Server error.' });
+    }
+});
+
+
 // ---- Instant Bingo (isolated module; shares wallet only) ----
 try {
   const { registerInstantRoutes } = require('./routes/instant');

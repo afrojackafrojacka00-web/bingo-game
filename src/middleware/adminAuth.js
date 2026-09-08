@@ -30,6 +30,7 @@ const ROLE_PERMISSIONS = {
     'transfers',
     'announcements',
     'referrals',
+    'leaderboard',
     'gamerooms',
     'gamehistory',
     'houseprofit',

@@ -423,7 +423,206 @@ table.data tr:hover td { background: var(--card-hover); }
 .inst-diff-btns button.active{border-color:var(--blue);background:rgba(59,130,246,.18);color:var(--blue);}
 
 </style>
-  <script src="/socket.io/socket.io.js"></script>
+  <script src="/socket.io/socket.io.js">
+// ===================== CURATED LEADERBOARD =====================
+let lbDraft = [];
+
+async function loadAdminLeaderboard() {
+  if (!getToken()) return;
+  try {
+    const r = await fetch('/api/admin/leaderboard', { headers: adminSecretHeader() });
+    const d = await r.json();
+    if (!d.success) return;
+    const vis = document.getElementById('lbVisibleToggle');
+    const hl = document.getElementById('lbHeadline');
+    if (vis) vis.checked = !!(d.settings && d.settings.visible);
+    if (hl) hl.value = (d.settings && d.settings.headline) || '';
+    lbDraft = (d.entries || []).map(function(e, i) {
+      return {
+        username: e.username,
+        displayName: e.displayName || e.username,
+        phoneLast3: e.phoneLast3 || '***',
+        metric: e.metric || 0,
+        award: e.award || 0,
+        category: e.category || '',
+        rank: e.rank || (i + 1)
+      };
+    });
+    renderLbDraft();
+  } catch (e) { console.error(e); }
+}
+
+async function saveLeaderboardSettings() {
+  if (!getToken()) return;
+  const vis = document.getElementById('lbVisibleToggle');
+  const hl = document.getElementById('lbHeadline');
+  try {
+    const r = await fetch('/api/admin/leaderboard/settings', {
+      method: 'PUT',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, adminSecretHeader()),
+      body: JSON.stringify({
+        visible: !!(vis && vis.checked),
+        headline: hl ? hl.value : ''
+      })
+    });
+    const d = await r.json();
+    if (!d.success) alert(d.message || 'Failed to save');
+    else if (typeof showAdminToast === 'function') showAdminToast('Leaderboard settings saved');
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function loadLeaderboardCandidates() {
+  if (!getToken()) return;
+  const cat = (document.getElementById('lbCategory') || {}).value || 'deposits';
+  const period = (document.getElementById('lbPeriod') || {}).value || 'week';
+  const box = document.getElementById('lbCandidates');
+  if (box) box.innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    const params = new URLSearchParams({ category: cat, period: period, limit: '25' });
+    const r = await fetch('/api/admin/leaderboard/candidates?' + params, { headers: adminSecretHeader() });
+    const d = await r.json();
+    if (!d.success) {
+      if (box) box.innerHTML = '<div class="empty">' + esc(d.message || 'Failed') + '</div>';
+      return;
+    }
+    const list = d.candidates || [];
+    if (!list.length) {
+      if (box) box.innerHTML = '<div class="empty">No candidates for this filter.</div>';
+      return;
+    }
+    const metricLabel = cat === 'deposits' ? 'Deposited' : (cat === 'invites' ? 'Invites' : 'Games');
+    box.innerHTML = '<div class="inst-table-wrap"><table class="inst-table"><thead><tr>' +
+      '<th>User</th><th>Phone</th><th>' + metricLabel + '</th><th></th></tr></thead><tbody>' +
+      list.map(function(c) {
+        const already = lbDraft.some(function(x) { return String(x.username).toLowerCase() === String(c.username).toLowerCase(); });
+        const u = String(c.username).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+        const dn = String(c.displayName || c.username).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+        const p3 = String(c.phoneLast3 || '***').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+        const catEsc = String(cat).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+        return '<tr><td><strong>' + esc(c.displayName || c.username) + '</strong><div class="muted" style="font-size:11px;">' + esc(c.username) + '</div></td>' +
+          '<td>***' + esc(c.phoneLast3 || '') + '</td>' +
+          '<td>' + (cat === 'deposits' ? fmtMoney(c.metric) : c.metric) + '</td>' +
+          '<td>' + (already
+            ? '<span class="muted">Added</span>'
+            : "<button class=\"btn btn-primary btn-sm\" onclick=\"addLbCandidate('" + u + "','" + dn + "','" + p3 + "'," + Number(c.metric||0) + ",'" + catEsc + "')\">Add</button>") +
+          '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  } catch (e) {
+    if (box) box.innerHTML = '<div class="empty">Network error</div>';
+  }
+}
+
+function addLbCandidate(username, displayName, phoneLast3, metric, category) {
+  if (lbDraft.some(function(x) { return String(x.username).toLowerCase() === String(username).toLowerCase(); })) return;
+  lbDraft.push({
+    username: username,
+    displayName: displayName,
+    phoneLast3: phoneLast3,
+    metric: metric,
+    award: 0,
+    category: category,
+    rank: lbDraft.length + 1
+  });
+  renderLbDraft();
+  loadLeaderboardCandidates();
+}
+
+function removeLbDraft(idx) {
+  lbDraft.splice(idx, 1);
+  renderLbDraft();
+}
+
+function moveLbDraft(idx, dir) {
+  const j = idx + dir;
+  if (j < 0 || j >= lbDraft.length) return;
+  const t = lbDraft[idx];
+  lbDraft[idx] = lbDraft[j];
+  lbDraft[j] = t;
+  renderLbDraft();
+}
+
+function setLbAward(idx, val) {
+  if (!lbDraft[idx]) return;
+  lbDraft[idx].award = Number(val) || 0;
+}
+
+function renderLbDraft() {
+  const body = document.getElementById('lbDraftBody');
+  if (!body) return;
+  if (!lbDraft.length) {
+    body.innerHTML = '<tr><td colspan="6" class="empty">No entries yet — add from candidates.</td></tr>';
+    return;
+  }
+  body.innerHTML = lbDraft.map(function(e, i) {
+    return '<tr>' +
+      '<td><b>#' + (i + 1) + '</b><div style="margin-top:4px;">' +
+        '<button class="btn btn-ghost btn-sm" onclick="moveLbDraft(' + i + ',-1)" ' + (i===0?'disabled':'') + '>↑</button> ' +
+        '<button class="btn btn-ghost btn-sm" onclick="moveLbDraft(' + i + ',1)" ' + (i===lbDraft.length-1?'disabled':'') + '>↓</button>' +
+      '</div></td>' +
+      '<td><strong>' + esc(e.displayName || e.username) + '</strong><div class="muted" style="font-size:11px;">' + esc(e.username) + '</div></td>' +
+      '<td>***' + esc(e.phoneLast3 || '') + '</td>' +
+      '<td>' + (e.metric != null ? e.metric : '—') + '</td>' +
+      '<td><input type="number" min="0" step="0.01" value="' + (Number(e.award)||0) + '" style="width:100px;" onchange="setLbAward(' + i + ', this.value)"></td>' +
+      '<td><button class="btn btn-danger btn-sm" onclick="removeLbDraft(' + i + ')">Remove</button></td>' +
+      '</tr>';
+  }).join('');
+}
+
+async function publishLeaderboard() {
+  if (!getToken()) return;
+  if (!confirm('Publish this board to players?')) return;
+  const vis = document.getElementById('lbVisibleToggle');
+  const hl = document.getElementById('lbHeadline');
+  const payload = {
+    visible: !!(vis && vis.checked),
+    headline: hl ? hl.value : '',
+    entries: lbDraft.map(function(e, i) {
+      return {
+        rank: i + 1,
+        username: e.username,
+        phoneLast3: e.phoneLast3,
+        award: Number(e.award) || 0,
+        metric: Number(e.metric) || 0,
+        category: e.category || null,
+        period: (document.getElementById('lbPeriod') || {}).value || null
+      };
+    })
+  };
+  try {
+    const r = await fetch('/api/admin/leaderboard/publish', {
+      method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, adminSecretHeader()),
+      body: JSON.stringify(payload)
+    });
+    const d = await r.json();
+    if (!d.success) alert(d.message || 'Publish failed');
+    else {
+      if (typeof showAdminToast === 'function') showAdminToast('Leaderboard published');
+      loadAdminLeaderboard();
+    }
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+async function clearLeaderboard() {
+  if (!getToken()) return;
+  if (!confirm('Clear all leaderboard entries?')) return;
+  try {
+    const r = await fetch('/api/admin/leaderboard/entries', {
+      method: 'DELETE',
+      headers: adminSecretHeader()
+    });
+    const d = await r.json();
+    if (!d.success) alert(d.message || 'Failed');
+    else {
+      lbDraft = [];
+      renderLbDraft();
+      if (typeof showAdminToast === 'function') showAdminToast('Leaderboard cleared');
+    }
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+
+</script>
 </head>
 <body>
 <aside class="sidebar" id="sidebar">
@@ -462,6 +661,7 @@ table.data tr:hover td { background: var(--card-hover); }
     <button class="nav-item" data-panel="specialevent"><span class="icon">🏆</span> Special Room</button>
     <button class="nav-item" data-panel="specialhistory"><span class="icon">📋</span> Special History</button>
     <div class="nav-section">System</div>
+    <button class="nav-item" data-panel="leaderboard"><span class="icon">🏅</span> Leaderboard</button>
     <button class="nav-item" data-panel="adminaccounts"><span class="icon">🛡️</span> Admin Accounts</button>
   </nav>
 </aside>
@@ -1195,6 +1395,66 @@ table.data tr:hover td { background: var(--card-hover); }
       </div>
     </section>
 
+    
+    <section class="panel" id="panel-leaderboard">
+      <div class="card">
+        <div class="card-header">
+          <h2><span class="emoji">🏅</span> Leaderboard control</h2>
+          <span class="muted" style="font-size:12px;">Boss & Admin only · curated board</span>
+        </div>
+        <div class="toolbar" style="flex-wrap:wrap;gap:10px;align-items:center;">
+          <label class="muted" style="display:flex;align-items:center;gap:8px;font-size:13px;">
+            <input type="checkbox" id="lbVisibleToggle" onchange="saveLeaderboardSettings()"> Show on player navbar
+          </label>
+          <input id="lbHeadline" type="text" placeholder="Headline e.g. Today big winner 1000 Birr" style="min-width:260px;flex:1;">
+          <button class="btn btn-primary btn-sm" onclick="saveLeaderboardSettings()">Save headline</button>
+          <button class="btn btn-secondary btn-sm" onclick="loadAdminLeaderboard()">↻</button>
+        </div>
+        <p class="muted" style="font-size:12px;margin:8px 0 14px;">Players only see this board when visible is ON. Super Admin cannot access this panel.</p>
+
+        <h3 style="margin:12px 0 8px;font-size:14px;">1 · Pick candidates</h3>
+        <div class="toolbar">
+          <select id="lbCategory">
+            <option value="deposits">Most deposits</option>
+            <option value="games">Most games played (all modes)</option>
+            <option value="invites">Most invites</option>
+          </select>
+          <select id="lbPeriod">
+            <option value="today">Today</option>
+            <option value="week" selected>This week</option>
+            <option value="month">This month</option>
+            <option value="all">All time</option>
+          </select>
+          <button class="btn btn-primary btn-sm" onclick="loadLeaderboardCandidates()">Load candidates</button>
+        </div>
+        <div id="lbCandidates" class="empty" style="margin-top:10px;">Choose category and load candidates.</div>
+
+        <h3 style="margin:18px 0 8px;font-size:14px;">2 · Draft board (edit awards & order)</h3>
+        <div class="toolbar">
+          <button class="btn btn-primary btn-sm" onclick="publishLeaderboard()">Publish to players</button>
+          <button class="btn btn-danger btn-sm" onclick="clearLeaderboard()">Clear board</button>
+        </div>
+        <div class="inst-table-wrap" style="margin-top:10px;">
+          <table class="inst-table" id="lbDraftTable">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>User</th>
+                <th>Phone</th>
+                <th>Metric</th>
+                <th>Award (Birr)</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="lbDraftBody">
+              <tr><td colspan="6" class="empty">No entries yet — add from candidates.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="muted" style="font-size:12px;margin-top:8px;">Award amounts are fully editable per rank. Order = rank shown to players.</p>
+      </div>
+    </section>
+
     <section class="panel" id="panel-adminaccounts">
       <div class="card">
         <div class="card-header">
@@ -1340,7 +1600,7 @@ const TITLES = {
   instantrounds: '⚡ Instant Rounds',
   specialevent: '🏆 Special Room',
   specialhistory: '📋 Special History',
-  adminaccounts: 'Admin Accounts'
+  adminaccounts: 'Admin Accounts', leaderboard: 'Leaderboard'
 };
 
 // Role → allowed panels (must match backend ROLE_PERMISSIONS)
@@ -1348,7 +1608,7 @@ const ROLE_PERMS = {
   boss: ['*'],
   admin: [
     'dashboard','deposits','withdraws','transfers',
-    'announcements','referrals',
+    'announcements','referrals','leaderboard',
     'gamerooms','gamehistory','houseprofit',
     'instanthistory','instantrounds',
     'specialevent','specialhistory',
@@ -1595,6 +1855,7 @@ function showPanel(name) {
     if (name === 'specialevent') loadSpecialAdmin();
     if (name === 'specialhistory') loadSpecialHistory();
     if (name === 'adminaccounts') loadAdminUsers();
+    if (name === 'leaderboard') loadAdminLeaderboard();
   }
 }
 document.querySelectorAll('.nav-item').forEach(btn => {

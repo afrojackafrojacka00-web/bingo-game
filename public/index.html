@@ -975,6 +975,35 @@ body.instant-immersive .instant-sticky-play{display:none;}
 }
 #softRefreshOverlay.show{display:flex;}
 #softRefreshOverlay .kal-boot-inner{transform:scale(.92);}
+
+.lb-headline{
+  margin:12px 0 16px;padding:14px 16px;border-radius:14px;
+  background:linear-gradient(135deg,rgba(245,158,11,.18),rgba(99,102,241,.14));
+  border:1px solid rgba(245,158,11,.35);
+  font-weight:800;font-size:16px;letter-spacing:.01em;text-align:center;
+}
+.lb-list{display:flex;flex-direction:column;gap:10px;margin-top:8px;}
+.lb-row{
+  display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+}
+.lb-row.top1{background:linear-gradient(135deg,rgba(245,158,11,.16),rgba(234,88,12,.08));border-color:rgba(245,158,11,.35);}
+.lb-row.top2{background:linear-gradient(135deg,rgba(148,163,184,.14),rgba(100,116,139,.08));border-color:rgba(148,163,184,.3);}
+.lb-row.top3{background:linear-gradient(135deg,rgba(180,83,9,.12),rgba(161,98,7,.08));border-color:rgba(180,83,9,.28);}
+.lb-rank{
+  width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:14px;background:rgba(255,255,255,.08);flex-shrink:0;
+}
+.lb-row.top1 .lb-rank{background:linear-gradient(135deg,#f59e0b,#ea580c);color:#111;}
+.lb-row.top2 .lb-rank{background:linear-gradient(135deg,#94a3b8,#64748b);color:#111;}
+.lb-row.top3 .lb-rank{background:linear-gradient(135deg,#d97706,#b45309);color:#fff;}
+.lb-user{flex:1;min-width:0;text-align:left;}
+.lb-user strong{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lb-user span{font-size:11px;color:var(--muted);}
+.lb-award{font-weight:800;font-size:15px;color:#fbbf24;white-space:nowrap;}
+[data-theme="light"] .lb-row{background:rgba(255,255,255,.75);border-color:rgba(15,23,42,.08);}
+
 </style>
 </head>
 <body>
@@ -1353,19 +1382,19 @@ body.instant-immersive .instant-sticky-play{display:none;}
 <div id="tabLeaderboard" class="tab-content hidden">
   <div class="card">
     <div class="page-title"><h2 style="margin:0" data-i18n="leaderboardTitle">🏅 Leaderboard</h2></div>
-    <p class="small" style="margin-top:12px;" data-i18n="leaderboardSoon">Coming soon.</p>
-    <div id="leaderboardList" class="history-list"></div>
+    <div id="lbHeadlinePublic" class="lb-headline hidden"></div>
+    <div id="leaderboardList" class="lb-list"><p class="small" data-i18n="leaderboardSoon">Coming soon.</p></div>
   </div>
 </div>
 
 <div id="bottomNav" class="bottom-nav hidden">
   <div class="nav-item active" onclick="switchTab('tabGames',this)">🎮<br><span data-i18n="navGames">Games</span></div>
   <div class="nav-item" onclick="switchTab('tabHistory',this)">🏆<br><span data-i18n="navHistory">History</span></div>
-  <div class="nav-item" onclick="switchTab('tabLeaderboard',this)">🏅<br><span data-i18n="navLeaderboard">Leaderboard</span></div>
+  <div class="nav-item hidden" id="navLeaderboardItem" onclick="switchTab('tabLeaderboard',this)">🏅<br><span data-i18n="navLeaderboard">Leaderboard</span></div>
   <div class="nav-item" onclick="switchTab('tabWallet',this)">💰<br><span data-i18n="navWallet">Wallet</span></div>
   <div class="nav-item" onclick="switchTab('tabAccount',this)">⚙️<br><span data-i18n="navAccount">Account</span></div>
 </div>
 <script src="i18n.js?v=3""></script>
-<script src="app.js?v=20260908-profile-voice"></script>
+<script src="app.js?v=20260908-leaderboard"></script>
 </body>
 </html>

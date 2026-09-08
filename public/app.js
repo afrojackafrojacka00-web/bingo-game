@@ -1834,7 +1834,7 @@ function switchTab(tabId, navElement) {
     }
     if (tabId === 'tabWallet') { fetchWallet(currentUsername); fetchPendingRequests(currentUsername); }
     if (tabId === 'tabAccount') applyAccountTabForClient();
-    // tabLeaderboard: placeholder for now
+    if (tabId === 'tabLeaderboard') loadPublicLeaderboard();
 }
 
 function logoutUser() {
@@ -3559,3 +3559,86 @@ function leaveSpecialPlay() {
 }
 
 // Hook home screen
+
+
+
+async function refreshLeaderboardNavVisibility() {
+    try {
+        const r = await fetch('/api/leaderboard?_=' + Date.now(), { cache: 'no-store' });
+        const d = await r.json();
+        const nav = document.getElementById('navLeaderboardItem');
+        if (!nav) return;
+        if (d && d.success && d.visible) {
+            nav.classList.remove('hidden');
+        } else {
+            nav.classList.add('hidden');
+            // If currently on leaderboard tab while hidden, bounce to games
+            const tab = document.getElementById('tabLeaderboard');
+            if (tab && !tab.classList.contains('hidden')) {
+                const gamesNav = document.querySelector('.nav-item[onclick*="tabGames"]');
+                switchTab('tabGames', gamesNav);
+            }
+        }
+    } catch (_) {
+        const nav = document.getElementById('navLeaderboardItem');
+        if (nav) nav.classList.add('hidden');
+    }
+}
+
+async function loadPublicLeaderboard() {
+    const list = document.getElementById('leaderboardList');
+    const headline = document.getElementById('lbHeadlinePublic');
+    if (list) list.innerHTML = '<p class="small">Loading…</p>';
+    try {
+        const r = await fetch('/api/leaderboard?_=' + Date.now(), { cache: 'no-store' });
+        const d = await r.json();
+        const nav = document.getElementById('navLeaderboardItem');
+        if (!d.success || !d.visible) {
+            if (nav) nav.classList.add('hidden');
+            if (headline) { headline.classList.add('hidden'); headline.textContent = ''; }
+            if (list) list.innerHTML = '<p class="small">' + (typeof t === 'function' ? t('leaderboardSoon') : 'Coming soon.') + '</p>';
+            return;
+        }
+        if (nav) nav.classList.remove('hidden');
+        if (headline) {
+            if (d.headline) {
+                headline.textContent = d.headline;
+                headline.classList.remove('hidden');
+            } else {
+                headline.classList.add('hidden');
+                headline.textContent = '';
+            }
+        }
+        const entries = d.entries || [];
+        if (!entries.length) {
+            if (list) list.innerHTML = '<p class="small">No winners published yet.</p>';
+            return;
+        }
+        if (list) {
+            list.innerHTML = entries.map(function(e) {
+                const rank = Number(e.rank) || 0;
+                const topClass = rank === 1 ? ' top1' : (rank === 2 ? ' top2' : (rank === 3 ? ' top3' : ''));
+                const medal = rank === 1 ? '🥇' : (rank === 2 ? '🥈' : (rank === 3 ? '🥉' : String(rank)));
+                const name = e.displayName || e.username || '—';
+                const phone = e.phoneLast3 ? ('***' + e.phoneLast3) : '';
+                const award = Number(e.award || 0);
+                return '<div class="lb-row' + topClass + '">' +
+                    '<div class="lb-rank">' + medal + '</div>' +
+                    '<div class="lb-user"><strong>' + escHtml(name) + '</strong><span>' + escHtml(phone) + '</span></div>' +
+                    '<div class="lb-award">' + (award > 0 ? (award.toFixed(2) + ' Br') : '—') + '</div>' +
+                    '</div>';
+            }).join('');
+        }
+    } catch (e) {
+        if (list) list.innerHTML = '<p class="small">Could not load leaderboard.</p>';
+    }
+}
+
+function escHtml(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+

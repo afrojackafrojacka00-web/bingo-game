@@ -327,6 +327,35 @@ await pool.query('ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS prize_pool 
             console.log('Seeded default Boss account: username=boss  (change password after first login)');
         }
 
+
+        // --------------- Curated Leaderboard ---------------
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS leaderboard_settings (
+                id INT PRIMARY KEY CHECK (id = 1),
+                is_visible BOOLEAN NOT NULL DEFAULT FALSE,
+                headline TEXT NOT NULL DEFAULT '',
+                updated_by VARCHAR(50),
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        await pool.query(`INSERT INTO leaderboard_settings (id, is_visible, headline) VALUES (1, FALSE, '') ON CONFLICT (id) DO NOTHING;`);
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS leaderboard_entries (
+                id SERIAL PRIMARY KEY,
+                rank_position INT NOT NULL,
+                username VARCHAR(50) NOT NULL,
+                phone_last3 VARCHAR(3),
+                display_name VARCHAR(100),
+                award_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+                category VARCHAR(30),
+                metric_value NUMERIC(14,2) DEFAULT 0,
+                period VARCHAR(20),
+                created_by VARCHAR(50),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_leaderboard_entries_rank ON leaderboard_entries(rank_position ASC);
+        `);
+
         console.log("Database initialized cleanly with indexes.");
     } catch (err) {
         console.error("Database initialization error:", err);
