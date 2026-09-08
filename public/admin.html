@@ -1215,38 +1215,39 @@ table.data tr:hover td { background: var(--card-hover); }
               <label class="switch"><input type="checkbox" id="lbVisibleToggle" onchange="toggleLeaderboardVisible(this)"><span class="switch-slider"></span></label>
             </div>
           </div>
-          <div class="toolbar" style="margin-top:12px;flex-wrap:wrap;gap:8px;">
-            <input id="lbHeadline" type="text" placeholder="Headline e.g. Today big winner 1000 Birr" style="min-width:260px;flex:1;">
-            <button class="btn btn-primary btn-sm" onclick="saveLeaderboardHeadline()">Save headline</button>
-            <button class="btn btn-secondary btn-sm" onclick="loadAdminLeaderboard()">↻</button>
+          <div class="toolbar" style="margin-top:14px;flex-wrap:wrap;gap:12px;align-items:center;">
+            <input id="lbHeadline" type="text" placeholder="Headline e.g. Today big winner 1000 Birr" style="min-width:260px;flex:1;margin:0;">
+            <button class="btn btn-primary btn-sm" style="margin:0;" onclick="saveLeaderboardHeadline()">Save headline</button>
+            <button class="btn btn-secondary btn-sm" style="margin:0;" onclick="loadAdminLeaderboard()">↻</button>
           </div>
           <p id="lbPublishedMeta" class="muted" style="font-size:12px;margin:10px 0 0;">Not published yet.</p>
         </div>
 
         <h3 style="margin:12px 0 8px;font-size:14px;">1 · Search user or load candidates</h3>
-        <div class="toolbar" style="flex-wrap:wrap;gap:8px;">
-          <input id="lbUserSearch" type="text" placeholder="Search username or phone…" style="min-width:200px;">
-          <button class="btn btn-primary btn-sm" onclick="searchLeaderboardUsers()">Search user</button>
-          <span class="muted" style="font-size:12px;">or</span>
-          <select id="lbCategory">
+        <div class="toolbar" style="flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:6px;">
+          <input id="lbUserSearch" type="text" placeholder="Search username or phone…" style="min-width:200px;margin:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();searchLeaderboardUsers();}">
+          <button class="btn btn-primary btn-sm" style="margin:0;" onclick="searchLeaderboardUsers()">Search user</button>
+        </div>
+        <div class="toolbar" style="flex-wrap:wrap;gap:12px;align-items:center;">
+          <select id="lbCategory" style="margin:0;">
             <option value="deposits">Most deposits</option>
             <option value="games">Most games played (all modes)</option>
             <option value="invites">Most invites</option>
           </select>
-          <select id="lbPeriod">
+          <select id="lbPeriod" style="margin:0;">
             <option value="today">Today</option>
             <option value="week" selected>This week</option>
             <option value="month">This month</option>
             <option value="all">All time</option>
           </select>
-          <button class="btn btn-secondary btn-sm" onclick="loadLeaderboardCandidates()">Load candidates</button>
+          <button class="btn btn-secondary btn-sm" style="margin:0;" onclick="loadLeaderboardCandidates()">Load candidates</button>
         </div>
         <div id="lbCandidates" class="empty" style="margin-top:10px;">Search a user or load candidates by category.</div>
 
         <h3 style="margin:18px 0 8px;font-size:14px;">2 · Draft board (edit awards & order)</h3>
-        <div class="toolbar">
-          <button class="btn btn-primary btn-sm" onclick="publishLeaderboard()">Publish to players</button>
-          <button class="btn btn-danger btn-sm" onclick="clearLeaderboard()">Clear board</button>
+        <div class="toolbar" style="flex-wrap:wrap;gap:12px;align-items:center;">
+          <button class="btn btn-primary btn-sm" style="margin:0;" onclick="publishLeaderboard()">Publish to players</button>
+          <button class="btn btn-danger btn-sm" style="margin:0;" onclick="clearLeaderboard()">Clear board</button>
         </div>
         <div class="inst-table-wrap" style="margin-top:10px;">
           <table class="inst-table" id="lbDraftTable">
@@ -3858,10 +3859,15 @@ async function loadLeaderboardCandidates() {
     const r = await fetch('/api/admin/leaderboard/candidates?' + params, { headers: adminSecretHeader() });
     const d = await r.json();
     if (!d.success) {
-      if (box) box.innerHTML = '<div class="empty">' + esc(d.message || 'Failed') + '</div>';
+      if (box) box.innerHTML = '<div class="empty">' + esc(d.message || 'Failed to load candidates') + '</div>';
       return;
     }
-    renderLbCandidateRows(d.candidates || [], cat);
+    const list = d.candidates || [];
+    if (!list.length) {
+      if (box) box.innerHTML = '<div class="empty">No users found for this category/period. Try "All time" or search by name.</div>';
+      return;
+    }
+    renderLbCandidateRows(list, cat);
   } catch (e) {
     if (box) box.innerHTML = '<div class="empty">Network error</div>';
   }

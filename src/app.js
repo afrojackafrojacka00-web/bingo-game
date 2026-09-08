@@ -2842,6 +2842,34 @@ attachGameEngine({
 
 
 // ---------------- CURATED LEADERBOARD ----------------
+async function ensureLeaderboardSchema() {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS leaderboard_settings (
+            id INT PRIMARY KEY CHECK (id = 1),
+            is_visible BOOLEAN NOT NULL DEFAULT FALSE,
+            headline TEXT NOT NULL DEFAULT '',
+            updated_by VARCHAR(50),
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+    await pool.query(`INSERT INTO leaderboard_settings (id, is_visible, headline) VALUES (1, FALSE, '') ON CONFLICT (id) DO NOTHING;`);
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS leaderboard_entries (
+            id SERIAL PRIMARY KEY,
+            rank_position INT NOT NULL,
+            username VARCHAR(50) NOT NULL,
+            phone_last3 VARCHAR(3),
+            display_name VARCHAR(100),
+            award_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+            category VARCHAR(30),
+            metric_value NUMERIC(14,2) DEFAULT 0,
+            period VARCHAR(20),
+            created_by VARCHAR(50),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    `);
+}
+
 function leaderboardPeriodSql(period, column = 'created_at') {
     const p = String(period || 'week').toLowerCase();
     if (p === 'today' || p === 'day') return ` AND ${column} >= CURRENT_DATE`;
@@ -2854,6 +2882,7 @@ function leaderboardPeriodSql(period, column = 'created_at') {
 // Public: players see published board only when visible
 app.get('/api/leaderboard', async (req, res) => {
     try {
+        await ensureLeaderboardSchema();
         const settings = await pool.query('SELECT is_visible, headline, updated_at FROM leaderboard_settings WHERE id = 1');
         const s = settings.rows[0] || { is_visible: false, headline: '' };
         if (!s.is_visible) {
@@ -2888,6 +2917,7 @@ app.get('/api/leaderboard', async (req, res) => {
 app.get('/api/admin/leaderboard', async (req, res) => {
     if (!requireAdmin(req, res, 'leaderboard')) return;
     try {
+        await ensureLeaderboardSchema();
         const settings = await pool.query('SELECT is_visible, headline, updated_by, updated_at FROM leaderboard_settings WHERE id = 1');
         const entries = await pool.query(
             `SELECT id, rank_position, username, phone_last3, display_name, award_amount, category, metric_value, period, created_by, created_at
@@ -2927,7 +2957,7 @@ app.put('/api/admin/leaderboard/settings', async (req, res) => {
     if (!requireAdmin(req, res, 'leaderboard')) return;
     try {
         const { visible, headline } = req.body || {};
-        await pool.query(`INSERT INTO leaderboard_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
+        await ensureLeaderboardSchema();
         if (visible !== undefined && headline !== undefined) {
             await pool.query(
                 `UPDATE leaderboard_settings SET is_visible = $1, headline = $2, updated_by = $3, updated_at = NOW() WHERE id = 1`,
@@ -2944,7 +2974,17 @@ app.put('/api/admin/leaderboard/settings', async (req, res) => {
                 [String(headline || '').slice(0, 200), req.admin.username]
             );
         }
-        res.json({ success: true });
+        const cur = await pool.query('SELECT is_visible, headline, updated_by, updated_at FROM leaderboard_settings WHERE id = 1');
+        const s = cur.rows[0] || {};
+        res.json({
+            success: true,
+            settings: {
+                visible: !!s.is_visible,
+                headline: s.headline || '',
+                updatedBy: s.updated_by || null,
+                updatedAt: s.updated_at || null,
+            }
+        });
     } catch (err) {
         console.error('leaderboard settings', err);
         res.status(500).json({ success: false, message: 'Server error.' });
@@ -2955,6 +2995,7 @@ app.put('/api/admin/leaderboard/settings', async (req, res) => {
 app.get('/api/admin/leaderboard/candidates', async (req, res) => {
     if (!requireAdmin(req, res, 'leaderboard')) return;
     try {
+        await ensureLeaderboardSchema();
         const category = String(req.query.category || 'deposits').toLowerCase();
         const period = String(req.query.period || 'week').toLowerCase();
         const limit = Math.min(50, Math.max(5, parseInt(req.query.limit, 10) || 20));
@@ -2962,61 +3003,94 @@ app.get('/api/admin/leaderboard/candidates', async (req, res) => {
 
         if (category === 'deposits') {
             const periodSql = leaderboardPeriodSql(period, 'd.created_at');
-            const r = await pool.query(
-                `SELECT u.username, u.phone_number, u.display_name,
-                        COALESCE(SUM(COALESCE(d.credited_amount, d.amount)),0)::float AS metric
-                 FROM users u
-                 INNER JOIN deposit_requests d ON LOWER(d.username) = LOWER(u.username) AND d.status = 'APPROVED' ${periodSql}
-                 GROUP BY u.username, u.phone_number, u.display_name
-                 ORDER BY metric DESC
-                 LIMIT $1`,
-                [limit]
-            );
-            rows = r.rows;
+            try {
+                const r = await pool.query(
+                    `SELECT u.username, u.phone_number, u.display_name,
+                            COALESCE(SUM(COALESCE(d.credited_amount, d.amount, 0)),0)::float AS metric
+                     FROM deposit_requests d
+                     JOIN users u ON LOWER(u.username) = LOWER(d.username)
+                     WHERE UPPER(COALESCE(d.status,'')) = 'APPROVED' ${periodSql}
+                     GROUP BY u.username, u.phone_number, u.display_name
+                     HAVING COALESCE(SUM(COALESCE(d.credited_amount, d.amount, 0)),0) > 0
+                     ORDER BY metric DESC
+                     LIMIT $1`,
+                    [limit]
+                );
+                rows = r.rows;
+            } catch (e) {
+                console.error('lb deposits candidates', e.message);
+                // fallback without credited_amount
+                const r = await pool.query(
+                    `SELECT u.username, u.phone_number, u.display_name,
+                            COALESCE(SUM(COALESCE(d.amount, 0)),0)::float AS metric
+                     FROM deposit_requests d
+                     JOIN users u ON LOWER(u.username) = LOWER(d.username)
+                     WHERE UPPER(COALESCE(d.status,'')) = 'APPROVED' ${periodSql}
+                     GROUP BY u.username, u.phone_number, u.display_name
+                     ORDER BY metric DESC
+                     LIMIT $1`,
+                    [limit]
+                );
+                rows = r.rows;
+            }
         } else if (category === 'games' || category === 'played') {
-            // Union plays from classic, instant, special
-            const pClassic = leaderboardPeriodSql(period, 'gs.created_at').replace(/^\s*AND/, '');
-            const pInstant = leaderboardPeriodSql(period, 'e.created_at').replace(/^\s*AND/, '');
-            const pSpecial = leaderboardPeriodSql(period, 'se.created_at').replace(/^\s*AND/, '');
-            const classicWhere = pClassic ? `AND ${pClassic}` : '';
-            const instantWhere = pInstant ? `AND ${pInstant}` : '';
-            const specialWhere = pSpecial ? `AND ${pSpecial}` : '';
-            const r = await pool.query(
-                `WITH plays AS (
-                    SELECT LOWER(gp.username) AS uname, COUNT(*)::int AS c
-                    FROM game_participants gp
-                    JOIN game_sessions gs ON gs.id = gp.game_id
-                    WHERE 1=1 ${classicWhere}
-                    GROUP BY LOWER(gp.username)
-                    UNION ALL
-                    SELECT LOWER(e.username), COUNT(*)::int
-                    FROM instant_entries e
-                    WHERE 1=1 ${instantWhere}
-                    GROUP BY LOWER(e.username)
-                    UNION ALL
-                    SELECT LOWER(se.username), COUNT(*)::int
-                    FROM special_event_entries se
-                    WHERE 1=1 ${specialWhere}
-                    GROUP BY LOWER(se.username)
-                 ),
-                 totals AS (
-                    SELECT uname, SUM(c)::int AS metric FROM plays GROUP BY uname
-                 )
-                 SELECT u.username, u.phone_number, u.display_name, t.metric::float AS metric
-                 FROM totals t
-                 JOIN users u ON LOWER(u.username) = t.uname
-                 ORDER BY t.metric DESC
-                 LIMIT $1`,
-                [limit]
-            );
-            rows = r.rows;
+            const pClassic = leaderboardPeriodSql(period, 'gs.created_at');
+            const pInstant = leaderboardPeriodSql(period, 'e.created_at');
+            const pSpecial = leaderboardPeriodSql(period, 'se.created_at');
+            const map = new Map();
+            // classic
+            try {
+                const r = await pool.query(
+                    `SELECT LOWER(gp.username) AS uname, COUNT(*)::int AS c
+                     FROM game_participants gp
+                     JOIN game_sessions gs ON gs.id = gp.game_id
+                     WHERE 1=1 ${pClassic}
+                     GROUP BY LOWER(gp.username)`
+                );
+                for (const row of r.rows) map.set(row.uname, (map.get(row.uname) || 0) + Number(row.c || 0));
+            } catch (e) { console.error('lb classic plays', e.message); }
+            // instant
+            try {
+                const r = await pool.query(
+                    `SELECT LOWER(e.username) AS uname, COUNT(*)::int AS c
+                     FROM instant_entries e
+                     WHERE 1=1 ${pInstant}
+                     GROUP BY LOWER(e.username)`
+                );
+                for (const row of r.rows) map.set(row.uname, (map.get(row.uname) || 0) + Number(row.c || 0));
+            } catch (e) { console.error('lb instant plays', e.message); }
+            // special
+            try {
+                const r = await pool.query(
+                    `SELECT LOWER(se.username) AS uname, COUNT(*)::int AS c
+                     FROM special_event_entries se
+                     WHERE 1=1 ${pSpecial}
+                     GROUP BY LOWER(se.username)`
+                );
+                for (const row of r.rows) map.set(row.uname, (map.get(row.uname) || 0) + Number(row.c || 0));
+            } catch (e) { console.error('lb special plays', e.message); }
+
+            const sorted = [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit);
+            if (sorted.length) {
+                const unames = sorted.map(([u]) => u);
+                const ur = await pool.query(
+                    `SELECT username, phone_number, display_name FROM users WHERE LOWER(username) = ANY($1::text[])`,
+                    [unames]
+                );
+                const byLower = {};
+                for (const u of ur.rows) byLower[String(u.username).toLowerCase()] = u;
+                rows = sorted.map(([uname, metric]) => {
+                    const u = byLower[uname] || { username: uname, phone_number: '', display_name: uname };
+                    return { username: u.username, phone_number: u.phone_number, display_name: u.display_name, metric };
+                });
+            }
         } else if (category === 'invites' || category === 'referrals') {
             const periodSql = leaderboardPeriodSql(period, 'u2.created_at');
             const r = await pool.query(
                 `SELECT u.username, u.phone_number, u.display_name,
                         COUNT(u2.id)::float AS metric
                  FROM users u
-                 LEFT JOIN users u2 ON LOWER(u2.referred_by) = LOWER(u.username) ${periodSql.replace(' AND ', ' AND ')}
+                 INNER JOIN users u2 ON LOWER(u2.referred_by) = LOWER(u.username) ${periodSql}
                  GROUP BY u.username, u.phone_number, u.display_name
                  HAVING COUNT(u2.id) > 0
                  ORDER BY metric DESC
@@ -3045,13 +3119,10 @@ app.get('/api/admin/leaderboard/candidates', async (req, res) => {
         });
     } catch (err) {
         console.error('leaderboard candidates', err);
-        res.status(500).json({ success: false, message: 'Server error.' });
+        res.status(500).json({ success: false, message: err.message || 'Server error.' });
     }
 });
 
-// Admin: publish entries (replace entire board)
-
-// Admin: search any user to add manually
 app.get('/api/admin/leaderboard/search-users', async (req, res) => {
     if (!requireAdmin(req, res, 'leaderboard')) return;
     try {
@@ -3093,6 +3164,7 @@ app.get('/api/admin/leaderboard/search-users', async (req, res) => {
 app.post('/api/admin/leaderboard/publish', async (req, res) => {
     if (!requireAdmin(req, res, 'leaderboard')) return;
     try {
+        await ensureLeaderboardSchema();
         const { entries, headline, visible } = req.body || {};
         if (!Array.isArray(entries)) {
             return res.status(400).json({ success: false, message: 'entries array required.' });

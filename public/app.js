@@ -987,6 +987,7 @@ async function showHomeScreen(username) {
     try { setDepositChipVisible(true); } catch (_) {}
     markAppBooted();
     applyLanguage(safeStorage.get('bingoLang') || 'am', false);
+    try { refreshLeaderboardNavVisibility(); } catch (_) {}
     switchTab('tabGames', document.querySelector('.nav-item'));
     showHome();
 
@@ -1020,6 +1021,10 @@ async function showHomeScreen(username) {
     notificationRefreshTimer = setInterval(() => {
         if (currentUsername) fetchNotifications(currentUsername);
     }, 10000);
+    if (window.leaderboardNavTimer) clearInterval(window.leaderboardNavTimer);
+    window.leaderboardNavTimer = setInterval(() => {
+        try { refreshLeaderboardNavVisibility(); } catch (_) {}
+    }, 15000);
 
     loadReferralInfo(username);
 }
