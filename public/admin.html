@@ -422,6 +422,8 @@ table.data tr:hover td { background: var(--card-hover); }
 .inst-diff-btns button{border:1px solid var(--border,var(--line,#444));background:transparent;color:var(--text);border-radius:10px;padding:8px 12px;cursor:pointer;font-size:12px;font-weight:600;}
 .inst-diff-btns button.active{border-color:var(--blue);background:rgba(59,130,246,.18);color:var(--blue);}
 
+.lb-period-btn.active{border-color:var(--blue)!important;background:rgba(59,130,246,.18)!important;color:var(--blue)!important;}
+.lb-period-btn{min-width:88px;}
 </style>
   <script src="/socket.io/socket.io.js"></script>
 </head>
@@ -1223,29 +1225,30 @@ table.data tr:hover td { background: var(--card-hover); }
           <p id="lbPublishedMeta" class="muted" style="font-size:12px;margin:10px 0 0;">Not published yet.</p>
         </div>
 
-        <h3 style="margin:12px 0 8px;font-size:14px;">1 · Search user or load candidates</h3>
-        <div class="toolbar" style="flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:6px;">
-          <input id="lbUserSearch" type="text" placeholder="Search username or phone…" style="min-width:200px;margin:0;" onkeydown="if(event.key==='Enter'){event.preventDefault();searchLeaderboardUsers();}">
+        <h3 style="margin:16px 0 10px;font-size:14px;">1 · Search user</h3>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:12px 0 18px;">
+          <input id="lbUserSearch" type="text" placeholder="Search username or phone…" style="min-width:220px;margin:0;flex:1;">
           <button class="btn btn-primary btn-sm" style="margin:0;" onclick="searchLeaderboardUsers()">Search user</button>
         </div>
-        <div class="toolbar" style="flex-wrap:wrap;gap:12px;align-items:center;">
-          <select id="lbCategory" style="margin:0;">
-            <option value="deposits">Most deposits</option>
-            <option value="games">Most games played (all modes)</option>
-            <option value="invites">Most invites</option>
-          </select>
-          <select id="lbPeriod" style="margin:0;">
-            <option value="today">Today</option>
-            <option value="week" selected>This week</option>
-            <option value="month">This month</option>
-            <option value="all">All time</option>
-          </select>
-          <button class="btn btn-secondary btn-sm" style="margin:0;" onclick="loadLeaderboardCandidates()">Load candidates</button>
-        </div>
-        <div id="lbCandidates" class="empty" style="margin-top:10px;">Search a user or load candidates by category.</div>
 
-        <h3 style="margin:18px 0 8px;font-size:14px;">2 · Draft board (edit awards & order)</h3>
-        <div class="toolbar" style="flex-wrap:wrap;gap:12px;align-items:center;">
+        <h3 style="margin:8px 0 10px;font-size:14px;">2 · Load by category</h3>
+        <div class="muted" style="font-size:12px;margin-bottom:8px;">Period</div>
+        <div id="lbPeriodBtns" style="display:flex;flex-wrap:wrap;gap:10px;margin:0 0 16px;">
+          <button type="button" class="btn btn-secondary btn-sm lb-period-btn" data-period="today" style="margin:0;" onclick="setLbPeriod('today')">Today</button>
+          <button type="button" class="btn btn-secondary btn-sm lb-period-btn active" data-period="week" style="margin:0;" onclick="setLbPeriod('week')">This week</button>
+          <button type="button" class="btn btn-secondary btn-sm lb-period-btn" data-period="month" style="margin:0;" onclick="setLbPeriod('month')">This month</button>
+          <button type="button" class="btn btn-secondary btn-sm lb-period-btn" data-period="all" style="margin:0;" onclick="setLbPeriod('all')">All time</button>
+        </div>
+        <div class="muted" style="font-size:12px;margin-bottom:8px;">Category</div>
+        <div id="lbCategoryBtns" style="display:flex;flex-wrap:wrap;gap:10px;margin:0 0 16px;">
+          <button type="button" class="btn btn-primary btn-sm" style="margin:0;" onclick="loadLeaderboardCandidates('deposits')">Most deposits</button>
+          <button type="button" class="btn btn-primary btn-sm" style="margin:0;" onclick="loadLeaderboardCandidates('games')">Most games played</button>
+          <button type="button" class="btn btn-primary btn-sm" style="margin:0;" onclick="loadLeaderboardCandidates('invites')">Most invites</button>
+        </div>
+        <div id="lbCandidates" class="empty" style="margin:12px 0 18px;">Pick a period, then press a category button — or search a user above.</div>
+
+        <h3 style="margin:20px 0 12px;font-size:14px;">3 · Draft board (edit awards & order)</h3>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:12px 0 16px;">
           <button class="btn btn-primary btn-sm" style="margin:0;" onclick="publishLeaderboard()">Publish to players</button>
           <button class="btn btn-danger btn-sm" style="margin:0;" onclick="clearLeaderboard()">Clear board</button>
         </div>
@@ -3848,15 +3851,26 @@ async function searchLeaderboardUsers() {
   }
 }
 
-async function loadLeaderboardCandidates() {
+let lbSelectedPeriod = 'week';
+let lbSelectedCategory = 'deposits';
+
+function setLbPeriod(period) {
+  lbSelectedPeriod = period || 'week';
+  document.querySelectorAll('.lb-period-btn').forEach(function(btn) {
+    btn.classList.toggle('active', btn.getAttribute('data-period') === lbSelectedPeriod);
+  });
+}
+
+async function loadLeaderboardCandidates(category) {
   if (!getToken()) return;
-  const cat = (document.getElementById('lbCategory') || {}).value || 'deposits';
-  const period = (document.getElementById('lbPeriod') || {}).value || 'week';
+  const cat = category || lbSelectedCategory || 'deposits';
+  lbSelectedCategory = cat;
+  const period = lbSelectedPeriod || 'week';
   const box = document.getElementById('lbCandidates');
-  if (box) box.innerHTML = '<div class="empty">Loading…</div>';
+  if (box) box.innerHTML = '<div class="empty">Loading ' + esc(cat) + ' · ' + esc(period) + '…</div>';
   try {
-    const params = new URLSearchParams({ category: cat, period: period, limit: '25' });
-    const r = await fetch('/api/admin/leaderboard/candidates?' + params, { headers: adminSecretHeader() });
+    const params = new URLSearchParams({ category: cat, period: period, limit: '30' });
+    const r = await fetch('/api/admin/leaderboard/candidates?' + params.toString(), { headers: adminSecretHeader() });
     const d = await r.json();
     if (!d.success) {
       if (box) box.innerHTML = '<div class="empty">' + esc(d.message || 'Failed to load candidates') + '</div>';
@@ -3864,12 +3878,13 @@ async function loadLeaderboardCandidates() {
     }
     const list = d.candidates || [];
     if (!list.length) {
-      if (box) box.innerHTML = '<div class="empty">No users found for this category/period. Try "All time" or search by name.</div>';
+      if (box) box.innerHTML = '<div class="empty">No users found for <b>' + esc(cat) + '</b> / <b>' + esc(period) + '</b>. Try All time, or search by name.</div>';
       return;
     }
     renderLbCandidateRows(list, cat);
   } catch (e) {
-    if (box) box.innerHTML = '<div class="empty">Network error</div>';
+    console.error(e);
+    if (box) box.innerHTML = '<div class="empty">Network error: ' + esc(e.message || String(e)) + '</div>';
   }
 }
 
@@ -3948,7 +3963,7 @@ async function publishLeaderboard() {
         award: Number(e.award) || 0,
         metric: Number(e.metric) || 0,
         category: e.category || null,
-        period: (document.getElementById('lbPeriod') || {}).value || null
+        period: lbSelectedPeriod || null
       };
     })
   };

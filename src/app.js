@@ -3006,10 +3006,13 @@ app.get('/api/admin/leaderboard/candidates', async (req, res) => {
             try {
                 const r = await pool.query(
                     `SELECT u.username, u.phone_number, u.display_name,
-                            COALESCE(SUM(COALESCE(d.credited_amount, d.amount, 0)),0)::float AS metric
+                            COALESCE(SUM(
+                              COALESCE(d.credited_amount, d.amount, 0)
+                            ),0)::float AS metric
                      FROM deposit_requests d
-                     JOIN users u ON LOWER(u.username) = LOWER(d.username)
-                     WHERE UPPER(COALESCE(d.status,'')) = 'APPROVED' ${periodSql}
+                     JOIN users u ON (d.user_id IS NOT NULL AND u.id = d.user_id)
+                                  OR (d.user_id IS NULL AND LOWER(u.username) = LOWER(d.username))
+                     WHERE UPPER(TRIM(COALESCE(d.status,''))) = 'APPROVED' ${periodSql}
                      GROUP BY u.username, u.phone_number, u.display_name
                      HAVING COALESCE(SUM(COALESCE(d.credited_amount, d.amount, 0)),0) > 0
                      ORDER BY metric DESC
@@ -3017,21 +3020,26 @@ app.get('/api/admin/leaderboard/candidates', async (req, res) => {
                     [limit]
                 );
                 rows = r.rows;
-            } catch (e) {
-                console.error('lb deposits candidates', e.message);
-                // fallback without credited_amount
-                const r = await pool.query(
-                    `SELECT u.username, u.phone_number, u.display_name,
-                            COALESCE(SUM(COALESCE(d.amount, 0)),0)::float AS metric
-                     FROM deposit_requests d
-                     JOIN users u ON LOWER(u.username) = LOWER(d.username)
-                     WHERE UPPER(COALESCE(d.status,'')) = 'APPROVED' ${periodSql}
-                     GROUP BY u.username, u.phone_number, u.display_name
-                     ORDER BY metric DESC
-                     LIMIT $1`,
-                    [limit]
-                );
-                rows = r.rows;
+            } catch (e1) {
+                console.error('lb deposits candidates primary', e1.message);
+                try {
+                    const r = await pool.query(
+                        `SELECT COALESCE(d.username, u.username) AS username,
+                                u.phone_number, u.display_name,
+                                COALESCE(SUM(COALESCE(d.amount, d.credited_amount, 0)),0)::float AS metric
+                         FROM deposit_requests d
+                         LEFT JOIN users u ON LOWER(u.username) = LOWER(d.username)
+                         WHERE UPPER(TRIM(COALESCE(d.status,''))) = 'APPROVED' ${periodSql}
+                         GROUP BY COALESCE(d.username, u.username), u.phone_number, u.display_name
+                         ORDER BY metric DESC
+                         LIMIT $1`,
+                        [limit]
+                    );
+                    rows = r.rows;
+                } catch (e2) {
+                    console.error('lb deposits candidates fallback', e2.message);
+                    throw e2;
+                }
             }
         } else if (category === 'games' || category === 'played') {
             const pClassic = leaderboardPeriodSql(period, 'gs.created_at');
