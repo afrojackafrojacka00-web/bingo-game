@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { requireAdmin } = require('../middleware/adminAuth');
+const { logAdminAction } = require('../middleware/adminLog');
 const special = require('../game/special/engine');
 const pool = require('../db/pool');
 const config = require('../config');
@@ -114,6 +115,11 @@ function registerSpecialRoutes(app) {
     if (!requireAdmin(req, res, 'specialevent')) return;
     try {
       const data = await special.adminUpdate(req.body || {});
+      logAdminAction(req.admin, 'special_room', {
+        entityType: 'special',
+        summary: 'Special room settings updated',
+        meta: req.body || {}
+      });
       res.json({ success: true, ...data });
     } catch (err) {
       console.error('admin special update', err);

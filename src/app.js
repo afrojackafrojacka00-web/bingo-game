@@ -17,6 +17,7 @@ const config = require('./config');
 const pool = require('./db/pool');
 const { initDB } = require('./db/init');
 const { adminAuth, requireAdmin, requireRole, timingSafeEqual, createAdminToken, getAdminFromRequest, hasPermission, ROLES } = require('./middleware/adminAuth');
+const { logAdminAction, ensureAdminActionLogSchema } = require('./middleware/adminLog');
 const { generalLimiter, authLimiter, moneyLimiter } = require('./middleware/rateLimiters');
 const cache = require('./cache/memory');
 
@@ -785,6 +786,11 @@ app.post('/api/admin/admin-users', async (req, res) => {
              VALUES ($1, $2, $3, $4)`,
             [cleanUser, hash, role, req.admin.username]
         );
+        logAdminAction(req.admin, 'admin_create', {
+            entityType: 'admin_user',
+            summary: `Created ${role} account "${cleanUser}"`,
+            meta: { username: cleanUser, role }
+        });
         res.json({ success: true, message: 'Account created.' });
     } catch (err) {
         if (err.code === '23505') {
@@ -861,6 +867,11 @@ app.put('/api/admin/admin-users/:id', async (req, res) => {
             `UPDATE admin_users SET ${updates.join(', ')} WHERE id = $${idx}`,
             params
         );
+        logAdminAction(req.admin, 'admin_update', {
+            entityType: 'admin_user', entityId: id,
+            summary: `Updated admin account #${id} (${target.username})`,
+            meta: { target: target.username }
+        });
         res.json({ success: true, message: 'Account updated.' });
     } catch (err) {
         if (err.code === '23505') {
@@ -985,6 +996,11 @@ app.post('/api/admin/referral-settings', async (req, res) => {
          ON CONFLICT(id) DO UPDATE SET referrals_required=EXCLUDED.referrals_required, reward_amount=EXCLUDED.reward_amount`,
         [required, reward]
     );
+    logAdminAction(req.admin, 'referral_settings', {
+        entityType: 'settings',
+        summary: `Referral settings · need ${required} · reward ${reward} Birr`,
+        meta: { referralsRequired: required, rewardAmount: reward }
+    });
     res.json({ success: true });
 });
 
@@ -1012,6 +1028,11 @@ app.post('/api/admin/welcome-bonus-settings', async (req, res) => {
              ON CONFLICT(id) DO UPDATE SET enabled = EXCLUDED.enabled, amount = EXCLUDED.amount, updated_at = NOW()`,
             [!!enabled, amt]
         );
+        logAdminAction(req.admin, 'welcome_bonus_settings', {
+            entityType: 'settings',
+            summary: `Welcome bonus · ${!!enabled ? 'ON' : 'OFF'} · ${amt} Birr`,
+            meta: { enabled: !!enabled, amount: amt }
+        });
         res.json({ success: true, enabled: !!enabled, amount: amt });
     } catch (err) {
         console.error('Welcome bonus settings error:', err);
@@ -1124,6 +1145,11 @@ app.post('/api/admin/deposit-verification-settings', async (req, res) => {
          ON CONFLICT(id) DO UPDATE SET auto_verify_enabled=EXCLUDED.auto_verify_enabled, updated_at=NOW()`,
         [!!autoVerifyEnabled]
     );
+    logAdminAction(req.admin, 'auto_verify_global', {
+        entityType: 'settings',
+        summary: `Global auto-verify · ${!!autoVerifyEnabled ? 'ON' : 'OFF'}`,
+        meta: { enabled: !!autoVerifyEnabled }
+    });
     res.json({ success: true, autoVerifyEnabled: !!autoVerifyEnabled });
 });
 
@@ -1135,6 +1161,11 @@ app.post('/api/admin/users/:username/auto-verify', async (req, res) => {
         [!!enabled, req.params.username]
     );
     if (!result.rowCount) return res.status(404).json({ success: false, message: 'User not found.' });
+    logAdminAction(req.admin, 'auto_verify_user', {
+        entityType: 'user', entityId: result.rows[0].username,
+        summary: `User auto-verify "${result.rows[0].username}" · ${result.rows[0].auto_verify_enabled ? 'ON' : 'OFF'}`,
+        meta: { username: result.rows[0].username, enabled: !!result.rows[0].auto_verify_enabled }
+    });
     res.json({ success: true, username: result.rows[0].username, autoVerifyEnabled: result.rows[0].auto_verify_enabled });
 });
 
@@ -1419,6 +1450,11 @@ app.post('/api/admin/adjust-balance', async (req, res) => {
             [result.rows[0].id, delta, delta > 0 ? 'admin_credit' : 'admin_debit']
         );
         await client.query('COMMIT');
+        logAdminAction(req.admin, 'balance_adjust', {
+            entityType: 'user', entityId: username,
+            summary: `Balance adjust "${username}" · ${delta > 0 ? '+' : ''}${delta} Birr → ${Number(result.rows[0].balance)}`,
+            meta: { username, delta, balance: Number(result.rows[0].balance) }
+        });
         res.json({ success: true, balance: Number(result.rows[0].balance) });
     } catch (err) {
         await client.query('ROLLBACK');
@@ -1782,6 +1818,12 @@ app.post('/api/admin/deposit-requests/:id/approve', async (req, res) => {
         try {
             io.emit('admin_request_updated', { type: 'deposit', id, status: 'APPROVED' });
         } catch (_) {}
+        logAdminAction(req.admin, 'deposit_approve', {
+            entityType: 'deposit',
+            entityId: id,
+            summary: `Approved deposit #${id} for ${depositReq.username || depositReq.user_id} · ${creditAmount} Birr`,
+            meta: { username: depositReq.username, amount: creditAmount }
+        });
         res.json({ success: true, balance: Number(userRes.rows[0].balance) });
     } catch (err) {
         await client.query('ROLLBACK');
@@ -1806,6 +1848,10 @@ app.post('/api/admin/deposit-requests/:id/reject', async (req, res) => {
     );
     if (!result.rowCount) return res.status(400).json({ success: false, message: 'Request not found or already reviewed.' });
     try { io.emit('admin_request_updated', { type: 'deposit', id, status: 'REJECTED' }); } catch (_) {}
+    logAdminAction(req.admin, 'deposit_reject', {
+        entityType: 'deposit', entityId: id,
+        summary: `Rejected deposit #${id}`
+    });
     res.json({ success: true });
 });
 
@@ -1952,6 +1998,11 @@ app.post('/api/admin/withdraw-requests/:id/approve', async (req, res) => {
         if (upd.rowCount === 0) throw new Error('Request not found or already reviewed.');
         await client.query('COMMIT');
         try { io.emit('admin_request_updated', { type: 'withdraw', id, status: 'APPROVED' }); } catch (_) {}
+        logAdminAction(req.admin, 'withdraw_approve', {
+            entityType: 'withdraw', entityId: id,
+            summary: `Approved withdraw #${id} for ${w.username || w.user_id} · ${w.amount} Birr`,
+            meta: { username: w.username, amount: Number(w.amount) }
+        });
         res.json({ success: true });
     } catch (err) {
         await client.query('ROLLBACK');
@@ -1990,6 +2041,11 @@ app.post('/api/admin/withdraw-requests/:id/reject', async (req, res) => {
         if (upd.rowCount === 0) throw new Error('Request not found or already reviewed.');
         await client.query('COMMIT');
         try { io.emit('admin_request_updated', { type: 'withdraw', id, status: 'REJECTED' }); } catch (_) {}
+        logAdminAction(req.admin, 'withdraw_reject', {
+            entityType: 'withdraw', entityId: id,
+            summary: `Rejected withdraw #${id} for ${w.username || w.user_id} · refunded ${w.amount} Birr`,
+            meta: { username: w.username, amount: Number(w.amount) }
+        });
         res.json({ success: true });
     } catch (err) {
         await client.query('ROLLBACK');
@@ -2146,6 +2202,11 @@ app.post('/api/admin/transfer-requests/:id/approve', async (req, res) => {
             [id, req.admin.username, req.admin.role]
         );
         await client.query('COMMIT');
+        logAdminAction(req.admin, 'transfer_approve', {
+            entityType: 'transfer', entityId: id,
+            summary: `Approved transfer #${id} · ${t.amount} Birr → ${t.recipient_username}`,
+            meta: { amount: Number(t.amount), recipient: t.recipient_username }
+        });
         res.json({ success: true });
     } catch (err) {
         await client.query('ROLLBACK');
@@ -2181,6 +2242,11 @@ app.post('/api/admin/transfer-requests/:id/reject', async (req, res) => {
             [id, req.admin.username, req.admin.role]
         );
         await client.query('COMMIT');
+        logAdminAction(req.admin, 'transfer_reject', {
+            entityType: 'transfer', entityId: id,
+            summary: `Rejected transfer #${id} · refunded ${t.amount} Birr`,
+            meta: { amount: Number(t.amount) }
+        });
         res.json({ success: true });
     } catch (err) {
         await client.query('ROLLBACK');
@@ -2231,6 +2297,11 @@ app.post('/api/admin/adjust-bonus', async (req, res) => {
             'INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',
             [result.rows[0].id, delta, 'ADMIN_BONUS_ADJUSTMENT']
         );
+        logAdminAction(req.admin, 'bonus_adjust', {
+            entityType: 'user', entityId: username,
+            summary: `Bonus adjust "${username}" · ${delta > 0 ? '+' : ''}${delta} Birr → ${Number(result.rows[0].bonus_balance)}`,
+            meta: { username, delta, bonusBalance: Number(result.rows[0].bonus_balance) }
+        });
         res.json({ success: true, bonusBalance: Number(result.rows[0].bonus_balance) });
     } catch (err) {
         res.status(500).json({ success: false, message: 'Server error.' });
@@ -2630,6 +2701,11 @@ app.post('/api/admin/broadcast', upload.single('imageFile'), async (req, res) =>
             }
         }
 
+        logAdminAction(req.admin, 'announcement', {
+            entityType: 'announcement',
+            summary: `Announcement · ${destination || 'APP'} · "${String(message || '').slice(0, 80)}"`,
+            meta: { destination, telegramSent: sentCount, telegramFailed: failedCount }
+        });
         res.json({
             success: true,
             message: 'Broadcast posted successfully!',
@@ -2841,6 +2917,74 @@ attachGameEngine({
 });
 
 
+
+// ---------------- ADMIN ACTION LOG (Boss only) ----------------
+app.get('/api/admin/action-logs', async (req, res) => {
+    // Boss only
+    if (!requireAdmin(req, res)) return;
+    if (req.admin.role !== 'boss') {
+        return res.status(403).json({ success: false, message: 'Boss only.' });
+    }
+    try {
+        await ensureAdminActionLogSchema();
+        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(100, Math.max(10, parseInt(req.query.limit, 10) || 50));
+        const offset = (page - 1) * limit;
+        const action = req.query.action ? String(req.query.action).trim() : '';
+        const actor = req.query.actor ? String(req.query.actor).trim() : '';
+        const from = req.query.from ? String(req.query.from).trim() : '';
+        const to = req.query.to ? String(req.query.to).trim() : '';
+        const params = [];
+        const where = [];
+        if (action) {
+            params.push(action);
+            where.push(`action = $${params.length}`);
+        }
+        if (actor) {
+            params.push('%' + actor.replace(/%/g, '') + '%');
+            where.push(`LOWER(actor_username) LIKE LOWER($${params.length})`);
+        }
+        if (from) {
+            params.push(from);
+            where.push(`created_at >= $${params.length}::date`);
+        }
+        if (to) {
+            params.push(to);
+            where.push(`created_at < ($${params.length}::date + INTERVAL '1 day')`);
+        }
+        const wsql = where.length ? ('WHERE ' + where.join(' AND ')) : '';
+        const countR = await pool.query(`SELECT COUNT(*)::int AS c FROM admin_action_logs ${wsql}`, params);
+        const listParams = params.concat([limit, offset]);
+        const list = await pool.query(
+            `SELECT id, actor_username, actor_role, action, entity_type, entity_id, summary, meta, created_at
+             FROM admin_action_logs ${wsql}
+             ORDER BY created_at DESC, id DESC
+             LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+            listParams
+        );
+        res.json({
+            success: true,
+            total: countR.rows[0].c,
+            page,
+            limit,
+            logs: list.rows.map((r) => ({
+                id: r.id,
+                actor: r.actor_username,
+                role: r.actor_role,
+                action: r.action,
+                entityType: r.entity_type,
+                entityId: r.entity_id,
+                summary: r.summary,
+                meta: r.meta,
+                createdAt: r.created_at,
+            })),
+        });
+    } catch (err) {
+        console.error('action logs', err);
+        res.status(500).json({ success: false, message: 'Server error.' });
+    }
+});
+
 // ---------------- CURATED LEADERBOARD ----------------
 async function ensureLeaderboardSchema() {
     await pool.query(`
@@ -2976,6 +3120,11 @@ app.put('/api/admin/leaderboard/settings', async (req, res) => {
         }
         const cur = await pool.query('SELECT is_visible, headline, updated_by, updated_at FROM leaderboard_settings WHERE id = 1');
         const s = cur.rows[0] || {};
+        logAdminAction(req.admin, 'leaderboard_settings', {
+            entityType: 'leaderboard',
+            summary: `Leaderboard settings · visible=${!!s.is_visible}` + (s.headline ? ` · "${String(s.headline).slice(0,80)}"` : ''),
+            meta: { visible: !!s.is_visible, headline: s.headline || '' }
+        });
         res.json({
             success: true,
             settings: {
@@ -3241,6 +3390,11 @@ app.post('/api/admin/leaderboard/publish', async (req, res) => {
         } finally {
             client.release();
         }
+        logAdminAction(req.admin, 'leaderboard_publish', {
+            entityType: 'leaderboard',
+            summary: `Published leaderboard · ${(entries || []).length} entries` + (headline ? ` · "${String(headline).slice(0,60)}"` : ''),
+            meta: { count: (entries || []).length, visible, headline }
+        });
         res.json({ success: true });
     } catch (err) {
         console.error('leaderboard publish', err);

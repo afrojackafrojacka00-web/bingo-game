@@ -2,6 +2,7 @@
 
 const { moneyLimiter } = require('../middleware/rateLimiters');
 const { requireAdmin } = require('../middleware/adminAuth');
+const { logAdminAction } = require('../middleware/adminLog');
 const instant = require('../game/instant/engine');
 const config = require('../config');
 const pool = require('../db/pool');
@@ -140,6 +141,11 @@ function registerInstantRoutes(app) {
     try {
       const on = !!(req.body && (req.body.enabled === true || req.body.enabled === 'true' || req.body.enabled === 1));
       const result = instant.adminSetMasterEnabled(on);
+      logAdminAction(req.admin, 'instant_control', {
+        entityType: 'instant',
+        summary: `Instant master power · ${on ? 'ON' : 'OFF'}`,
+        meta: { enabled: on }
+      });
       res.json({ success: true, ...result });
     } catch (err) {
       const status = err.code === 'BUSY' ? 409 : 400;
@@ -156,6 +162,11 @@ function registerInstantRoutes(app) {
         ? !!(req.body.ecoMode === true || req.body.ecoMode === 'true' || req.body.ecoMode === 1)
         : on;
       const result = instant.adminSetEcoMode(eco);
+      logAdminAction(req.admin, 'instant_control', {
+        entityType: 'instant',
+        summary: `Instant eco mode · ${eco ? 'ON' : 'OFF'}`,
+        meta: { ecoMode: eco }
+      });
       res.json({ success: true, ...result, control: instant.adminGetControlState() });
     } catch (err) {
       res.status(400).json({ success: false, message: err.message || 'Failed.' });
@@ -180,6 +191,11 @@ function registerInstantRoutes(app) {
       if (body.numbersDrawn != null) {
         out.numbers = instant.adminSetNumbersDrawn(body.numbersDrawn);
       }
+      logAdminAction(req.admin, 'instant_settings', {
+        entityType: 'instant',
+        summary: 'Instant settings updated',
+        meta: out
+      });
       res.json({ success: true, ...out, control: instant.adminGetControlState() });
     } catch (err) {
       res.status(400).json({ success: false, message: err.message || 'Failed.' });
@@ -239,6 +255,11 @@ function registerInstantRoutes(app) {
     try {
       const rules = (req.body && req.body.rules) || [];
       const result = instant.adminSetWinRules(rules);
+      logAdminAction(req.admin, 'instant_settings', {
+        entityType: 'instant',
+        summary: 'Instant win rules updated',
+        meta: { rulesCount: Array.isArray(rules) ? rules.length : 0 }
+      });
       res.json({ success: true, ...result });
     } catch (err) {
       res.status(400).json({ success: false, message: err.message || 'Failed.' });

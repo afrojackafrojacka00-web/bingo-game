@@ -356,6 +356,24 @@ await pool.query('ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS prize_pool 
             CREATE INDEX IF NOT EXISTS idx_leaderboard_entries_rank ON leaderboard_entries(rank_position ASC);
         `);
 
+        // --------------- Admin action audit log (Boss only view) ---------------
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS admin_action_logs (
+                id SERIAL PRIMARY KEY,
+                actor_username VARCHAR(50) NOT NULL,
+                actor_role VARCHAR(20) NOT NULL,
+                action VARCHAR(80) NOT NULL,
+                entity_type VARCHAR(50),
+                entity_id VARCHAR(50),
+                summary TEXT,
+                meta JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_admin_action_logs_created ON admin_action_logs(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_admin_action_logs_actor ON admin_action_logs(LOWER(actor_username));
+            CREATE INDEX IF NOT EXISTS idx_admin_action_logs_action ON admin_action_logs(action);
+        `);
+
         console.log("Database initialized cleanly with indexes.");
     } catch (err) {
         console.error("Database initialization error:", err);

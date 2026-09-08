@@ -465,6 +465,7 @@ table.data tr:hover td { background: var(--card-hover); }
     <button class="nav-item" data-panel="specialhistory"><span class="icon">📋</span> Special History</button>
     <div class="nav-section">System</div>
     <button class="nav-item" data-panel="leaderboard"><span class="icon">🏅</span> Leaderboard</button>
+    <button class="nav-item" data-panel="actionlog"><span class="icon">📋</span> Action Log</button>
     <button class="nav-item" data-panel="adminaccounts"><span class="icon">🛡️</span> Admin Accounts</button>
   </nav>
 </aside>
@@ -1273,6 +1274,66 @@ table.data tr:hover td { background: var(--card-hover); }
       </div>
     </section>
 
+    
+    <section class="panel" id="panel-actionlog">
+      <div class="card">
+        <div class="card-header">
+          <h2><span class="emoji">📋</span> Admin action log</h2>
+          <span class="muted" style="font-size:12px;">Boss only · latest first</span>
+        </div>
+        <p class="muted" style="font-size:12px;margin:0 0 12px;">Tracks deposit/withdraw/transfer reviews, leaderboard changes, admin account changes, and more.</p>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:12px 0 16px;">
+          <select id="alogAction" style="margin:0;">
+            <option value="">All actions</option>
+            <option value="deposit_approve">Deposit approved</option>
+            <option value="deposit_reject">Deposit rejected</option>
+            <option value="withdraw_approve">Withdraw approved</option>
+            <option value="withdraw_reject">Withdraw rejected</option>
+            <option value="transfer_approve">Transfer approved</option>
+            <option value="transfer_reject">Transfer rejected</option>
+            <option value="balance_adjust">Balance adjust</option>
+            <option value="bonus_adjust">Bonus adjust</option>
+            <option value="auto_verify_global">Auto-verify global</option>
+            <option value="auto_verify_user">Auto-verify user</option>
+            <option value="announcement">Announcement</option>
+            <option value="referral_settings">Referral settings</option>
+            <option value="welcome_bonus_settings">Welcome bonus</option>
+            <option value="game_settings">Game settings</option>
+            <option value="house_cut">House cut</option>
+            <option value="instant_control">Instant control</option>
+            <option value="instant_settings">Instant settings</option>
+            <option value="special_room">Special room</option>
+            <option value="leaderboard_publish">Leaderboard published</option>
+            <option value="leaderboard_settings">Leaderboard settings</option>
+            <option value="admin_create">Admin created</option>
+            <option value="admin_update">Admin updated</option>
+          </select>
+          <input id="alogActor" type="text" placeholder="Filter by admin username" style="min-width:160px;margin:0;">
+          <input id="alogFrom" type="date" title="From date" style="margin:0;">
+          <input id="alogTo" type="date" title="To date" style="margin:0;">
+          <button class="btn btn-primary btn-sm" style="margin:0;" onclick="loadActionLogs(1)">Filter</button>
+          <button class="btn btn-secondary btn-sm" style="margin:0;" onclick="document.getElementById('alogAction').value='';document.getElementById('alogActor').value='';document.getElementById('alogFrom').value='';document.getElementById('alogTo').value='';loadActionLogs(1)">Reset</button>
+        </div>
+        <div class="inst-table-wrap">
+          <table class="inst-table">
+            <thead>
+              <tr>
+                <th>When</th>
+                <th>Who</th>
+                <th>Role</th>
+                <th>Action</th>
+                <th>Summary</th>
+              </tr>
+            </thead>
+            <tbody id="actionLogBody">
+              <tr><td colspan="5" class="empty">Open this panel to load logs.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="pagination" id="actionLogPager" style="margin-top:12px;"></div>
+      </div>
+    </section>
+
     <section class="panel" id="panel-adminaccounts">
       <div class="card">
         <div class="card-header">
@@ -1418,7 +1479,7 @@ const TITLES = {
   instantrounds: '⚡ Instant Rounds',
   specialevent: '🏆 Special Room',
   specialhistory: '📋 Special History',
-  adminaccounts: 'Admin Accounts', leaderboard: 'Leaderboard'
+  adminaccounts: 'Admin Accounts', leaderboard: 'Leaderboard', actionlog: 'Action Log'
 };
 
 // Role → allowed panels (must match backend ROLE_PERMISSIONS)
@@ -1674,6 +1735,7 @@ function showPanel(name) {
     if (name === 'specialhistory') loadSpecialHistory();
     if (name === 'adminaccounts') loadAdminUsers();
     if (name === 'leaderboard') loadAdminLeaderboard();
+    if (name === 'actionlog') loadActionLogs(1);
   }
 }
 document.querySelectorAll('.nav-item').forEach(btn => {
@@ -4000,6 +4062,93 @@ async function clearLeaderboard() {
     }
   } catch (e) { alert('Error: ' + e.message); }
 }
+
+// ===================== ACTION LOG (Boss only) =====================
+let actionLogPage = 1;
+const ACTION_LABELS = {
+  deposit_approve: 'Deposit approved',
+  deposit_reject: 'Deposit rejected',
+  withdraw_approve: 'Withdraw approved',
+  withdraw_reject: 'Withdraw rejected',
+  transfer_approve: 'Transfer approved',
+  transfer_reject: 'Transfer rejected',
+  balance_adjust: 'Balance adjust',
+  bonus_adjust: 'Bonus adjust',
+  auto_verify_global: 'Auto-verify global',
+  auto_verify_user: 'Auto-verify user',
+  announcement: 'Announcement',
+  referral_settings: 'Referral settings',
+  welcome_bonus_settings: 'Welcome bonus',
+  game_settings: 'Game settings',
+  house_cut: 'House cut',
+  instant_control: 'Instant control',
+  instant_settings: 'Instant settings',
+  special_room: 'Special room',
+  leaderboard_publish: 'Leaderboard published',
+  leaderboard_settings: 'Leaderboard settings',
+  admin_create: 'Admin created',
+  admin_update: 'Admin updated'
+};
+
+async function loadActionLogs(page) {
+  if (!getToken()) return;
+  if (currentAdmin && currentAdmin.role !== 'boss') {
+    const body = document.getElementById('actionLogBody');
+    if (body) body.innerHTML = '<tr><td colspan="5" class="empty">Boss only.</td></tr>';
+    return;
+  }
+  actionLogPage = page || 1;
+  const body = document.getElementById('actionLogBody');
+  if (body) body.innerHTML = '<tr><td colspan="5" class="empty">Loading…</td></tr>';
+  try {
+    const params = new URLSearchParams({ page: String(actionLogPage), limit: '50' });
+    const act = (document.getElementById('alogAction') || {}).value || '';
+    const actor = (document.getElementById('alogActor') || {}).value || '';
+    const from = (document.getElementById('alogFrom') || {}).value || '';
+    const to = (document.getElementById('alogTo') || {}).value || '';
+    if (act) params.set('action', act);
+    if (actor.trim()) params.set('actor', actor.trim());
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    const r = await fetch('/api/admin/action-logs?' + params.toString(), { headers: adminSecretHeader() });
+    const d = await r.json();
+    if (!d.success) {
+      if (body) body.innerHTML = '<tr><td colspan="5" class="empty">' + esc(d.message || 'Failed') + '</td></tr>';
+      return;
+    }
+    const logs = d.logs || [];
+    if (!logs.length) {
+      if (body) body.innerHTML = '<tr><td colspan="5" class="empty">No actions logged yet.</td></tr>';
+    } else if (body) {
+      body.innerHTML = logs.map(function(log) {
+        const label = ACTION_LABELS[log.action] || log.action;
+        const roleLabel = { boss: 'Boss', admin: 'Admin', super_admin: 'Super Admin' }[log.role] || log.role;
+        return '<tr>' +
+          '<td style="white-space:nowrap;">' + (typeof fmtDate === 'function' ? fmtDate(log.createdAt) : esc(String(log.createdAt || ''))) + '</td>' +
+          '<td><strong>' + esc(log.actor || '—') + '</strong></td>' +
+          '<td>' + esc(roleLabel) + '</td>' +
+          '<td>' + esc(label) + '</td>' +
+          '<td>' + esc(log.summary || '—') + '</td>' +
+          '</tr>';
+      }).join('');
+    }
+    const pager = document.getElementById('actionLogPager');
+    if (pager) {
+      const total = d.total || 0;
+      const pages = Math.max(1, Math.ceil(total / (d.limit || 50)));
+      pager.innerHTML =
+        '<button class="btn btn-ghost btn-sm" style="margin:0;" ' + (actionLogPage <= 1 ? 'disabled' : '') +
+        ' onclick="loadActionLogs(' + (actionLogPage - 1) + ')">Prev</button>' +
+        '<span class="muted" style="margin:0 10px;">Page ' + actionLogPage + ' / ' + pages + ' (' + total + ')</span>' +
+        '<button class="btn btn-ghost btn-sm" style="margin:0;" ' + (actionLogPage >= pages ? 'disabled' : '') +
+        ' onclick="loadActionLogs(' + (actionLogPage + 1) + ')">Next</button>';
+    }
+  } catch (e) {
+    if (body) body.innerHTML = '<tr><td colspan="5" class="empty">Network error</td></tr>';
+  }
+}
+
+
 </script>
 
 </div>
