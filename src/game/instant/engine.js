@@ -20,6 +20,15 @@ let currentStakeDefault = 10;
 let drawnNumbers = [];
 let drawIndex = 0;
 const entries = new Map();
+// Usernames with a join/charge currently in flight (BEGIN..COMMIT below).
+// joinSharedRound is reached over plain HTTP (double-tap Play, a client
+// retry after a slow response, or two tabs) with no other de-duplication,
+// and it reads `entries` / the DB balance, then `await`s, before writing
+// the result back. Without this guard a second request for the same
+// username arriving mid-await would sail past every check the first one
+// already passed and charge the player a second time for one entry — see
+// joinSharedRound() for the acquire/release.
+const pendingJoins = new Set();
 let lastResults = [];
 let fakePlayers = 260 + Math.floor(Math.random() * 40);
 let fakeOpponents = [];
@@ -454,14 +463,35 @@ async function beginDrawPhase() {
 
 async function settleAllEntries() {
   lastResults = [];
+  // Claim the round for settlement once — prevents double payout if settle is re-entered
+  if (currentRoundId) {
+    try {
+      const claim = await pool.query(
+        `UPDATE instant_rounds SET status='SETTLING'
+         WHERE id=$1 AND status IN ('DRAWING','SELECTING','OPEN','PLAYING')
+         RETURNING id`,
+        [currentRoundId]
+      );
+      if (!claim.rowCount) {
+        // Already settling/completed — do not pay again
+        console.warn('instant settle skipped — round already settled', currentRoundId);
+        return;
+      }
+    } catch (e) {
+      // status column may not have SETTLING — fall through with best effort
+      console.error('instant settle claim', e.message);
+    }
+  }
   for (const [username, ent] of entries.entries()) {
     for (const cardNumber of ent.cards) {
       const grid = await getCardGrid(cardNumber);
       const evalResult = evaluateCard(grid, drawnNumbers, runtimeWinRules);
       const prize = evalResult.hit ? Number((Number(ent.stake) * evalResult.multiplier).toFixed(2)) : 0;
+      const client = await pool.connect();
       try {
+        await client.query('BEGIN');
         if (currentRoundId) {
-          await pool.query(
+          await client.query(
             `INSERT INTO instant_entries (round_id,user_id,username,card_number,stake,paid,pattern,multiplier,prize,winning_cells)
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
             [currentRoundId, ent.userId, username, cardNumber, ent.stake, ent.stake,
@@ -469,10 +499,16 @@ async function settleAllEntries() {
           );
         }
         if (prize > 0) {
-          await pool.query(`UPDATE users SET balance = balance + $1 WHERE id = $2`, [prize, ent.userId]);
-          await pool.query(`INSERT INTO transactions(user_id,amount,type) VALUES ($1,$2,'INSTANT_BINGO_WIN')`, [ent.userId, prize]);
+          await client.query(`UPDATE users SET balance = balance + $1 WHERE id = $2`, [prize, ent.userId]);
+          await client.query(`INSERT INTO transactions(user_id,amount,type) VALUES ($1,$2,'INSTANT_BINGO_WIN')`, [ent.userId, prize]);
         }
-      } catch (e) { console.error('instant settle', e.message); }
+        await client.query('COMMIT');
+      } catch (e) {
+        try { await client.query('ROLLBACK'); } catch (_) {}
+        console.error('instant settle', e.message);
+      } finally {
+        client.release();
+      }
       lastResults.push({
         username, cardNumber, pattern: evalResult.pattern, multiplier: evalResult.multiplier,
         prize, hit: evalResult.hit, winningCells: evalResult.winningCells || [], grid,
@@ -484,6 +520,29 @@ async function settleAllEntries() {
       await pool.query(`UPDATE instant_rounds SET status='COMPLETED', completed_at=NOW() WHERE id=$1`, [currentRoundId]);
     }
   } catch (_) {}
+}
+
+// Stand-alone refund used when a charge succeeded but the entry can no
+// longer be honored (round moved on to DRAWING while we were charging).
+// Runs in its own transaction since the charge's transaction already
+// committed by the time we discover this.
+async function refundStrandedCharge(userId, amount, type) {
+  amount = Number(amount);
+  if (!Number.isFinite(amount) || amount <= 0) return;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [amount, userId]);
+    await client.query('INSERT INTO transactions(user_id,amount,type) VALUES ($1,$2,$3)', [userId, amount, type]);
+    await client.query('COMMIT');
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    // This would be a real, un-refunded charge sitting on the books —
+    // log loudly so it can be reconciled by hand instead of disappearing.
+    console.error('refundStrandedCharge FAILED — manual reconciliation needed', { userId, amount, type, error: err.message });
+  } finally {
+    client.release();
+  }
 }
 
 async function joinSharedRound({ username, stake, cardNumbers }) {
@@ -500,45 +559,71 @@ async function joinSharedRound({ username, stake, cardNumbers }) {
     startSelectionPhase();
   }
   if (phase !== 'SELECTING') throw new Error('Round already started — wait for the next selection.');
-  const maxCards = maxCardsPerPlayer();
-  const cards = [...new Set((cardNumbers || []).map(Number))].filter((n) => n > 0);
-  if (!cards.length) throw new Error('Select at least one card.');
-  if (cards.length > maxCards) throw new Error('Max ' + maxCards + ' cards.');
-  const s = Number(stake);
-  if (!stakes().includes(s)) throw new Error('Invalid stake.');
-  const catalog = await listCatalog(cfg().catalogSize || 200);
-  const set = new Set(catalog);
-  for (const c of cards) if (!set.has(c)) throw new Error('Card #' + c + ' not in catalog.');
-  const totalCost = Number((s * cards.length).toFixed(2));
-  const client = await pool.connect();
+
+  // Must be acquired synchronously, before any `await` below — see the
+  // comment on `pendingJoins` above. Released in `finally`.
+  if (pendingJoins.has(username)) {
+    throw new Error('Already processing your last request — please wait a moment.');
+  }
+  pendingJoins.add(username);
+
   try {
-    await client.query('BEGIN');
-    const user = await client.query(`SELECT id, balance FROM users WHERE LOWER(username)=LOWER($1) FOR UPDATE`, [username]);
-    if (!user.rowCount) throw new Error('User not found.');
-    const userId = user.rows[0].id;
-    if (Number(user.rows[0].balance) < totalCost) throw new Error('Insufficient balance.');
-    if (entries.has(username)) {
-      const prev = entries.get(username);
-      await client.query(`UPDATE users SET balance = balance + $1 WHERE id = $2`, [prev.paid, userId]);
-      await client.query(`INSERT INTO transactions(user_id,amount,type) VALUES ($1,$2,'INSTANT_BINGO_REFUND')`, [userId, prev.paid]);
+    const maxCards = maxCardsPerPlayer();
+    const cards = [...new Set((cardNumbers || []).map(Number))].filter((n) => n > 0);
+    if (!cards.length) throw new Error('Select at least one card.');
+    if (cards.length > maxCards) throw new Error('Max ' + maxCards + ' cards.');
+    const s = Number(stake);
+    if (!stakes().includes(s)) throw new Error('Invalid stake.');
+    const catalog = await listCatalog(cfg().catalogSize || 200);
+    const set = new Set(catalog);
+    for (const c of cards) if (!set.has(c)) throw new Error('Card #' + c + ' not in catalog.');
+    const totalCost = Number((s * cards.length).toFixed(2));
+
+    let userId;
+    let newBalance;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const user = await client.query(`SELECT id, balance FROM users WHERE LOWER(username)=LOWER($1) FOR UPDATE`, [username]);
+      if (!user.rowCount) throw new Error('User not found.');
+      userId = user.rows[0].id;
+      if (Number(user.rows[0].balance) < totalCost) throw new Error('Insufficient balance.');
+      if (entries.has(username)) {
+        const prev = entries.get(username);
+        await client.query(`UPDATE users SET balance = balance + $1 WHERE id = $2`, [prev.paid, userId]);
+        await client.query(`INSERT INTO transactions(user_id,amount,type) VALUES ($1,$2,'INSTANT_BINGO_REFUND')`, [userId, prev.paid]);
+      }
+      const charge = await client.query(
+        `UPDATE users SET balance = balance - $1 WHERE id = $2 AND balance >= $1 RETURNING balance`, [totalCost, userId]);
+      if (!charge.rowCount) throw new Error('Insufficient balance.');
+      await client.query(`INSERT INTO transactions(user_id,amount,type) VALUES ($1,$2,'INSTANT_BINGO_BUY')`, [userId, -totalCost]);
+      await client.query('COMMIT');
+      newBalance = Number(charge.rows[0].balance);
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      throw err;
+    } finally {
+      client.release();
     }
-    const charge = await client.query(
-      `UPDATE users SET balance = balance - $1 WHERE id = $2 AND balance >= $1 RETURNING balance`, [totalCost, userId]);
-    if (!charge.rowCount) throw new Error('Insufficient balance.');
-    await client.query(`INSERT INTO transactions(user_id,amount,type) VALUES ($1,$2,'INSTANT_BINGO_BUY')`, [userId, -totalCost]);
-    await client.query('COMMIT');
+
+    // The charge committed, but the selection window can end while we
+    // were mid-transaction (BEGIN..COMMIT is several DB round trips). If
+    // the round has already moved on, this entry would never be drawn or
+    // settled — refund immediately instead of letting the money vanish.
+    if (phase !== 'SELECTING') {
+      await refundStrandedCharge(userId, totalCost, 'INSTANT_BINGO_REFUND_LATE');
+      throw new Error('The round just started as you joined — your payment was refunded. Please try the next round.');
+    }
+
     entries.set(username, { userId, cards, stake: s, paid: totalCost });
     currentStakeDefault = s;
     broadcast('instant_state', publicState());
     return {
-      success: true, balance: Number(charge.rows[0].balance), paid: totalCost, cards, stake: s,
+      success: true, balance: newBalance, paid: totalCost, cards, stake: s,
       phase, secondsLeft: Math.max(0, Math.ceil((selectionEndsAt - Date.now()) / 1000)), state: publicState(),
     };
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
   } finally {
-    client.release();
+    pendingJoins.delete(username);
   }
 }
 

@@ -4,6 +4,7 @@ const pool = require('../db/pool');
 const config = require('../config');
 const { requireAdmin } = require('../middleware/adminAuth');
 const { logAdminAction } = require('../middleware/adminLog');
+const { verifySocketToken, requireUser } = require('../middleware/userAuth');
 const cache = require('../cache/memory');
 
 /**
@@ -37,6 +38,12 @@ function createRoom(stake) {
         status: 'WAITING',
         deadline: null,
         gameId: null,
+        // Bumped every time the room transitions away from JOINING (game
+        // starts, or the round resets). Lets an in-flight player_ready
+        // charge detect "the round I was joining is gone" even if the room
+        // has already cycled back to a fresh JOINING state by the time the
+        // charge resolves — see the epoch check in the player_ready handler.
+        epoch: 0,
         players: new Set(),
         selectedCards: new Map(),
         cardOwners: new Map(), // cardNumber -> username, O(1) "is this card taken" lookups
@@ -286,6 +293,7 @@ function clearDrawTimer(room) {
 
 async function resetRoom(room, message = null) {
     clearDrawTimer(room);
+    room.epoch += 1;
     room.status = 'WAITING';
     room.deadline = null;
     room.gameId = null;
@@ -393,6 +401,7 @@ async function getCardGrid(cardNumber) {
 }
 
 async function startRoomGame(room) {
+    room.epoch += 1;
     room.status = 'PLAYING';
     room.deadline = null;
 
@@ -1107,19 +1116,49 @@ app.get('/api/admin/games', async (req, res) => {
 
 app.get('/api/admin/game-settings', async (req,res)=>{ if (!requireAdmin(req, res, 'gamesettings')) return; const r=await pool.query('SELECT winning_pattern,draw_interval_seconds FROM bingo_game_settings WHERE id=1'); const s=r.rows[0]||{winning_pattern:DEFAULT_GAME_PATTERN,draw_interval_seconds:DEFAULT_DRAW_INTERVAL_SECONDS}; res.json({success:true,winningPattern:s.winning_pattern,drawIntervalSeconds:s.draw_interval_seconds,patterns:PATTERN_NAMES}); });
 app.post('/api/admin/game-settings', async (req,res)=>{ const {adminSecret,winningPattern,drawIntervalSeconds}=req.body; if (!requireAdmin(req, res, 'gamesettings')) return; if(!PATTERN_NAMES[winningPattern])return res.status(400).json({success:false,message:'Invalid pattern.'}); const seconds=Number(drawIntervalSeconds); if(!Number.isInteger(seconds)||seconds<1||seconds>60)return res.status(400).json({success:false,message:'Interval must be 1-60 seconds.'}); await pool.query(`INSERT INTO bingo_game_settings(id,winning_pattern,draw_interval_seconds,updated_at) VALUES(1,$1,$2,NOW()) ON CONFLICT(id) DO UPDATE SET winning_pattern=EXCLUDED.winning_pattern,draw_interval_seconds=EXCLUDED.draw_interval_seconds,updated_at=NOW()`,[winningPattern,seconds]); logAdminAction(req.admin,'game_settings',{entityType:'settings',summary:`Game settings · pattern ${winningPattern} · interval ${seconds}s`,meta:{winningPattern,drawIntervalSeconds:seconds}}); res.json({success:true,winningPattern,drawIntervalSeconds:seconds}); });
-app.get('/api/game-state', async (req,res)=>{ const stake=Number(req.query.stake), username=String(req.query.username||''); const room=gameRooms.get(stake); if(!room||!username||!room.readyPlayers.has(username))return res.status(403).json({success:false,ended:true,message:'This game has ended.'}); const cards=[]; for(const cardNumber of Array.from(userCards(room,username))) { const grid=await getCardGrid(cardNumber); if(grid)cards.push({cardNumber,grid,locked:room.claimLockedCards.has(cardNumber)}); } res.json({success:true,room:{...roomSnapshot(room),drawn:Array.from(room.drawn),lastNumber:room.lastNumber,patternName:PATTERN_NAMES[room.winningPattern]||room.winningPattern},cards,winnerPayload:room.winnerPayload||null}); });
+app.get('/api/game-state', requireUser, async (req,res)=>{ const stake=Number(req.query.stake), username=String(req.query.username||''); const room=gameRooms.get(stake); if(!room||!username||!room.readyPlayers.has(username))return res.status(403).json({success:false,ended:true,message:'This game has ended.'}); const cards=[]; for(const cardNumber of Array.from(userCards(room,username))) { const grid=await getCardGrid(cardNumber); if(grid)cards.push({cardNumber,grid,locked:room.claimLockedCards.has(cardNumber)}); } res.json({success:true,room:{...roomSnapshot(room),drawn:Array.from(room.drawn),lastNumber:room.lastNumber,patternName:PATTERN_NAMES[room.winningPattern]||room.winningPattern},cards,winnerPayload:room.winnerPayload||null}); });
 
 io.on('connection', socket => {
     socket.emit('rooms_state', allRoomsSnapshot());
+
+    // Every event below that touches money or private room state (joining,
+    // toggling a card, going READY, leaving, claiming a win) used to trust
+    // whatever `username` the client sent in the event payload — meaning
+    // anyone who knew (or guessed) a username could act as that player over
+    // a socket they opened themselves. socket.handshake.auth.token is
+    // verified once, here, at connection time (see the io.use() middleware
+    // in app.js that actually sets socket.data.user); every handler below
+    // reads socket.data.user instead of trusting the payload.
+    //
+    // Returns the verified username for this socket, or null if there is no
+    // valid session — or if the client-supplied username doesn't match it,
+    // which catches a stale client instead of silently acting on the wrong
+    // account.
+    function verifiedUsername(payload) {
+        const authUsername = socket.data && socket.data.user && socket.data.user.username;
+        if (!authUsername) return null;
+        if (payload && payload.username && String(payload.username).toLowerCase() !== String(authUsername).toLowerCase()) {
+            return null;
+        }
+        return authUsername;
+    }
 
     socket.on('rooms_state_request', () => {
         socket.emit('rooms_state', allRoomsSnapshot());
     });
 
-    socket.on('subscribe_room', ({ stake, username }, cb = () => {}) => {
+    socket.on('subscribe_room', ({ stake, username: claimedUsername }, cb = () => {}) => {
         stake = Number(stake);
         const room = gameRooms.get(stake);
         if (!room) return cb({ success: false });
+
+        // Personal fields below (selectedCards, amountPaid, isReady,
+        // playerInRoom) are private to whoever they belong to — require a
+        // real session before revealing them for a given username.
+        const username = verifiedUsername({ username: claimedUsername });
+        if (claimedUsername && !username) {
+            return cb({ success: false, message: 'Please log in again.', code: 'AUTH_REQUIRED' });
+        }
 
         socket.join(roomName(stake));
 
@@ -1127,11 +1166,11 @@ io.on('connection', socket => {
             success: true,
             state: {
                 ...roomSnapshot(room),
-                selectedCards: Array.from(userCards(room, username)),
+                selectedCards: username ? Array.from(userCards(room, username)) : [],
                 drawn: Array.from(room.drawn),
-                amountPaid: getPlayerPaid(room, username),
-                isReady: room.readyPlayers.has(username),
-                playerInRoom: room.players.has(username)
+                amountPaid: username ? getPlayerPaid(room, username) : 0,
+                isReady: username ? room.readyPlayers.has(username) : false,
+                playerInRoom: username ? room.players.has(username) : false
             }
         });
     });
@@ -1140,12 +1179,13 @@ io.on('connection', socket => {
         socket.leave(roomName(Number(stake)));
     });
 
-    socket.on('join_room', async ({ stake, username }, cb = () => {}) => {
+    socket.on('join_room', async ({ stake, username: claimedUsername }, cb = () => {}) => {
         stake = Number(stake);
         const room = gameRooms.get(stake);
+        const username = verifiedUsername({ username: claimedUsername });
 
         if (!room || !username) {
-            return cb({ success: false, message: 'Invalid game room.' });
+            return cb({ success: false, message: username ? 'Invalid game room.' : 'Please log in again.', code: username ? undefined : 'AUTH_REQUIRED' });
         }
 
         if (room.status === 'PLAYING') {
@@ -1210,9 +1250,14 @@ io.on('connection', socket => {
         }
     });
 
-    socket.on('leave_room', async ({ stake, username }, cb = () => {}) => {
+    socket.on('leave_room', async ({ stake, username: claimedUsername }, cb = () => {}) => {
         stake = Number(stake);
         const room = gameRooms.get(stake);
+        const username = verifiedUsername({ username: claimedUsername });
+
+        if (!username) {
+            return cb({ success: false, message: 'Please log in again.', code: 'AUTH_REQUIRED' });
+        }
 
         if (!room || !room.players.has(username)) {
             return cb({
@@ -1265,10 +1310,15 @@ io.on('connection', socket => {
         }
     });
 
-    socket.on('toggle_card', ({ stake, cardNumber, username }, cb = () => {}) => {
+    socket.on('toggle_card', ({ stake, cardNumber, username: claimedUsername }, cb = () => {}) => {
         stake = Number(stake);
         cardNumber = Number(cardNumber);
         const room = gameRooms.get(stake);
+        const username = verifiedUsername({ username: claimedUsername });
+
+        if (!username) {
+            return cb({ success: false, message: 'Please log in again.', code: 'AUTH_REQUIRED' });
+        }
 
         if (!room || room.status !== 'JOINING' || !room.players.has(username)) {
             return cb({
@@ -1365,9 +1415,14 @@ io.on('connection', socket => {
         });
     });
 
-    socket.on('player_ready', async ({ stake, username }, cb = () => {}) => {
+    socket.on('player_ready', async ({ stake, username: claimedUsername }, cb = () => {}) => {
         stake = Number(stake);
         const room = gameRooms.get(stake);
+        const username = verifiedUsername({ username: claimedUsername });
+
+        if (!username) {
+            return cb({ success: false, message: 'Please log in again.', code: 'AUTH_REQUIRED' });
+        }
 
         if (!room || room.status !== 'JOINING' || !room.players.has(username)) {
             return cb({
@@ -1401,8 +1456,30 @@ io.on('connection', socket => {
         // paid for in a single transaction right here, instead of one
         // transaction per card tap during selection.
         const amount = cards.size * stake;
+        const epochAtReady = room.epoch;
         try {
             const charge = await chargePlayer(username, amount, 'GAME_CARD_ENTRY');
+
+            // The shared room-scheduler tick (every ROOM_BROADCAST_MS) can
+            // start the game or reset the room for "not enough ready
+            // players" while chargePlayer() above was still awaiting its
+            // DB round trips. If that happened, this player is now charged
+            // for a round that has already moved on without them — the
+            // epoch bump (see resetRoom/startRoomGame) catches this even if
+            // the room has since cycled back to a fresh JOINING state.
+            // Refund immediately instead of quietly adding a paid "ready"
+            // player who was never actually part of that round.
+            if (room.epoch !== epochAtReady || room.status !== 'JOINING' || !room.players.has(username)) {
+                try {
+                    await refundAmount(username, amount, 'GAME_REFUND_READY_TOO_LATE');
+                } catch (refundErr) {
+                    // A real, un-refunded charge would be sitting on the books here —
+                    // log loudly so it can be reconciled by hand instead of disappearing.
+                    console.error('READY-too-late refund FAILED — manual reconciliation needed', { username, amount, error: refundErr.message });
+                }
+                return cb({ success: false, message: 'The round moved on just as you got ready — your payment was refunded.' });
+            }
+
             setPlayerPaid(room, username, amount);
             room.readyPlayers.add(username);
             io.to(roomName(stake)).emit('room_state', roomSnapshot(room));
@@ -1415,8 +1492,10 @@ io.on('connection', socket => {
         }
     });
 
-        socket.on('claim_bingo', async ({ stake, username, cardNumber }, cb = () => {}) => {
+        socket.on('claim_bingo', async ({ stake, username: claimedUsername, cardNumber }, cb = () => {}) => {
         stake=Number(stake); cardNumber=Number(cardNumber); const room=gameRooms.get(stake);
+        const username = verifiedUsername({ username: claimedUsername });
+        if(!username) return cb({success:false,message:'Please log in again.',code:'AUTH_REQUIRED'});
         if(!room||(room.status!=='PLAYING'&&room.status!=='FINISHING')||!room.readyPlayers.has(username)||!userCards(room,username).has(cardNumber)) return cb({success:false,message:'Invalid Bingo claim.'});
         if(room.claimLockedCards.has(cardNumber)) return cb({success:false,locked:true,message:'This card is locked for the rest of this game.'});
         // Lock the card SYNCHRONOUSLY, before the `await` below — a duplicate
@@ -1507,6 +1586,17 @@ async function finalizeWinners(room, stake) {
             const client = await pool.connect();
             try {
                 await client.query('BEGIN');
+                // Guard: do not pay twice for the same game+user+card
+                if (room.gameId) {
+                    const dup = await client.query(
+                        `SELECT 1 FROM game_winners WHERE game_id=$1 AND LOWER(username)=LOWER($2) AND card_number=$3`,
+                        [room.gameId, w.username, w.cardNumber]
+                    );
+                    if (dup.rowCount) {
+                        await client.query('ROLLBACK');
+                        continue;
+                    }
+                }
                 const user = await getUserIdAndBalance(w.username, client);
                 if (!user) throw new Error('Winner not found');
                 await client.query('UPDATE users SET wins=wins+1,balance=balance+$1 WHERE id=$2', [share, user.id]);

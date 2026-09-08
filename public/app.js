@@ -69,6 +69,36 @@ const safeStorage = {
     remove(key) { try { localStorage.removeItem(key); } catch (_) {} },
 };
 
+// ---- Session token ----
+// Every request that touches money or private user data now requires this
+// (see requireUser() on the server) instead of trusting a bare username —
+// login and Telegram auth hand one back, and loginUser()/the telegram-auth
+// handler below store it here. The fetch wrapper further down attaches it
+// to every same-origin /api/ call automatically, so none of the many
+// individual fetch() calls elsewhere in this file need to change.
+const SESSION_TOKEN_KEY = 'bingoSessionToken';
+function getSessionToken() { return safeStorage.get(SESSION_TOKEN_KEY) || ''; }
+function setSessionToken(token) {
+    if (!token) return;
+    safeStorage.set(SESSION_TOKEN_KEY, token);
+    reconnectSocketWithFreshAuth();
+}
+function clearSessionToken() { safeStorage.remove(SESSION_TOKEN_KEY); }
+
+// The persistent `socket` below is created once at page load — often
+// before login, so a public/logged-out visitor can still see the room
+// list. Its handshake auth is a callback so socket.io re-reads the current
+// token on every (re)connect attempt, but an *already-connected* socket
+// needs an explicit reconnect to pick up a token obtained after that first
+// connection (i.e. right after the user logs in) — this does that.
+function reconnectSocketWithFreshAuth() {
+    try {
+        if (typeof socket === 'undefined' || !socket || typeof socket.disconnect !== 'function') return;
+        socket.disconnect();
+        socket.connect();
+    } catch (_) {}
+}
+
 let currentUsername = "";
 let currentStake = null;
 let pendingStake = null;
@@ -81,11 +111,46 @@ let notificationRefreshTimer = null;
 const selectedCards = new Set();
 const takenCardsMap = {};
 const socket = (typeof io === 'function')
-  ? io({ transports: ['websocket', 'polling'] })
+  // `auth` as a function is re-invoked by socket.io on every connect and
+  // reconnect attempt, so this always sends whatever token is currently
+  // stored — including a token obtained after this socket was first
+  // created (see reconnectSocketWithFreshAuth above, called from
+  // setSessionToken). No token yet (logged-out visitor) just connects
+  // unauthenticated, which is fine — read-only things like the public room
+  // list still work; see socket.data.user checks on the server.
+  ? io({ transports: ['websocket', 'polling'], auth: (cb) => cb({ token: getSessionToken() }) })
   : { on() {}, emit() {}, connect() {}, disconnect() {} };
 if (typeof io !== 'function') {
   console.error('socket.io failed to load');
 }
+
+// Attach the session token to every same-origin /api/ request automatically
+// — see requireUser() on the server, which checks this header first. This
+// touches window.fetch once, here, instead of editing the many individual
+// fetch() calls scattered through this file, so nothing else needs to
+// change and nothing can accidentally be missed.
+(function installSessionTokenFetch() {
+    if (typeof window === 'undefined' || typeof window.fetch !== 'function') return;
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = function (input, init) {
+        try {
+            const url = typeof input === 'string' ? input : (input && input.url) || '';
+            // Relative /api/ URLs only — never attach to a different host,
+            // where this header would be both useless and an unnecessary
+            // thing to send.
+            if (url.indexOf('/api/') === 0) {
+                const token = getSessionToken();
+                if (token) {
+                    init = init || {};
+                    const headers = new Headers(init.headers || {});
+                    if (!headers.has('X-Session-Token')) headers.set('X-Session-Token', token);
+                    init = { ...init, headers };
+                }
+            }
+        } catch (_) { /* fall through and make the original call unmodified */ }
+        return originalFetch(input, init);
+    };
+})();
 
 
 // Telegram's in-app browser blocks/misbehaves with native confirm()/alert()
@@ -117,6 +182,7 @@ function clearWebSession() {
     try {
         safeStorage.remove('bingoUser');
         safeStorage.remove(WEB_SESSION_ACTIVITY_KEY);
+        clearSessionToken();
     } catch (_) {}
 }
 
@@ -926,6 +992,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (data.success && data.status === 'LOGGED_IN') {
                 currentUsername = data.username;
                 safeStorage.set('bingoUser', currentUsername);
+                setSessionToken(data.sessionToken);
                 if (!data.phoneVerified) show('phoneModal');
                 else await showHomeScreen(currentUsername);
             } else if (insideTelegram) {
@@ -1067,7 +1134,10 @@ async function loginUser() {
     try {
         const res = await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});
         const data = await res.json();
-        if (data.success) await showHomeScreen(data.username);
+        if (data.success) {
+            setSessionToken(data.sessionToken);
+            await showHomeScreen(data.username);
+        }
         else alert(data.message || 'Invalid credentials.');
     } catch { alert('Login failed.'); }
 }
@@ -1854,6 +1924,7 @@ function logoutUser() {
         socket.emit('leave_room', { stake: currentStake, username: currentUsername });
     }
     clearWebSession();
+    reconnectSocketWithFreshAuth();
     currentUsername = '';
     currentStake = null;
     currentRoom = null;
@@ -1900,6 +1971,7 @@ async function setWebPassword() {
             if (!ud.success) return alertUser(ud.message || 'Could not update username.');
             currentUsername = ud.username;
             safeStorage.set('bingoUser', currentUsername);
+            setSessionToken(ud.sessionToken);
             touchWebSession();
             const pd = document.getElementById('playerDisplay');
             if (pd) pd.innerText = currentUsername;

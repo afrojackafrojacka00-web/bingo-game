@@ -14,6 +14,20 @@ function timingSafeEqual(a, b) {
   return crypto.timingSafeEqual(bufA, bufB);
 }
 
+// Dev-only fallback so `npm run dev` works with zero env-var setup. A fresh
+// random secret is generated each time the process boots — never a fixed,
+// guessable string. Production MUST set ADMIN_SECRET — see the startup
+// check in src/app.js, which refuses to boot without it. This used to fall
+// back to the hardcoded string 'change-me-admin-secret', which meant any
+// deployment that forgot to set ADMIN_SECRET was silently signing valid
+// admin tokens with a secret sitting in plain sight in this file — anyone
+// who had ever seen this source could forge a "boss" token. Never reinstate
+// a fixed fallback value here.
+const devFallbackSecret = crypto.randomBytes(32).toString('hex');
+function adminSecret() {
+  return config.adminSecret || devFallbackSecret;
+}
+
 const ROLES = {
   BOSS: 'boss',
   ADMIN: 'admin',
@@ -68,8 +82,7 @@ function createAdminToken(username, role, ttlSeconds = 60 * 60 * 12) {
   const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
   const payload = `${username}|${role}|${exp}`;
   const payloadB64 = Buffer.from(payload).toString('base64url');
-  const secret = config.adminSecret || 'change-me-admin-secret';
-  const sig = crypto.createHmac('sha256', secret).update(payloadB64).digest('base64url');
+  const sig = crypto.createHmac('sha256', adminSecret()).update(payloadB64).digest('base64url');
   return `${payloadB64}.${sig}`;
 }
 
@@ -78,8 +91,7 @@ function verifyAdminToken(token) {
   const parts = token.split('.');
   if (parts.length !== 2) return null;
   const [payloadB64, sig] = parts;
-  const secret = config.adminSecret || 'change-me-admin-secret';
-  const expectedSig = crypto.createHmac('sha256', secret).update(payloadB64).digest('base64url');
+  const expectedSig = crypto.createHmac('sha256', adminSecret()).update(payloadB64).digest('base64url');
   if (!timingSafeEqual(sig, expectedSig)) return null;
 
   let payload;

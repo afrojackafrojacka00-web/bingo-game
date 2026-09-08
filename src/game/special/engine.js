@@ -28,6 +28,15 @@ let winnerPayload = null;
 
 // players: username -> { userId, cards: number[], paid }
 const entries = new Map();
+// Usernames with a join charge currently in flight. joinWithCards is
+// reached over plain HTTP (double-tap Join, a client retry, two tabs)
+// with nothing else de-duplicating it, and it checks `entries`/reserves
+// cards, then `await`s the DB charge, before recording the result. Without
+// this guard a duplicate request for the same username arriving mid-await
+// would pass every check the first one already passed (the card-ownership
+// check only blocks a *different* user) and charge the player twice for
+// one entry — see joinWithCards() for the acquire/release.
+const pendingJoins = new Set();
 const cardOwners = new Map(); // cardNumber -> username
 const gridCache = new Map(); // cardNumber -> grid
 const claimLockedCards = new Set();
@@ -673,6 +682,16 @@ async function endGame(winners) {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+      // Only settle once — skip if session already completed
+      const sess = await client.query(
+        `SELECT status FROM special_event_sessions WHERE id=$1 FOR UPDATE`,
+        [currentSessionId]
+      );
+      if (!sess.rowCount || String(sess.rows[0].status).toUpperCase() === 'COMPLETED') {
+        await client.query('ROLLBACK');
+        console.warn('special settle skipped — already completed', currentSessionId);
+        return;
+      }
       for (const w of list) {
         const ent = entries.get(w.username);
         if (!ent) continue;
@@ -729,6 +748,27 @@ async function getCardGrid(cardNumber) {
   return grid;
 }
 
+// Stand-alone refund used when a charge succeeded but the entry can no
+// longer be honored (the game moved on to PLAYING while we were charging).
+// Runs in its own transaction since the charge's transaction already
+// committed by the time we discover this.
+async function refundStrandedCharge(userId, amount, type) {
+  amount = Number(amount);
+  if (!Number.isFinite(amount) || amount <= 0) return;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [amount, userId]);
+    await client.query('INSERT INTO transactions(user_id,amount,type) VALUES ($1,$2,$3)', [userId, amount, type]);
+    await client.query('COMMIT');
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('refundStrandedCharge FAILED — manual reconciliation needed', { userId, amount, type, error: err.message });
+  } finally {
+    client.release();
+  }
+}
+
 async function joinWithCards({ username, cardNumbers }) {
   if (phase !== 'OPEN' && phase !== 'SELECTING') {
     const err = new Error(phase === 'PLAYING' || phase === 'ENDED'
@@ -743,38 +783,68 @@ async function joinWithCards({ username, cardNumbers }) {
     err.code = 'LOCKED';
     throw err;
   }
+
+  // Must be acquired synchronously, before any `await` below — see the
+  // comment on `pendingJoins` above. Released in `finally`.
+  if (pendingJoins.has(username)) {
+    throw new Error('Already processing your last request — please wait a moment.');
+  }
+  pendingJoins.add(username);
+
   const cards = [...new Set((cardNumbers || []).map(Number))].filter((n) => n > 0);
-  if (!cards.length) throw new Error('Select at least one card.');
-  if (cards.length > 50) throw new Error('Too many cards.');
-
-  for (const c of cards) {
-    const owner = cardOwners.get(c);
-    if (owner && owner !== username) throw new Error('Card #' + c + ' is taken.');
-  }
-  // Reserve immediately (sync) so two players cannot take the same card
-  for (const c of cards) {
-    if (cardOwners.has(c) && cardOwners.get(c) !== username) {
-      throw new Error('Card #' + c + ' is taken.');
-    }
-    cardOwners.set(c, username);
-  }
-
-  const stake = Number(settings.stake);
-  const totalCost = Number((stake * cards.length).toFixed(2));
-  const client = await pool.connect();
   try {
-    await client.query('BEGIN');
-    const user = await client.query(`SELECT id, balance FROM users WHERE LOWER(username)=LOWER($1) FOR UPDATE`, [username]);
-    if (!user.rowCount) throw new Error('User not found.');
-    const userId = user.rows[0].id;
+    if (!cards.length) throw new Error('Select at least one card.');
+    if (cards.length > 50) throw new Error('Too many cards.');
 
-    const charge = await client.query(
-      `UPDATE users SET balance = balance - $1 WHERE id=$2 AND balance >= $1 RETURNING balance`,
-      [totalCost, userId]
-    );
-    if (!charge.rowCount) throw new Error('Insufficient balance.');
-    await client.query(`INSERT INTO transactions(user_id,amount,type) VALUES ($1,$2,'SPECIAL_EVENT_BUY')`, [userId, -totalCost]);
-    await client.query('COMMIT');
+    for (const c of cards) {
+      const owner = cardOwners.get(c);
+      if (owner && owner !== username) throw new Error('Card #' + c + ' is taken.');
+    }
+    // Reserve immediately (sync) so two players cannot take the same card
+    for (const c of cards) {
+      if (cardOwners.has(c) && cardOwners.get(c) !== username) {
+        throw new Error('Card #' + c + ' is taken.');
+      }
+      cardOwners.set(c, username);
+    }
+
+    const stake = Number(settings.stake);
+    const totalCost = Number((stake * cards.length).toFixed(2));
+    let userId;
+    let newBalance;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const user = await client.query(`SELECT id, balance FROM users WHERE LOWER(username)=LOWER($1) FOR UPDATE`, [username]);
+      if (!user.rowCount) throw new Error('User not found.');
+      userId = user.rows[0].id;
+
+      const charge = await client.query(
+        `UPDATE users SET balance = balance - $1 WHERE id=$2 AND balance >= $1 RETURNING balance`,
+        [totalCost, userId]
+      );
+      if (!charge.rowCount) throw new Error('Insufficient balance.');
+      await client.query(`INSERT INTO transactions(user_id,amount,type) VALUES ($1,$2,'SPECIAL_EVENT_BUY')`, [userId, -totalCost]);
+      await client.query('COMMIT');
+      newBalance = Number(charge.rows[0].balance);
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      // Release reservation if READY failed
+      cards.forEach((c) => { if (cardOwners.get(c) === username) cardOwners.delete(c); });
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    // The charge committed, but the game can move to PLAYING while we
+    // were mid-transaction. If that happened, this entry would never be
+    // drawn or settled — refund immediately instead of letting the money
+    // vanish, and release the card reservation.
+    if (phase !== 'OPEN' && phase !== 'SELECTING') {
+      cards.forEach((c) => { if (cardOwners.get(c) === username) cardOwners.delete(c); });
+      await refundStrandedCharge(userId, totalCost, 'SPECIAL_EVENT_REFUND_LATE');
+      throw new Error('The game just started as you joined — your payment was refunded.');
+    }
 
     entries.set(username, { userId, cards, paid: totalCost, ready: true });
 
@@ -786,18 +856,13 @@ async function joinWithCards({ username, cardNumbers }) {
     broadcast('special_state', publicState());
     return {
       success: true,
-      balance: Number(charge.rows[0].balance),
+      balance: newBalance,
       cards,
       paid: totalCost,
       state: publicState(),
     };
-  } catch (e) {
-    try { await client.query('ROLLBACK'); } catch (_) {}
-    // Release reservation if READY failed
-    cards.forEach((c) => { if (cardOwners.get(c) === username) cardOwners.delete(c); });
-    throw e;
   } finally {
-    client.release();
+    pendingJoins.delete(username);
   }
 }
 

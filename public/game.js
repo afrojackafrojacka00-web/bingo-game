@@ -1,11 +1,40 @@
 try{if(typeof window.applyBingoLanguage==='function')window.applyBingoLanguage(window.getBingoLang?window.getBingoLang():'am',false);}catch(_){}
 function t(k,f){try{var L=(typeof window.getBingoLang==='function'&&window.getBingoLang())||'am';var P=(window.BINGO_I18N&&window.BINGO_I18N[L])||{};var E=(window.BINGO_I18N&&window.BINGO_I18N.en)||{};if(P[k]!=null)return P[k];if(E[k]!=null)return E[k];}catch(_){ }return f!=null?f:k;}
+// Session token — same mechanism as app.js (see the comment there): every
+// request that touches money or private data requires it now instead of
+// trusting the bare `username` this page already reads from localStorage
+// below. This is a separate page load (a fresh script context from
+// app.js's), so it needs its own copy of the fetch wrapper and its own
+// socket auth wiring.
+function getSessionToken(){try{return localStorage.getItem('bingoSessionToken')||'';}catch(_){return '';}}
+(function installSessionTokenFetch(){
+    if (typeof window==='undefined'||typeof window.fetch!=='function') return;
+    const originalFetch=window.fetch.bind(window);
+    window.fetch=function(input,init){
+        try{
+            const url=typeof input==='string'?input:(input&&input.url)||'';
+            if(url.indexOf('/api/')===0){
+                const token=getSessionToken();
+                if(token){
+                    init=init||{};
+                    const headers=new Headers(init.headers||{});
+                    if(!headers.has('X-Session-Token'))headers.set('X-Session-Token',token);
+                    init={...init,headers};
+                }
+            }
+        }catch(_){}
+        return originalFetch(input,init);
+    };
+})();
 const params=new URLSearchParams(location.search),active=JSON.parse(localStorage.getItem('bingoActiveGame')||'{}');
 const specialActive=JSON.parse(localStorage.getItem('bingoSpecialActive')||'{}');
 const isSpecial=params.get('special')==='1'||!!specialActive.cards;
 const stake=Number(params.get('stake')||active.stake)||0;
 const username=(isSpecial?specialActive.username:null)||active.username||localStorage.getItem('bingoUser')||'';
-const socket=isSpecial?io('/special',{transports:['websocket','polling']}):io();
+// `auth` as a function is re-read by socket.io on every (re)connect attempt,
+// same reasoning as app.js's socket.
+const socketAuthOpt={auth:(cb)=>cb({token:getSessionToken()})};
+const socket=isSpecial?io('/special',Object.assign({transports:['websocket','polling']},socketAuthOpt)):io(socketAuthOpt);
 let cards=[],drawn=new Set(),autoMark=true,showBlink=true,ended=false,locked=new Set(),room={},winnerTimer=null,manualMarks=new Map();
 let voicePack='john',soundEnabled=true;
 let audioCtx=null,audioBuffers={},currentSource=null,audioCutTimer=null,audioUnlocked=false;

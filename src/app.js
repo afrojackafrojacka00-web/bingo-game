@@ -17,14 +17,43 @@ const config = require('./config');
 const pool = require('./db/pool');
 const { initDB } = require('./db/init');
 const { adminAuth, requireAdmin, requireRole, timingSafeEqual, createAdminToken, getAdminFromRequest, hasPermission, ROLES } = require('./middleware/adminAuth');
+const { requireUser, createUserToken, verifySocketToken } = require('./middleware/userAuth');
 const { logAdminAction, ensureAdminActionLogSchema } = require('./middleware/adminLog');
 const { generalLimiter, authLimiter, moneyLimiter } = require('./middleware/rateLimiters');
 const cache = require('./cache/memory');
 
+// Fail fast instead of silently running insecurely. Both secrets sign
+// forgeable auth tokens (admin tokens and, since the money-safety fixes,
+// regular user session tokens) — without them set, either module falls
+// back to a random secret that's regenerated (and every existing token
+// invalidated) on every single restart, which is fine for local dev but
+// must never happen unnoticed in production.
+if (config.isProd) {
+    const missing = [];
+    if (!config.adminSecret) missing.push('ADMIN_SECRET');
+    if (!config.sessionSecret) missing.push('SESSION_SECRET');
+    if (missing.length) {
+        console.error(`FATAL: ${missing.join(' and ')} must be set in production. Refusing to start.`);
+        process.exit(1);
+    }
+    if (!config.allowedOrigins.length) {
+        // Not fatal — same-origin usage (the Telegram Mini App and the web
+        // client are both served from this same host) works fine with no
+        // cross-origin allowlist at all, which is why this only warns. Set
+        // ALLOWED_ORIGINS if some other domain (e.g. a separately hosted
+        // admin dashboard) needs to call this API directly.
+        console.warn('ALLOWED_ORIGINS is not set — cross-origin requests to this API will be rejected. Same-origin usage is unaffected.');
+    }
+}
+
 const app = express();
 const server = http.createServer(app);
+// Reject cross-origin socket connections unless the origin is explicitly
+// allowlisted. Same-origin connections (the normal case — this app's own
+// pages connecting to this app's own server) are never subject to CORS at
+// all and are unaffected either way.
 const io = new Server(server, {
-    cors: { origin: '*' },
+    cors: { origin: config.allowedOrigins.length ? config.allowedOrigins : false, credentials: true },
     transports: ['websocket', 'polling'],
     perMessageDeflate: false,
     maxHttpBufferSize: 1e5,
@@ -32,6 +61,22 @@ const io = new Server(server, {
     pingTimeout: 20000
 });
 const PORT = config.port;
+
+// Authenticates the socket connection ONCE, at handshake time, instead of
+// trusting a `username` field on every individual event. A socket
+// represents one logged-in session for its whole lifetime, so re-verifying
+// per event isn't needed — game event handlers (see attachGameEngine) read
+// socket.data.user as the caller's real identity. Connections without a
+// valid token are still allowed through (read-only things like the public
+// room list work while logged out) — handlers that need a real user check
+// socket.data.user themselves and reject if it's missing.
+io.use((socket, next) => {
+    const token = (socket.handshake.auth && socket.handshake.auth.token)
+        || (socket.handshake.query && socket.handshake.query.sessionToken);
+    const auth = verifySocketToken(token);
+    if (auth) socket.data.user = auth;
+    next();
+});
 
 app.set('trust proxy', 1);
 // frameguard defaults to "X-Frame-Options: SAMEORIGIN", which blocks Telegram
@@ -49,7 +94,21 @@ app.use((req, res, next) => {
     next();
 });
 app.use(compression());
-app.use(cors());
+// Same fail-closed-by-default policy as the socket.io cors option above —
+// see the ALLOWED_ORIGINS warning near the top of this file. Same-origin
+// requests (the normal case) are never subject to this at all.
+app.use(cors({
+    origin: (origin, callback) => {
+        // No Origin header = same-origin request, a server-to-server call,
+        // or a non-browser client (curl, a mobile app's native HTTP client)
+        // — browsers only attach Origin for actual cross-origin requests,
+        // so allowing "no origin" here isn't a hole in the check below.
+        if (!origin) return callback(null, true);
+        if (config.allowedOrigins.includes(origin)) return callback(null, true);
+        return callback(null, false);
+    },
+    credentials: true,
+}));
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(config.publicDir, {
     maxAge: config.isProd ? '1h' : 0,
@@ -199,8 +258,13 @@ async function applyReferralIfNew(client, referredByRaw, newUsername) {
     const referredBy = (referredByRaw || '').trim();
     if (!referredBy || referredBy.toLowerCase() === newUsername.toLowerCase()) return;
 
+    // Lock the referrer's row for this whole check-then-credit. Without it,
+    // two people signing up with the same referral code at the same moment
+    // can each independently count the referrer as having "just crossed"
+    // the milestone and both credit the bonus — a real double-credit, not
+    // just a display glitch, since bonus_balance is real spendable money.
     const referrer = await client.query(
-        'SELECT id, username FROM users WHERE LOWER(username) = LOWER($1)',
+        'SELECT id, username FROM users WHERE LOWER(username) = LOWER($1) FOR UPDATE',
         [referredBy]
     );
     if (!referrer.rowCount) return;
@@ -319,7 +383,11 @@ app.post('/api/login', authLimiter, async (req, res) => {
         if (!isMatch) return res.status(401).json({ success: false, message: "Invalid password." });
 
         await pool.query('UPDATE users SET last_active_at = NOW() WHERE id = $1', [result.rows[0].id]);
-        res.json({ success: true, username: result.rows[0].username });
+        // Every request after this one authenticates with this token instead
+        // of a bare username — see src/middleware/userAuth.js. Without it,
+        // any client could act as any user just by sending their username.
+        const sessionToken = createUserToken(result.rows[0].id, result.rows[0].username);
+        res.json({ success: true, username: result.rows[0].username, sessionToken });
     } catch (err) {
         res.status(500).json({ success: false, message: "Server error." });
     }
@@ -366,7 +434,12 @@ app.post('/api/telegram-auth', async (req, res) => {
                 success: true, 
                 status: 'LOGGED_IN', 
                 username: dbUser.username,
-                phoneVerified: !!dbUser.phone_verified 
+                phoneVerified: !!dbUser.phone_verified,
+                // Telegram's initData is itself a signed proof of identity, so
+                // it's just as legitimate a place to issue a session token as
+                // password login — every request after this one needs it, see
+                // src/middleware/userAuth.js.
+                sessionToken: createUserToken(dbUser.id, dbUser.username)
             });
         }
 
@@ -413,7 +486,8 @@ app.post('/api/telegram-auth', async (req, res) => {
             success: true, 
             status: 'LOGGED_IN', 
             username: finalUsername,
-            phoneVerified: false 
+            phoneVerified: false,
+            sessionToken: createUserToken(newUserRes.rows[0].id, finalUsername)
         });
     } catch (err) {
         await client.query('ROLLBACK');
@@ -441,7 +515,19 @@ app.post('/api/save-telegram-phone', async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        const checkUser = await client.query('SELECT id, username, phone_verified FROM users WHERE telegram_id = $1', [user.id]);
+        // Lock the row for the whole verify+bonus check. The SELECT alone
+        // (no FOR UPDATE) let two concurrent calls — a double-tap on
+        // "verify", or a client retry — both read phone_verified = FALSE,
+        // both find zero prior WELCOME_BONUS rows, and both credit the
+        // bonus: balance went up twice for one signup. Locking here forces
+        // the second call to wait for the first to commit, so it sees the
+        // first one's WELCOME_BONUS row and skips crediting again. The
+        // unique index on transactions (idx_transactions_welcome_bonus_once,
+        // see db/init.js) is the backstop in case anything still races.
+        const checkUser = await client.query(
+            'SELECT id, username, phone_verified FROM users WHERE telegram_id = $1 FOR UPDATE',
+            [user.id]
+        );
         if (checkUser.rows.length === 0) {
             await client.query('ROLLBACK');
             return res.status(404).json({ success: false, message: "User not found." });
@@ -493,6 +579,12 @@ app.post('/api/save-telegram-phone', async (req, res) => {
         res.json({ success: true, message: "Telegram phone number verified and saved!" });
     } catch (err) {
         await client.query('ROLLBACK');
+        // 23505 = the idx_transactions_welcome_bonus_once backstop caught a
+        // double-credit attempt that slipped past the row lock above. The
+        // phone/verification part of this request is safe to just retry.
+        if (err.code === '23505') {
+            return res.status(409).json({ success: false, message: "Please try again." });
+        }
         console.error("Save Telegram phone error:", err);
         res.status(500).json({ success: false, message: "Failed to save phone number." });
     } finally {
@@ -509,7 +601,7 @@ app.post('/api/save-telegram-phone', async (req, res) => {
 // initData signature tied to the account being updated.
 
 // 6. Get User Details (Balance, Phone, Username, Language)
-app.get('/api/user-details', async (req, res) => {
+app.get('/api/user-details', requireUser, async (req, res) => {
     const username = req.query.username;
     if (!username) return res.status(400).json({ success: false, message: "Username required." });
 
@@ -533,7 +625,7 @@ app.get('/api/user-details', async (req, res) => {
 });
 
 // 6b. Update Preferred Language (English / Amharic)
-app.post('/api/user/language', async (req, res) => {
+app.post('/api/user/language', requireUser, async (req, res) => {
     const { username, language } = req.body;
     if (!username || !['en', 'am'].includes(language)) {
         return res.status(400).json({ success: false, message: "Invalid language." });
@@ -554,7 +646,7 @@ app.post('/api/user/language', async (req, res) => {
     }
 });
 
-app.post('/api/user/theme', async (req, res) => {
+app.post('/api/user/theme', requireUser, async (req, res) => {
     const { username, theme } = req.body;
     if (!username || !['dark', 'light'].includes(theme)) {
         return res.status(400).json({ success: false, message: "Invalid theme." });
@@ -571,7 +663,7 @@ app.post('/api/user/theme', async (req, res) => {
     }
 });
 
-app.post('/api/user/display-name', async (req, res) => {
+app.post('/api/user/display-name', requireUser, async (req, res) => {
     const { username, displayName } = req.body;
     if (!username || !displayName || String(displayName).trim().length < 2 || String(displayName).trim().length > 50) {
         return res.status(400).json({ success: false, message: "Display name must be 2-50 characters." });
@@ -590,7 +682,7 @@ app.post('/api/user/display-name', async (req, res) => {
 
 // Update Preferred Voice Pack for number calls
 const VOICE_PACKS = config.voicePacks;
-app.post('/api/user/voice-pack', async (req, res) => {
+app.post('/api/user/voice-pack', requireUser, async (req, res) => {
     const { username, voicePack } = req.body;
     if (!username || !VOICE_PACKS.includes(voicePack)) {
         return res.status(400).json({ success: false, message: "Invalid voice pack." });
@@ -613,7 +705,7 @@ app.post('/api/user/voice-pack', async (req, res) => {
 
 // Update sound on/off — saved server-side so it's the same on the next
 // game, the next login, and any device, instead of resetting each time.
-app.post('/api/user/sound-setting', async (req, res) => {
+app.post('/api/user/sound-setting', requireUser, async (req, res) => {
     const { username, soundEnabled } = req.body;
     if (!username || typeof soundEnabled !== 'boolean') {
         return res.status(400).json({ success: false, message: "Invalid request." });
@@ -635,7 +727,7 @@ app.post('/api/user/sound-setting', async (req, res) => {
 });
 
 // ---------------- REFERRALS ----------------
-app.get('/api/referral-info', async (req, res) => {
+app.get('/api/referral-info', requireUser, async (req, res) => {
     const username = req.query.username;
     if (!username) return res.status(400).json({ success: false, message: "Username required." });
 
@@ -1437,13 +1529,30 @@ app.post('/api/admin/adjust-balance', async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
+        // Debits must not drive balance below zero
         const result = await client.query(
-            'UPDATE users SET balance = balance + $1 WHERE LOWER(username) = LOWER($2) RETURNING id, balance',
+            delta < 0
+              ? `UPDATE users SET balance = balance + $1
+                 WHERE LOWER(username) = LOWER($2) AND balance + $1 >= 0
+                 RETURNING id, balance`
+              : `UPDATE users SET balance = balance + $1
+                 WHERE LOWER(username) = LOWER($2)
+                 RETURNING id, balance`,
             [delta, username]
         );
         if (!result.rowCount) {
+            const exists = await client.query(
+                'SELECT balance FROM users WHERE LOWER(username) = LOWER($1)',
+                [username]
+            );
             await client.query('ROLLBACK');
-            return res.status(404).json({ success: false, message: 'User not found.' });
+            if (!exists.rowCount) {
+                return res.status(404).json({ success: false, message: 'User not found.' });
+            }
+            return res.status(400).json({
+                success: false,
+                message: 'Insufficient balance for this debit (would go below 0).'
+            });
         }
         await client.query(
             'INSERT INTO transactions(user_id, amount, type) VALUES($1, $2, $3)',
@@ -1518,6 +1627,28 @@ async function finalizeDepositRequest({ requestId, userId, username, depositAmou
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+            // Lock the request row first — only credit if still PENDING.
+            // Prevents double-credit when auto-verify races with admin approve.
+            const locked = await client.query(
+                "SELECT id, status FROM deposit_requests WHERE id = $1 FOR UPDATE",
+                [requestId]
+            );
+            if (!locked.rowCount || locked.rows[0].status !== 'PENDING') {
+                await client.query('ROLLBACK');
+                return { credited: false, alreadyHandled: true };
+            }
+            const claim = await client.query(
+                `UPDATE deposit_requests
+                 SET status = 'APPROVED', credited_amount = $1, reviewed_at = NOW(),
+                     verification_note = $2, reviewed_by = 'system', reviewed_by_role = 'system'
+                 WHERE id = $3 AND status = 'PENDING'
+                 RETURNING id`,
+                [depositAmount, 'Auto-verified', requestId]
+            );
+            if (!claim.rowCount) {
+                await client.query('ROLLBACK');
+                return { credited: false, alreadyHandled: true };
+            }
             const userUpd = await client.query(
                 'UPDATE users SET balance = balance + $1 WHERE id = $2 RETURNING balance',
                 [depositAmount, userId]
@@ -1526,20 +1657,16 @@ async function finalizeDepositRequest({ requestId, userId, username, depositAmou
                 'INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',
                 [userId, depositAmount, 'DEPOSIT_APPROVED']
             );
-            await client.query(
-                "UPDATE deposit_requests SET status = 'APPROVED', credited_amount = $1, reviewed_at = NOW(), verification_note = $2 WHERE id = $3",
-                [depositAmount, 'Auto-verified', requestId]
-            );
             await client.query('COMMIT');
             return { credited: true, balance: Number(userUpd.rows[0].balance) };
         } catch (err) {
-            await client.query('ROLLBACK');
+            try { await client.query('ROLLBACK'); } catch (_) {}
             // 23505 = unique_violation: another request with this exact
             // transaction ID got approved first (a race). Don't credit
             // twice — reject this one instead.
             if (err.code === '23505') {
                 await pool.query(
-                    "UPDATE deposit_requests SET status = 'REJECTED', reviewed_at = NOW(), verification_note = $1 WHERE id = $2",
+                    "UPDATE deposit_requests SET status = 'REJECTED', reviewed_at = NOW(), verification_note = $1 WHERE id = $2 AND status = 'PENDING'",
                     ['Duplicate transaction ID — already credited on another request.', requestId]
                 );
                 return { credited: false, duplicate: true };
@@ -1562,7 +1689,7 @@ async function finalizeDepositRequest({ requestId, userId, username, depositAmou
     return { credited: false };
 }
 
-app.post('/api/deposit-request', moneyLimiter, async (req, res) => {
+app.post('/api/deposit-request', moneyLimiter, requireUser, async (req, res) => {
     const { username, method, amount, transactionId, submittedText } = req.body;
     const depositAmount = Number(amount);
     const txnId = transactionId ? String(transactionId).trim() : '';
@@ -1858,7 +1985,7 @@ app.post('/api/admin/deposit-requests/:id/reject', async (req, res) => {
 // ---------------- WALLET: WITHDRAW REQUESTS ----------------
 const MIN_WITHDRAW_AMOUNT = config.minWithdrawAmount;
 
-app.post('/api/withdraw-request', moneyLimiter, async (req, res) => {
+app.post('/api/withdraw-request', moneyLimiter, requireUser, async (req, res) => {
     const { username, amount, method, destination, accountOwnerName } = req.body;
     const withdrawAmount = Number(amount);
 
@@ -1888,6 +2015,11 @@ app.post('/api/withdraw-request', moneyLimiter, async (req, res) => {
             `INSERT INTO withdraw_requests(user_id,username,amount,method,destination,account_owner_name)
              VALUES($1,$2,$3,$4,$5,$6) RETURNING id, created_at`,
             [charge.rows[0].id, username, withdrawAmount, method, destination.trim(), method === 'cbe' ? String(accountOwnerName).trim() : null]
+        );
+        // Ledger the reserved funds so money is never "missing" from the books
+        await client.query(
+            'INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',
+            [charge.rows[0].id, -withdrawAmount, 'WITHDRAW_HOLD']
         );
         await client.query('COMMIT');
         try {
@@ -1985,9 +2117,10 @@ app.post('/api/admin/withdraw-requests/:id/approve', async (req, res) => {
 
         // The funds were already deducted at submission time — approving
         // just confirms the payout actually went out and logs it.
+        // Balance was already reserved at submit (WITHDRAW_HOLD). Record settlement only.
         await client.query(
             'INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',
-            [w.user_id, -Number(w.amount), 'WITHDRAWAL_APPROVED']
+            [w.user_id, 0, 'WITHDRAWAL_APPROVED']
         );
         const upd = await client.query(
             `UPDATE withdraw_requests
@@ -2065,7 +2198,7 @@ function normalizePhone(raw) {
 }
 
 // ---------------- WALLET: TRANSFER REQUESTS (user to user) ----------------
-app.post('/api/transfer-request', moneyLimiter, async (req, res) => {
+app.post('/api/transfer-request', moneyLimiter, requireUser, async (req, res) => {
     const { username, amount, recipientPhone } = req.body;
     const transferAmount = Number(amount);
     const normPhone = normalizePhone(recipientPhone);
@@ -2108,6 +2241,10 @@ app.post('/api/transfer-request', moneyLimiter, async (req, res) => {
         await client.query(
             'INSERT INTO transfer_requests(sender_id,sender_username,recipient_phone,recipient_username,amount) VALUES($1,$2,$3,$4,$5)',
             [charge.rows[0].id, username, normPhone, recipient.rows[0].username, transferAmount]
+        );
+        await client.query(
+            'INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',
+            [charge.rows[0].id, -transferAmount, 'TRANSFER_HOLD']
         );
         await client.query('COMMIT');
         res.json({ success: true, message: 'Submitted — your transfer is pending review.', balance: Number(charge.rows[0].balance) });
@@ -2187,9 +2324,10 @@ app.post('/api/admin/transfer-requests/:id/approve', async (req, res) => {
         );
         if (!recipient.rowCount) throw new Error('Recipient no longer exists.');
 
+        // Sender already paid via TRANSFER_HOLD; credit recipient only.
         await client.query(
             'INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',
-            [t.sender_id, -Number(t.amount), 'TRANSFER_SENT']
+            [t.sender_id, 0, 'TRANSFER_SENT']
         );
         await client.query(
             'INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',
@@ -2259,7 +2397,7 @@ app.post('/api/admin/transfer-requests/:id/reject', async (req, res) => {
 // User-facing: their own pending requests across all three types, so
 // submitting something doesn't just vanish with no feedback (they still
 // won't show up in the confirmed transaction history until reviewed).
-app.get('/api/my-pending-requests', async (req, res) => {
+app.get('/api/my-pending-requests', requireUser, async (req, res) => {
     const username = req.query.username;
     if (!username) return res.status(400).json({ success: false, message: 'Username required.' });
 
@@ -2289,10 +2427,20 @@ app.post('/api/admin/adjust-bonus', async (req, res) => {
     }
     try {
         const result = await pool.query(
-            'UPDATE users SET bonus_balance = bonus_balance + $1 WHERE LOWER(username) = LOWER($2) RETURNING id, bonus_balance',
+            delta < 0
+              ? `UPDATE users SET bonus_balance = bonus_balance + $1
+                 WHERE LOWER(username) = LOWER($2) AND bonus_balance + $1 >= 0
+                 RETURNING id, bonus_balance`
+              : `UPDATE users SET bonus_balance = bonus_balance + $1
+                 WHERE LOWER(username) = LOWER($2)
+                 RETURNING id, bonus_balance`,
             [delta, username]
         );
-        if (!result.rowCount) return res.status(404).json({ success: false, message: 'User not found.' });
+        if (!result.rowCount) {
+            const exists = await pool.query('SELECT 1 FROM users WHERE LOWER(username)=LOWER($1)', [username]);
+            if (!exists.rowCount) return res.status(404).json({ success: false, message: 'User not found.' });
+            return res.status(400).json({ success: false, message: 'Insufficient bonus for this debit (would go below 0).' });
+        }
         await pool.query(
             'INSERT INTO transactions(user_id,amount,type) VALUES($1,$2,$3)',
             [result.rows[0].id, delta, 'ADMIN_BONUS_ADJUSTMENT']
@@ -2322,7 +2470,7 @@ const PATTERN_NAMES = {
 };
 
 // 6c. Game History — completed games this user actually joined (not every game)
-app.get('/api/history', async (req, res) => {
+app.get('/api/history', requireUser, async (req, res) => {
     const username = req.query.username;
     if (!username) return res.status(400).json({ success: false, message: "Username required." });
 
@@ -2402,7 +2550,7 @@ app.get('/api/history', async (req, res) => {
 // Detail for a single past game: the winning card's grid, the winning
 // pattern's cells, and the numbers that had been drawn — everything needed
 // to redraw exactly what the winner saw when they won.
-app.get('/api/history/:gameId', async (req, res) => {
+app.get('/api/history/:gameId', requireUser, async (req, res) => {
     const gameId = Number(req.params.gameId);
     if (!Number.isInteger(gameId)) {
         return res.status(400).json({ success: false, message: 'Invalid game id.' });
@@ -2472,7 +2620,7 @@ app.get('/api/history/:gameId', async (req, res) => {
 });
 
 // 6d. Wallet — current balance plus recent transaction log
-app.get('/api/wallet', async (req, res) => {
+app.get('/api/wallet', requireUser, async (req, res) => {
     const username = req.query.username;
     if (!username) return res.status(400).json({ success: false, message: "Username required." });
 
@@ -2621,7 +2769,10 @@ app.post('/api/user/username', async (req, res) => {
         if (!result.rowCount) {
             return res.status(404).json({ success: false, message: 'User not found.' });
         }
-        res.json({ success: true, username: result.rows[0].username });
+        // The username is embedded in the session token (see userAuth.js) —
+        // any token issued before this change is now stale, so hand back a
+        // fresh one instead of leaving the client to fail its next request.
+        res.json({ success: true, username: result.rows[0].username, sessionToken: createUserToken(gate.dbUser.id, result.rows[0].username) });
     } catch (err) {
         console.error('Username change error:', err);
         res.status(500).json({ success: false, message: 'Server error.' });
@@ -2799,7 +2950,7 @@ app.delete('/api/admin/notifications/:id', async (req, res) => {
     }
 });
 
-app.get('/api/notifications', async (req, res) => {
+app.get('/api/notifications', requireUser, async (req, res) => {
     const { username } = req.query;
     if (!username) {
         return res.status(400).json({ success: false, message: 'Username required.' });
@@ -2858,7 +3009,7 @@ app.get('/api/notifications', async (req, res) => {
     }
 });
 
-app.post('/api/notifications/mark-read', async (req, res) => {
+app.post('/api/notifications/mark-read', requireUser, async (req, res) => {
     const { username } = req.body;
     if (!username) {
         return res.status(400).json({ success: false, message: 'Username required.' });
@@ -3463,5 +3614,45 @@ try {
 }
 
 server.listen(PORT, () => console.log(`Bingo server listening on ${PORT}`));
+
+// Platforms like Render/Heroku send SIGTERM before killing the process on
+// every deploy or restart. Without handling it, the process gets hard-killed
+// mid-request — including mid-charge, in the middle of one of the BEGIN..
+// COMMIT transactions elsewhere in this file — which is exactly the kind of
+// "money charged but never recorded" scenario the money-safety fixes in the
+// game engines guard against from the other direction. Draining first closes
+// that gap: stop taking new connections, let in-flight HTTP requests and
+// socket handlers finish, then close the DB pool and exit.
+let shuttingDown = false;
+function gracefulShutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`${signal} received — draining connections before shutdown...`);
+
+    const forceExitTimer = setTimeout(() => {
+        console.error('Graceful shutdown timed out after 20s — forcing exit.');
+        process.exit(1);
+    }, 20000);
+    forceExitTimer.unref();
+
+    io.close(() => {
+        console.log('Socket.io connections closed.');
+    });
+
+    server.close(async (err) => {
+        if (err) console.error('Error while closing HTTP server:', err);
+        try {
+            await pool.end();
+            console.log('DB pool closed. Exiting cleanly.');
+        } catch (poolErr) {
+            console.error('Error while closing DB pool:', poolErr);
+        } finally {
+            clearTimeout(forceExitTimer);
+            process.exit(0);
+        }
+    });
+}
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 module.exports = { app, server, io, pool };

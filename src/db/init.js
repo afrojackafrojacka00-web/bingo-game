@@ -173,6 +173,28 @@ await pool.query('ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS prize_pool 
         `);
         await pool.query(`INSERT INTO welcome_bonus_settings(id, enabled, amount) VALUES(1, TRUE, 10.00) ON CONFLICT (id) DO NOTHING;`);
 
+        // Backstop against ever crediting the welcome bonus twice for the
+        // same user (was reachable via a race in /api/save-telegram-phone —
+        // now fixed with a row lock there, this is the belt-and-braces DB
+        // guarantee that holds even if some future code path forgets it).
+        try {
+            await pool.query(`
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_welcome_bonus_once
+                ON transactions(user_id) WHERE type = 'WELCOME_BONUS';
+            `);
+        } catch (idxErr) {
+            // Only fails if duplicate WELCOME_BONUS rows already exist from
+            // before this fix. Surface it loudly instead of silently leaving
+            // the double-credit hole open — find and reconcile the
+            // duplicates, then restart:
+            //   SELECT user_id, COUNT(*) FROM transactions
+            //   WHERE type = 'WELCOME_BONUS' GROUP BY user_id HAVING COUNT(*) > 1;
+            console.error(
+                'Could not create idx_transactions_welcome_bonus_once — likely pre-existing duplicate ' +
+                'WELCOME_BONUS rows need manual reconciliation first:', idxErr.message
+            );
+        }
+
         // Wallet: admin-managed deposit accounts, and pending user requests
         // that only take effect once an admin approves them.
         await pool.query(`

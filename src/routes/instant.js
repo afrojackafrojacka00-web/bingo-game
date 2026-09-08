@@ -2,6 +2,7 @@
 
 const { moneyLimiter } = require('../middleware/rateLimiters');
 const { requireAdmin } = require('../middleware/adminAuth');
+const { requireUser } = require('../middleware/userAuth');
 const { logAdminAction } = require('../middleware/adminLog');
 const instant = require('../game/instant/engine');
 const config = require('../config');
@@ -78,10 +79,10 @@ function registerInstantRoutes(app) {
       res.status(status).json({ success: false, message: err.message || 'Could not join.' });
     }
   };
-  app.post('/api/instant/play', moneyLimiter, handleInstantJoin);
-  app.post('/api/instant/join', moneyLimiter, handleInstantJoin);
+  app.post('/api/instant/play', moneyLimiter, requireUser, handleInstantJoin);
+  app.post('/api/instant/join', moneyLimiter, requireUser, handleInstantJoin);
 
-  app.get('/api/instant/history', async (req, res) => {
+  app.get('/api/instant/history', requireUser, async (req, res) => {
     try {
       const username = String(req.query.username || '');
       if (!username) return res.status(400).json({ success: false, message: 'Username required.' });

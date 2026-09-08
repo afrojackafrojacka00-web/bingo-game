@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { requireAdmin } = require('../middleware/adminAuth');
+const { requireUser } = require('../middleware/userAuth');
 const { logAdminAction } = require('../middleware/adminLog');
 const special = require('../game/special/engine');
 const pool = require('../db/pool');
@@ -48,7 +49,7 @@ function registerSpecialRoutes(app) {
     }
   });
 
-  app.post('/api/special/join', moneyLimiter, gameActionLimiter, async (req, res) => {
+  app.post('/api/special/join', moneyLimiter, gameActionLimiter, requireUser, async (req, res) => {
     try {
       const username = String(req.body?.username || '').trim();
       const cardNumbers = req.body?.cardNumbers || [];
@@ -61,7 +62,7 @@ function registerSpecialRoutes(app) {
     }
   });
 
-  app.get('/api/special/history', async (req, res) => {
+  app.get('/api/special/history', requireUser, async (req, res) => {
     try {
       const username = String(req.query.username || '').trim();
       if (!username) return res.status(400).json({ success: false, message: 'Username required.' });
@@ -75,7 +76,7 @@ function registerSpecialRoutes(app) {
     }
   });
 
-  app.post('/api/special/claim', gameActionLimiter, async (req, res) => {
+  app.post('/api/special/claim', gameActionLimiter, requireUser, async (req, res) => {
     try {
       const username = String(req.body?.username || '').trim();
       const cardNumber = Number(req.body?.cardNumber);

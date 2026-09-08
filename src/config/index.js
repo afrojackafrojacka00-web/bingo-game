@@ -15,6 +15,19 @@ const config = {
   pgStatementTimeoutMs: Number(process.env.PG_STATEMENT_TIMEOUT_MS || 15000),
 
   adminSecret: process.env.ADMIN_SECRET || '',
+  // Signs regular-user session tokens (see src/middleware/userAuth.js).
+  // Required in production — see the startup check in src/app.js. Keep this
+  // separate from adminSecret so a leaked user-session secret can never be
+  // used to forge an admin token, or vice versa.
+  sessionSecret: process.env.SESSION_SECRET || '',
+  // Comma-separated list of origins allowed to call the API / open a socket,
+  // e.g. "https://yourapp.example.com,https://web.telegram.org". Required
+  // in production — see the startup check in src/app.js. Left empty in dev
+  // so localhost testing keeps working without extra setup.
+  allowedOrigins: (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
   botToken: process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '',
 
   stakes: [10, 20, 50, 100, 200, 500],
