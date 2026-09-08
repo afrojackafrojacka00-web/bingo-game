@@ -3050,6 +3050,46 @@ app.get('/api/admin/leaderboard/candidates', async (req, res) => {
 });
 
 // Admin: publish entries (replace entire board)
+
+// Admin: search any user to add manually
+app.get('/api/admin/leaderboard/search-users', async (req, res) => {
+    if (!requireAdmin(req, res, 'leaderboard')) return;
+    try {
+        const q = String(req.query.q || '').trim();
+        if (!q || q.length < 1) {
+            return res.json({ success: true, users: [] });
+        }
+        const limit = Math.min(30, Math.max(1, parseInt(req.query.limit, 10) || 20));
+        const like = '%' + q.replace(/%/g, '') + '%';
+        const r = await pool.query(
+            `SELECT username, phone_number, display_name
+             FROM users
+             WHERE LOWER(username) LIKE LOWER($1)
+                OR COALESCE(phone_number,'') LIKE $1
+                OR COALESCE(display_name,'') ILIKE $1
+             ORDER BY username ASC
+             LIMIT $2`,
+            [like, limit]
+        );
+        res.json({
+            success: true,
+            users: r.rows.map((row) => {
+                const phone = String(row.phone_number || '');
+                const last3 = phone.replace(/\D/g, '').slice(-3) || '***';
+                return {
+                    username: row.username,
+                    displayName: row.display_name || row.username,
+                    phoneLast3: last3,
+                    metric: null,
+                };
+            }),
+        });
+    } catch (err) {
+        console.error('leaderboard search users', err);
+        res.status(500).json({ success: false, message: 'Server error.' });
+    }
+});
+
 app.post('/api/admin/leaderboard/publish', async (req, res) => {
     if (!requireAdmin(req, res, 'leaderboard')) return;
     try {
